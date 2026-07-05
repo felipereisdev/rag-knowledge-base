@@ -391,7 +391,7 @@ def _store_knowledge(args):
                 f"  Language: {lang}\n"
                 f"  ID: {entry_id}\n\n"
                 f"Project: {pid} — {stats['pending']} pending, {stats['indexed']} indexed\n"
-                f"Call rag_open_approval_ui to review."
+                f"Approve at http://127.0.0.1:8765"
             )
         }]
     }
@@ -412,7 +412,7 @@ def _import_document(args):
                 f"Imported {len(entry_ids)} entries from {filepath}.\n"
                 f"  Project: {pid}\n"
                 f"  Status: pending (needs approval)\n\n"
-                f"Call rag_open_approval_ui to review."
+                f"Approve at http://127.0.0.1:8765"
             )
         }]
     }
