@@ -113,6 +113,8 @@ TOOLS = [
             "- You discover a design pattern: 'the auth system uses JWT with refresh tokens'\n"
             "- The user makes a decision: 'we decided to use Postgres instead of MongoDB'\n"
             "- You learn about a constraint: 'the API rate limit is 100 req/min per user'\n\n"
+            "IMPORTANT: Check the project language with rag_status first. "
+            "Store title and content in the project's configured language.\n\n"
             "These entries go through an approval workflow before becoming searchable."
         ),
         "inputSchema": {
@@ -300,6 +302,29 @@ TOOLS = [
             "type": "object",
             "properties": {}
         }
+    },
+    {
+        "name": "rag_set_language",
+        "description": (
+            "Set the language for a project. The AI should store all knowledge entries "
+            "(title and content) in this language. Use this to configure the language "
+            "for the knowledge base.\n\n"
+            "Examples: 'pt-BR', 'en', 'es', 'fr'."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "language": {
+                    "type": "string",
+                    "description": "Language code (e.g. 'pt-BR', 'en', 'es')."
+                },
+                "project_id": {
+                    "type": "string",
+                    "description": "Project ID. If omitted, auto-detected from current directory."
+                }
+            },
+            "required": ["language"]
+        }
     }
 ]
 
@@ -326,6 +351,8 @@ def handle_tool_call(name, args):
             return _status(args)
         elif name == "rag_list_projects":
             return _list_projects(args)
+        elif name == "rag_set_language":
+            return _set_language(args)
         else:
             return {"content": [{"type": "text", "text": f"Unknown tool: {name}"}], "isError": True}
     except Exception as e:
@@ -349,6 +376,9 @@ def _store_knowledge(args):
         tags=tags,
     )
 
+    project = db.get_project(pid)
+    lang = project.get("language", "en") if project else "en"
+
     stats = db.get_project_stats(pid)
     return {
         "content": [{
@@ -358,6 +388,7 @@ def _store_knowledge(args):
                 f"  Title: {title}\n"
                 f"  Category: {category}\n"
                 f"  Tags: {', '.join(tags) if tags else '(none)'}\n"
+                f"  Language: {lang}\n"
                 f"  ID: {entry_id}\n\n"
                 f"Project: {pid} — {stats['pending']} pending, {stats['indexed']} indexed\n"
                 f"Call rag_open_approval_ui to review."
@@ -495,7 +526,8 @@ def _status(args):
     lines = [
         f"Project: {project['name']} ({project['id']})",
         f"  Root: {project['root_path']}",
-        f"  Description: {project.get('description') or '(none)'}\n",
+        f"  Description: {project.get('description') or '(none)'}",
+        f"  Language: {project.get('language', 'en')}\n",
         f"  Total: {stats['total']} | Indexed: {stats['indexed']} | Pending: {stats['pending']} | Rejected: {stats['rejected']}",
     ]
 
@@ -519,9 +551,37 @@ def _list_projects(args):
     for p in projects:
         lines.append(f"  {p['name']} ({p['id']})")
         lines.append(f"    Path: {p['root_path']}")
+        lines.append(f"    Language: {p.get('language', 'en')}")
         lines.append(f"    Indexed: {p['indexed_count']} | Pending: {p['pending_count']}\n")
 
     return {"content": [{"type": "text", "text": "\n".join(lines)}]}
+
+
+def _set_language(args):
+    pid = _resolve_project_id(args)
+    language = args["language"]
+
+    project = db.get_project(pid)
+    if project:
+        db.upsert_project(
+            pid, project["name"], project["root_path"],
+            project.get("description", ""), project.get("project_type", ""),
+            language=language,
+        )
+    else:
+        root_path = args.get("root_path", os.getcwd())
+        name = args.get("project_name", os.path.basename(os.path.abspath(root_path)))
+        db.upsert_project(pid, name, root_path, "", "", language=language)
+
+    return {
+        "content": [{
+            "type": "text",
+            "text": (
+                f"Language set to '{language}' for project '{pid}'.\n"
+                f"All knowledge entries should be stored in this language."
+            )
+        }]
+    }
 
 
 # ---------------------------------------------------------------------------

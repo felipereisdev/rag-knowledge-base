@@ -34,6 +34,7 @@ def init_db():
                 root_path TEXT NOT NULL,
                 description TEXT DEFAULT '',
                 project_type TEXT DEFAULT '',
+                language TEXT DEFAULT 'en',
                 created_at REAL NOT NULL,
                 updated_at REAL NOT NULL
             );
@@ -78,27 +79,43 @@ def init_db():
                 ON entry_tags(entry_id);
         """)
         conn.commit()
+
+        # Migration: add language column if missing (for existing DBs)
+        cols = [r[1] for r in conn.execute("PRAGMA table_info(projects)").fetchall()]
+        if "language" not in cols:
+            conn.execute("ALTER TABLE projects ADD COLUMN language TEXT DEFAULT 'en'")
+            conn.commit()
     finally:
         conn.close()
 
 
-# ---- Project operations ----
-
-
-def upsert_project(project_id, name, root_path, description="", project_type=""):
+def upsert_project(project_id, name, root_path, description="", project_type="", language=""):
     conn = get_connection()
     try:
         now = time.time()
-        conn.execute("""
-            INSERT INTO projects (id, name, root_path, description, project_type, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(id) DO UPDATE SET
-                name=excluded.name,
-                root_path=excluded.root_path,
-                description=excluded.description,
-                project_type=excluded.project_type,
-                updated_at=excluded.updated_at
-        """, (project_id, name, root_path, description, project_type, now, now))
+        if language:
+            conn.execute("""
+                INSERT INTO projects (id, name, root_path, description, project_type, language, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    name=excluded.name,
+                    root_path=excluded.root_path,
+                    description=excluded.description,
+                    project_type=excluded.project_type,
+                    language=excluded.language,
+                    updated_at=excluded.updated_at
+            """, (project_id, name, root_path, description, project_type, language, now, now))
+        else:
+            conn.execute("""
+                INSERT INTO projects (id, name, root_path, description, project_type, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    name=excluded.name,
+                    root_path=excluded.root_path,
+                    description=excluded.description,
+                    project_type=excluded.project_type,
+                    updated_at=excluded.updated_at
+            """, (project_id, name, root_path, description, project_type, now, now))
         conn.commit()
     finally:
         conn.close()
