@@ -1,7 +1,7 @@
 {
   "name": "rag",
-  "version": "0.1.0+codex.20260705144515",
-  "description": "Per-project RAG knowledge base with approval workflow. Index project files into a searchable knowledge base, approve what gets indexed, and query it semantically.",
+  "version": "0.3.0",
+  "description": "Knowledge base RAG with approval workflow. Store business rules, design decisions, and documentation in a searchable knowledge base with categories and tags.",
   "author": {
     "name": "Local developer"
   },
@@ -11,14 +11,14 @@
     "knowledge-base",
     "search",
     "retrieval",
-    "project"
+    "documentation"
   ],
   "mcpServers": "./.mcp.json",
   "skills": "./skills/",
   "interface": {
-    "displayName": "RAG Knowledge Base",
-    "shortDescription": "Per-project RAG with approval workflow",
-    "longDescription": "Index project files into a searchable knowledge base. Review and approve content before it becomes searchable. Knowledge is scoped per project and queried semantically.",
+    "displayName": "Knowledge Base RAG",
+    "shortDescription": "Knowledge base with approval workflow",
+    "longDescription": "Store and search knowledge entries: business rules, design decisions, architecture notes, and documentation. Organize with categories and tags. Review and approve before entries become searchable.",
     "developerName": "Local developer",
     "category": "Productivity",
     "capabilities": [
@@ -27,9 +27,9 @@
       "Write"
     ],
     "defaultPrompt": [
-      "Index this project for RAG search",
-      "Search the knowledge base for authentication logic",
-      "Show me pending knowledge to approve"
+      "Store this knowledge: orders over 1000 need manager approval",
+      "Search the knowledge base for authentication rules",
+      "Import this markdown file into the knowledge base"
     ],
     "brandColor": "#2563EB"
   }

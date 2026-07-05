@@ -111,9 +111,9 @@ fi
 
 # ── RAG block for AGENTS.md / CLAUDE.md ───────────────────
 
-RAG_BLOCK="# RAG Knowledge Base\n#\n# This project has a RAG knowledge base. Before answering questions about the codebase,\n# use the RAG tools to search for relevant context.\n#\n# - Project ID: $PROJECT_ID\n# - Project name: $PROJECT_NAME\n# - Project type: ${PROJECT_TYPE:-unknown}\n# - DB: ~/.rag/knowledge.db\n#\n# How to use:\n#   1. rag_auto_init to initialize (if not already done)\n#   2. rag_auto_scan to index project files\n#   3. rag_open_approval_ui to review and approve chunks\n#   4. rag_search to query the knowledge base\n#   5. rag_store_knowledge to save business rules/decisions\n#\n# Triggers:\n# - User asks about code → call rag_search first\n# - New project → call rag_auto_init then rag_auto_scan\n# - User explains a rule → call rag_store_knowledge"
+RAG_BLOCK="# RAG Knowledge Base\n#\n# This project has a RAG knowledge base. Before answering questions about the codebase,\n# use the RAG tools to search for relevant context.\n#\n# - Project ID: $PROJECT_ID\n# - Project name: $PROJECT_NAME\n# - Project type: ${PROJECT_TYPE:-unknown}\n# - DB: ~/.rag/knowledge.db\n#\n# How to use:\n#   - rag_store_knowledge to save business rules, design decisions, architecture notes\n#   - rag_import_document to import .md/.txt files\n#   - rag_open_approval_ui to review pending entries\n#   - rag_search to query the knowledge base\n#\n# Triggers:\n# - User asks about code/business rules/architecture → call rag_search first\n# - User explains a rule/decision/constraint → call rag_store_knowledge\n# - User points to a .md/.txt doc → call rag_import_document"
 
-RAG_BLOCK_SHORT="# RAG Knowledge Base — Project: $PROJECT_ID ($PROJECT_NAME)\n# Use rag_search before answering code questions.\n# Store knowledge with rag_store_knowledge."
+RAG_BLOCK_SHORT="# Knowledge Base RAG — Project: $PROJECT_ID ($PROJECT_NAME)\n# Use rag_search before answering questions about business rules or architecture.\n# Store knowledge with rag_store_knowledge and import docs with rag_import_document."
 
 # ── AGENTS.md (Codex / OpenCode) ──────────────────────────
 AGENTS_FILE="$PROJECT_PATH/AGENTS.md"
@@ -173,7 +173,7 @@ if [ "$DB_ONLY" = false ]; then
 
     # ── .cursorrules (Cursor) ─────────────────────────────
     CURSOR_FILE="$PROJECT_PATH/.cursorrules"
-    CURSOR_BLOCK="# RAG Knowledge Base\n#\n# This project has a RAG knowledge base. Run the RAG server to index and search:\n#   python3 $RAG_DIR/server/main.py\n#   python3 $RAG_DIR/scripts/search.py --query \"<question>\" --project $PROJECT_ID\n#\n# Project ID: $PROJECT_ID\n# Approval UI at http://127.0.0.1:8765"
+    CURSOR_BLOCK="# RAG Knowledge Base\n#\n# This project has a RAG knowledge base. Start the MCP server and use the scripts:\n#   python3 $RAG_DIR/server/main.py\n#   python3 $RAG_DIR/scripts/search.py --query \"<question>\" --project $PROJECT_ID\n#   python3 $RAG_DIR/scripts/store.py --project $PROJECT_ID --title \"<title>\" --content \"<content>\" --category <category>\n#   python3 $RAG_DIR/scripts/import.py --file <path> --project $PROJECT_ID\n#\n# Project ID: $PROJECT_ID\n# Approval UI at http://127.0.0.1:8765"
 
     if [ -f "$CURSOR_FILE" ]; then
         if grep -q "RAG Knowledge Base" "$CURSOR_FILE" 2>/dev/null; then
@@ -226,12 +226,13 @@ if [ "$DRY_RUN" = false ]; then
     echo ""
     echo -e "Next steps:"
     echo -e "  1. Open a new conversation in your assistant"
-    echo -e "  2. Call ${CYAN}rag_auto_init${NC} to verify the project is initialized"
-    echo -e "  3. Call ${CYAN}rag_auto_scan${NC} to index files"
-    echo -e "  4. Call ${CYAN}rag_open_approval_ui${NC} to review"
+    echo -e "  2. Call ${CYAN}rag_store_knowledge${NC} to save business rules or design decisions"
+    echo -e "  3. Call ${CYAN}rag_import_document${NC} to import documentation or notes"
+    echo -e "  4. Call ${CYAN}rag_open_approval_ui${NC} to review pending entries"
+    echo -e "  5. Call ${CYAN}rag_search${NC} to query the knowledge base"
     echo -e ""
     echo -e "For Claude/Cursor without MCP support:"
-    echo -e "  python3 $RAG_DIR/scripts/index.py --path . --project $PROJECT_ID"
+    echo -e "  python3 $RAG_DIR/scripts/import.py --file README.md --project $PROJECT_ID"
     echo -e "  python3 $RAG_DIR/scripts/search.py --query \"<question>\" --project $PROJECT_ID"
 else
     echo -e "Dry run complete. Run without --dry-run to apply changes."
