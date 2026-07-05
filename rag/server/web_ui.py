@@ -1,9 +1,8 @@
-"""Web UI server for approving/rejecting pending RAG knowledge chunks."""
+"""Web UI server for approving/rejecting pending knowledge entries."""
 
 import json
 import os
 import threading
-import time
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
 
@@ -22,33 +21,38 @@ def _load_template():
         return f.read()
 
 
-def _type_tag(file_type):
-    """Render a colored type tag."""
-    return f'<span class="type-tag type-{file_type}">{file_type}</span>'
+def _category_tag(category):
+    return f'<span class="cat-tag cat-{category}">{category}</span>'
+
+
+def _tag_badges(tags):
+    if not tags:
+        return ""
+    badges = "".join(f'<span class="tag-badge">{t}</span>' for t in tags)
+    return f'<div class="tag-list">{badges}</div>'
 
 
 def _render_projects():
     projects = db.list_projects()
     if not projects:
-        return "<p class='empty'>No projects registered yet. Use the <code>rag_init_project</code> tool to add one.</p>"
+        return "<p class='empty'>No projects registered yet. Store knowledge to create one.</p>"
 
     html = []
     for p in projects:
+        pending = db.get_pending_entries(p["id"])
         stats = db.get_project_stats(p["id"])
-        pending = db.get_pending_chunks(p["id"])
-        pending_count = len(pending)
 
         html.append(f'<div class="project-card" data-project="{p["id"]}">')
-        html.append(f'<div class="project-header">')
+        html.append('<div class="project-header">')
         html.append(f'<h2>{p["name"]}</h2>')
         html.append(f'<span class="path">{p["root_path"]}</span>')
-        html.append(f'<div class="stats">')
+        html.append('<div class="stats">')
         html.append(f'<span class="badge indexed">{stats["indexed"]} indexed</span>')
         html.append(f'<span class="badge pending">{stats["pending"]} pending</span>')
         html.append(f'<span class="badge rejected">{stats["rejected"]} rejected</span>')
-        html.append(f'<span class="badge docs">{stats["documents"]} docs</span>')
-        html.append(f'</div>')
-        html.append(f'</div>')
+        html.append(f'<span class="badge total">{stats["total"]} total</span>')
+        html.append('</div>')
+        html.append('</div>')
 
         if p.get("description"):
             html.append(f'<p class="desc">{p["description"]}</p>')
@@ -59,40 +63,35 @@ def _render_projects():
             html.append(f'<button class="btn reject" onclick="rejectAll(\'{p["id"]}\')">Reject All</button>')
             html.append('</div>')
 
-            # Group pending chunks by document
-            docs = {}
-            for chunk in pending:
-                rel = chunk["rel_path"]
-                if rel not in docs:
-                    docs[rel] = []
-                docs[rel].append(chunk)
-
             html.append('<div class="pending-list">')
-            for rel_path, chunks in docs.items():
-                file_type = chunks[0].get("file_type", "source")
-                tag = _type_tag(file_type)
-                html.append(f'<div class="doc-group">')
-                html.append(f'<div class="doc-header">')
-                html.append(f'<span class="doc-path">{rel_path}</span>')
-                html.append(f'<span class="chunk-count">{tag} {len(chunks)} chunks</span>')
-                html.append(f'</div>')
-                for chunk in chunks:
-                    preview = chunk["content"][:300]
-                    if len(chunk["content"]) > 300:
-                        preview += "..."
-                    # Escape for HTML
-                    preview = preview.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-                    html.append(f'<div class="chunk-item" data-chunk="{chunk["id"]}">')
-                    html.append(f'<div class="chunk-preview"><pre>{preview}</pre></div>')
-                    html.append(f'<div class="chunk-actions">')
-                    html.append(f'<button class="btn-sm approve" onclick="approveChunk(\'{chunk["id"]}\')">Approve</button>')
-                    html.append(f'<button class="btn-sm reject" onclick="rejectChunk(\'{chunk["id"]}\')">Reject</button>')
-                    html.append(f'</div>')
-                    html.append(f'</div>')
-                html.append(f'</div>')
+            for entry in pending:
+                cat_tag = _category_tag(entry["category"])
+                tag_badges = _tag_badges(entry.get("tags", []))
+                source_tag = ""
+                if entry.get("source") and entry["source"] != "manual":
+                    source_tag = f'<span class="source-tag">{entry["source"]}</span>'
+
+                preview = entry["content"][:500]
+                if len(entry["content"]) > 500:
+                    preview += "..."
+                preview = preview.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+                html.append(f'<div class="entry-item" data-entry="{entry["id"]}">')
+                html.append('<div class="entry-header">')
+                html.append(f'<span class="entry-title">{entry["title"]}</span>')
+                html.append(f'<span class="entry-meta">{cat_tag} {source_tag}</span>')
+                html.append('</div>')
+                if tag_badges:
+                    html.append(tag_badges)
+                html.append(f'<div class="entry-preview"><pre>{preview}</pre></div>')
+                html.append('<div class="entry-actions">')
+                html.append(f'<button class="btn-sm approve" onclick="approveEntry(\'{entry["id"]}\')">Approve</button>')
+                html.append(f'<button class="btn-sm reject" onclick="rejectEntry(\'{entry["id"]}\')">Reject</button>')
+                html.append('</div>')
+                html.append('</div>')
             html.append('</div>')
         else:
-            html.append('<p class="empty">No pending chunks. Use <code>rag_scan_files</code> to index new content.</p>')
+            html.append('<p class="empty">No pending entries. Everything is reviewed.</p>')
 
         html.append('</div>')
 
@@ -134,7 +133,7 @@ class ApprovalHandler(BaseHTTPRequestHandler):
         elif parsed.path == "/api/pending":
             qs = parse_qs(parsed.query)
             project_id = qs.get("project", [None])[0]
-            self._send_json({"pending": db.get_pending_chunks(project_id)})
+            self._send_json({"pending": db.get_pending_entries(project_id)})
         else:
             self.send_error(404)
 
@@ -150,25 +149,29 @@ class ApprovalHandler(BaseHTTPRequestHandler):
             return
 
         if parsed.path == "/api/approve":
-            chunk_ids = data.get("chunk_ids", [])
-            db.approve_chunks(chunk_ids)
-            self._send_json({"ok": True, "approved": len(chunk_ids) if chunk_ids != ["__ALL__"] else "all"})
+            entry_ids = data.get("entry_ids", [])
+            db.approve_entries(entry_ids)
+            self._send_json({"ok": True, "approved": len(entry_ids) if entry_ids != ["__ALL__"] else "all"})
         elif parsed.path == "/api/reject":
-            chunk_ids = data.get("chunk_ids", [])
-            db.reject_chunks(chunk_ids)
-            self._send_json({"ok": True, "rejected": len(chunk_ids) if chunk_ids != ["__ALL__"] else "all"})
+            entry_ids = data.get("entry_ids", [])
+            db.reject_entries(entry_ids)
+            self._send_json({"ok": True, "rejected": len(entry_ids) if entry_ids != ["__ALL__"] else "all"})
         elif parsed.path == "/api/approve-project":
             project_id = data.get("project_id")
             if project_id:
-                db.approve_chunks(["__ALL__"])
-                self._send_json({"ok": True})
+                pending = db.get_pending_entries(project_id)
+                entry_ids = [e["id"] for e in pending]
+                db.approve_entries(entry_ids)
+                self._send_json({"ok": True, "approved": len(entry_ids)})
             else:
                 self._send_json({"error": "project_id required"}, 400)
         elif parsed.path == "/api/reject-project":
             project_id = data.get("project_id")
             if project_id:
-                db.reject_chunks(["__ALL__"])
-                self._send_json({"ok": True})
+                pending = db.get_pending_entries(project_id)
+                entry_ids = [e["id"] for e in pending]
+                db.reject_entries(entry_ids)
+                self._send_json({"ok": True, "rejected": len(entry_ids)})
             else:
                 self._send_json({"error": "project_id required"}, 400)
         else:
