@@ -3,7 +3,7 @@
 
 Usage:
     python3 store.py --project my-project --title "Order rule" --content "Orders over 1000 need approval"
-    python3 store.py --project my-project --title "Auth architecture" --content "..." --category architecture
+    python3 store.py --project my-project --title "Auth architecture" --content "..." --category architecture --tags auth security
 """
 
 import argparse
@@ -23,8 +23,9 @@ def main():
     parser.add_argument("--content", "-c", required=True, help="Content/body of the knowledge entry")
     parser.add_argument("--category", "-k", default="insight",
                         choices=["business-rule", "design-decision", "architecture",
-                                 "constraint", "convention", "insight"],
+                                 "documentation", "insight", "convention", "constraint"],
                         help="Category of knowledge")
+    parser.add_argument("--tags", nargs="*", default=[], help="Tags for the entry")
     parser.add_argument("--no-ui", action="store_true", help="Don't open approval UI")
     args = parser.parse_args()
 
@@ -32,30 +33,34 @@ def main():
 
     project = db.get_project(args.project)
     if not project:
-        print(f"Error: Project '{args.project}' not found. Run index.py --init first.")
+        print(f"Error: Project '{args.project}' not found. Run import.py --init first.")
         sys.exit(1)
 
-    full_content = f"[{args.category.upper()}] {args.title}\n\n{args.content}"
-    chunk_id = db.insert_knowledge_chunk(args.project, args.title, full_content, source=args.category)
+    entry_id = db.store_knowledge_entry(
+        project_id=args.project,
+        title=args.title,
+        content=args.content,
+        category=args.category,
+        source="manual",
+        tags=args.tags,
+    )
 
     print(f"Knowledge entry stored for '{project['name']}'.")
     print(f"  Title: {args.title}")
     print(f"  Category: {args.category}")
-    print(f"  Chunk: {chunk_id}")
+    print(f"  Tags: {', '.join(args.tags) if args.tags else '(none)'}")
+    print(f"  ID: {entry_id}")
     print(f"  Status: pending (needs approval)")
 
     if not args.no_ui:
         port = web_ui.start_web_server(8765)
         print(f"\nApproval UI: http://127.0.0.1:{port}")
-        print("Open in browser to approve/reject.")
-        print("Press Ctrl+C to stop.")
-
         try:
             import webbrowser
             webbrowser.open(f"http://127.0.0.1:{port}")
         except Exception:
             pass
-
+        print("Press Ctrl+C to stop.")
         try:
             import time
             while True:
