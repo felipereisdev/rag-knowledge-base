@@ -8,6 +8,7 @@ assistants, with an **approval workflow** so you control what goes into the know
 - [Claude](#claude) (Claude Code, Anthropic)
 - [Cursor](#cursor)
 - [OpenCode](#opencode)
+- [Docker](#docker)
 
 ## Why?
 
@@ -31,6 +32,45 @@ it becomes searchable.
 # 3. Say: "remember that orders over 1000 need manager approval"
 # 4. Approve the entry in the web UI
 # 5. Ask questions: "what are the business rules?"
+```
+
+---
+
+## Docker
+
+Run the MCP server and approval UI in a container — no Python installation needed.
+
+### Installation
+
+```bash
+git clone https://github.com/felipereisdev/rag-knowledge-base.git ~/rag-knowledge-base
+cd ~/rag-knowledge-base
+docker compose up -d
+```
+
+The approval UI is available at `http://127.0.0.1:8765`.
+
+The SQLite database is persisted via a volume mount at `~/.rag/knowledge.db`.
+
+### Usage
+
+```bash
+docker compose up -d      # start in background
+docker compose logs -f    # view logs
+docker compose down       # stop
+```
+
+To use the MCP server from an assistant, configure it to run inside the container:
+
+```json
+{
+  "mcpServers": {
+    "rag": {
+      "command": "docker",
+      "args": ["exec", "-i", "rag-knowledge-base", "python3", "rag/server/main.py"]
+    }
+  }
+}
 ```
 
 ---
@@ -142,23 +182,26 @@ to store, search, and import knowledge.
 
 ```
 ~/.rag/knowledge.db          ← SQLite database (shared by all assistants)
-~/rag-knowledge-base/rag/
-├── .codex-plugin/
-│   └── plugin.json           ← Codex plugin manifest
-├── .mcp.json                 ← MCP server config
-├── server/
-│   ├── main.py               ← MCP server (JSON-RPC over stdio)
-│   ├── db.py                 ← SQLite layer (entries, tags, projects)
-│   ├── search_engine.py      ← TF-IDF search over knowledge entries
-│   ├── doc_import.py         ← Markdown/text import parser
-│   ├── web_ui.py             ← Approval web UI
-│   └── templates/approval.html
-├── scripts/                  ← CLI scripts for non-Codex assistants
-│   ├── store.py              ← Store a knowledge entry
-│   ├── import.py             ← Import a .md or .txt file
-│   └── search.py             ← Search the knowledge base
-├── skills/SKILL.md           ← Codex skill instructions
-└── README.md
+~/rag-knowledge-base/
+├── Dockerfile                ← Docker image for MCP server + approval UI
+├── docker-compose.yml        ← Container orchestration
+├── rag/
+│   ├── .codex-plugin/
+│   │   └── plugin.json       ← Codex plugin manifest
+│   ├── .mcp.json             ← MCP server config
+│   ├── server/
+│   │   ├── main.py           ← MCP server (JSON-RPC over stdio)
+│   │   ├── db.py             ← SQLite layer (entries, tags, projects)
+│   │   ├── search_engine.py  ← TF-IDF search over knowledge entries
+│   │   ├── doc_import.py     ← Markdown/text import parser
+│   │   ├── web_ui.py         ← Approval web UI
+│   │   └── templates/approval.html
+│   ├── scripts/              ← CLI scripts for non-Codex assistants
+│   │   ├── store.py          ← Store a knowledge entry
+│   │   ├── import.py         ← Import a .md or .txt file
+│   │   └── search.py         ← Search the knowledge base
+│   ├── skills/SKILL.md       ← Codex skill instructions
+│   └── README.md
 ```
 
 ## Categories

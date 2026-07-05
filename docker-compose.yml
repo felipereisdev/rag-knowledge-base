@@ -1,0 +1,10 @@
+services:
+  rag:
+    build: .
+    container_name: rag-knowledge-base
+    stdin_open: true
+    volumes:
+      - ~/.rag:/root/.rag
+    ports:
+      - "8765:8765"
+    restart: unless-stopped

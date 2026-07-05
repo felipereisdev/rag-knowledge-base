@@ -1,0 +1,8 @@
+.git
+.github
+docs/
+rag/.pytest_cache/
+rag/tests/
+*.md
+*.log
+.DS_Store
