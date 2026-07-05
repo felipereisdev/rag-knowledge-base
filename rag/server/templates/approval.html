@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RAG Knowledge Base - Approval</title>
+<style>
+  :root {
+    --bg: #0f1117;
+    --surface: #1a1d27;
+    --surface-hover: #222633;
+    --border: #2d3142;
+    --text: #e4e6eb;
+    --text-dim: #8b8fa3;
+    --accent: #3b82f6;
+    --accent-hover: #2563eb;
+    --green: #22c55e;
+    --green-hover: #16a34a;
+    --red: #ef4444;
+    --red-hover: #dc2626;
+    --yellow: #eab308;
+    --orange: #f97316;
+    --purple: #a855f7;
+    --teal: #14b8a6;
+    --pink: #ec4899;
+    --radius: 8px;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+    padding: 24px;
+    max-width: 1100px;
+    margin: 0 auto;
+  }
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 32px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid var(--border);
+  }
+  header h1 { font-size: 24px; font-weight: 700; }
+  header h1 span { color: var(--accent); }
+  .refresh-btn {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 8px 16px;
+    border-radius: var(--radius);
+    cursor: pointer;
+    font-size: 14px;
+  }
+  .refresh-btn:hover { background: var(--surface-hover); }
+  .project-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 20px;
+    margin-bottom: 20px;
+  }
+  .project-header {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-bottom: 12px;
+  }
+  .project-header h2 { font-size: 18px; font-weight: 600; }
+  .path {
+    font-family: "SF Mono", Monaco, monospace;
+    font-size: 13px;
+    color: var(--text-dim);
+  }
+  .stats { display: flex; gap: 8px; margin-left: auto; flex-wrap: wrap; }
+  .badge {
+    font-size: 12px;
+    padding: 2px 10px;
+    border-radius: 20px;
+    font-weight: 500;
+  }
+  .badge.indexed { background: rgba(34,197,94,0.15); color: var(--green); }
+  .badge.pending { background: rgba(234,179,8,0.15); color: var(--yellow); }
+  .badge.rejected { background: rgba(239,68,68,0.15); color: var(--red); }
+  .badge.docs { background: rgba(59,130,246,0.15); color: var(--accent); }
+
+  /* File type tags */
+  .type-tag {
+    display: inline-block;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 1px 8px;
+    border-radius: 4px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  .type-source { background: rgba(59,130,246,0.2); color: var(--accent); }
+  .type-config { background: rgba(249,115,22,0.2); color: var(--orange); }
+  .type-docs { background: rgba(20,184,166,0.2); color: var(--teal); }
+  .type-test { background: rgba(239,68,68,0.2); color: var(--red); }
+  .type-web { background: rgba(168,85,247,0.2); color: var(--purple); }
+  .type-script { background: rgba(236,72,153,0.2); color: var(--pink); }
+  .type-data { background: rgba(234,179,8,0.2); color: var(--yellow); }
+  .type-generated { background: rgba(148,163,184,0.2); color: var(--text-dim); }
+
+  .desc { color: var(--text-dim); font-size: 14px; margin-bottom: 12px; }
+  .actions { display: flex; gap: 8px; margin-bottom: 16px; }
+  .btn {
+    padding: 8px 20px;
+    border-radius: var(--radius);
+    border: none;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 500;
+  }
+  .btn.approve { background: var(--green); color: #fff; }
+  .btn.approve:hover { background: var(--green-hover); }
+  .btn.reject { background: var(--red); color: #fff; }
+  .btn.reject:hover { background: var(--red-hover); }
+  .pending-list { display: flex; flex-direction: column; gap: 16px; }
+  .doc-group { border-left: 3px solid var(--accent); padding-left: 16px; }
+  .doc-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 8px;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .doc-path {
+    font-family: "SF Mono", Monaco, monospace;
+    font-size: 13px;
+    color: var(--accent);
+  }
+  .chunk-count { font-size: 12px; color: var(--text-dim); }
+  .chunk-item {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 12px;
+    margin-bottom: 8px;
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+  }
+  .chunk-item.approved { border-color: var(--green); opacity: 0.4; }
+  .chunk-item.rejected { border-color: var(--red); opacity: 0.4; }
+  .chunk-preview { flex: 1; overflow-x: auto; }
+  .chunk-preview pre {
+    font-family: "SF Mono", Monaco, monospace;
+    font-size: 12px;
+    white-space: pre-wrap;
+    word-break: break-word;
+    color: var(--text-dim);
+    line-height: 1.5;
+  }
+  .chunk-actions { display: flex; flex-direction: column; gap: 4px; flex-shrink: 0; }
+  .btn-sm {
+    padding: 4px 12px;
+    border-radius: 4px;
+    border: none;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 500;
+  }
+  .btn-sm.approve { background: var(--green); color: #fff; }
+  .btn-sm.approve:hover { background: var(--green-hover); }
+  .btn-sm.reject { background: var(--red); color: #fff; }
+  .btn-sm.reject:hover { background: var(--red-hover); }
+  .empty {
+    color: var(--text-dim);
+    font-size: 14px;
+    padding: 12px 0;
+  }
+  .empty code { background: var(--bg); padding: 2px 6px; border-radius: 4px; font-size: 12px; }
+  .toast {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 12px 20px;
+    border-radius: var(--radius);
+    font-size: 14px;
+    opacity: 0;
+    transform: translateY(10px);
+    transition: opacity 0.2s, transform 0.2s;
+    pointer-events: none;
+  }
+  .toast.show { opacity: 1; transform: translateY(0); }
+  .toast.success { border-color: var(--green); }
+  .toast.error { border-color: var(--red); }
+  @media (max-width: 640px) {
+    .stats { margin-left: 0; width: 100%; }
+    .chunk-item { flex-direction: column; }
+    .chunk-actions { flex-direction: row; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>RAG <span>Knowledge Base</span></h1>
+  <button class="refresh-btn" onclick="location.reload()">Refresh</button>
+</header>
+<div id="projects">{{PROJECTS}}</div>
+<div class="toast" id="toast"></div>
+
+<script>
+function showToast(msg, type) {
+  const toast = document.getElementById('toast');
+  toast.textContent = msg;
+  toast.className = 'toast show ' + (type || '');
+  setTimeout(() => toast.className = 'toast', 2000);
+}
+
+async function approveChunk(id) {
+  const r = await fetch('/api/approve', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({chunk_ids: [id]})
+  });
+  if (r.ok) {
+    const item = document.querySelector('[data-chunk="' + id + '"]');
+    if (item) { item.classList.add('approved'); }
+    showToast('Approved', 'success');
+    setTimeout(() => location.reload(), 800);
+  } else { showToast('Failed', 'error'); }
+}
+
+async function rejectChunk(id) {
+  const r = await fetch('/api/reject', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({chunk_ids: [id]})
+  });
+  if (r.ok) {
+    const item = document.querySelector('[data-chunk="' + id + '"]');
+    if (item) { item.classList.add('rejected'); }
+    showToast('Rejected', 'error');
+    setTimeout(() => location.reload(), 800);
+  } else { showToast('Failed', 'error'); }
+}
+
+async function approveAll(projectId) {
+  const r = await fetch('/api/approve-project', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({project_id: projectId})
+  });
+  if (r.ok) {
+    showToast('All approved', 'success');
+    setTimeout(() => location.reload(), 800);
+  } else { showToast('Failed', 'error'); }
+}
+
+async function rejectAll(projectId) {
+  const r = await fetch('/api/reject-project', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({project_id: projectId})
+  });
+  if (r.ok) {
+    showToast('All rejected', 'error');
+    setTimeout(() => location.reload(), 800);
+  } else { showToast('Failed', 'error'); }
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,9 @@
+# RAG Knowledge Base
+#
+# This project has a RAG knowledge base. Run the RAG server to index and search:
+#   python3 /Users/freis/Projects/PERSONAL/rag/rag/server/main.py
+#   python3 /Users/freis/Projects/PERSONAL/rag/rag/scripts/search.py --query "<question>" --project rag
+#
+# Project ID: rag
+# Approval UI at http://127.0.0.1:8765
+

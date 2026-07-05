@@ -1,0 +1,36 @@
+{
+  "name": "rag",
+  "version": "0.1.0+codex.20260705144515",
+  "description": "Per-project RAG knowledge base with approval workflow. Index project files into a searchable knowledge base, approve what gets indexed, and query it semantically.",
+  "author": {
+    "name": "Local developer"
+  },
+  "license": "MIT",
+  "keywords": [
+    "rag",
+    "knowledge-base",
+    "search",
+    "retrieval",
+    "project"
+  ],
+  "mcpServers": "./.mcp.json",
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "RAG Knowledge Base",
+    "shortDescription": "Per-project RAG with approval workflow",
+    "longDescription": "Index project files into a searchable knowledge base. Review and approve content before it becomes searchable. Knowledge is scoped per project and queried semantically.",
+    "developerName": "Local developer",
+    "category": "Productivity",
+    "capabilities": [
+      "Interactive",
+      "Read",
+      "Write"
+    ],
+    "defaultPrompt": [
+      "Index this project for RAG search",
+      "Search the knowledge base for authentication logic",
+      "Show me pending knowledge to approve"
+    ],
+    "brandColor": "#2563EB"
+  }
+}
