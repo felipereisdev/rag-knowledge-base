@@ -14,9 +14,9 @@ import re
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import db
-import search_engine
+import embeddings
 import doc_import
-import web_ui
+import api
 
 MCP_VERSION = "2024-11-05"
 SERVER_NAME = "rag"
@@ -113,6 +113,8 @@ TOOLS = [
             "- You discover a design pattern: 'the auth system uses JWT with refresh tokens'\n"
             "- The user makes a decision: 'we decided to use Postgres instead of MongoDB'\n"
             "- You learn about a constraint: 'the API rate limit is 100 req/min per user'\n\n"
+            "IMPORTANT: Check the project language with rag_status first. "
+            "Store title and content in the project's configured language.\n\n"
             "These entries go through an approval workflow before becoming searchable."
         ),
         "inputSchema": {
@@ -266,7 +268,7 @@ TOOLS = [
     {
         "name": "rag_open_approval_ui",
         "description": (
-            "Open the web UI to review and approve/reject pending knowledge entries. "
+            "Open the admin panel to review and approve/reject pending knowledge entries. "
             "Call this after storing or importing knowledge so the user can review."
         ),
         "inputSchema": {
@@ -274,8 +276,8 @@ TOOLS = [
             "properties": {
                 "port": {
                     "type": "number",
-                    "description": "Port for the web UI (default: 8765).",
-                    "default": 8765
+                    "description": "Port for the admin panel (default: 8000).",
+                    "default": 8000
                 }
             }
         }
@@ -299,6 +301,29 @@ TOOLS = [
         "inputSchema": {
             "type": "object",
             "properties": {}
+        }
+    },
+    {
+        "name": "rag_set_language",
+        "description": (
+            "Set the language for a project. The AI should store all knowledge entries "
+            "(title and content) in this language. Use this to configure the language "
+            "for the knowledge base.\n\n"
+            "Examples: 'pt-BR', 'en', 'es', 'fr'."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "language": {
+                    "type": "string",
+                    "description": "Language code (e.g. 'pt-BR', 'en', 'es')."
+                },
+                "project_id": {
+                    "type": "string",
+                    "description": "Project ID. If omitted, auto-detected from current directory."
+                }
+            },
+            "required": ["language"]
         }
     }
 ]
@@ -326,6 +351,8 @@ def handle_tool_call(name, args):
             return _status(args)
         elif name == "rag_list_projects":
             return _list_projects(args)
+        elif name == "rag_set_language":
+            return _set_language(args)
         else:
             return {"content": [{"type": "text", "text": f"Unknown tool: {name}"}], "isError": True}
     except Exception as e:
@@ -349,6 +376,9 @@ def _store_knowledge(args):
         tags=tags,
     )
 
+    project = db.get_project(pid)
+    lang = project.get("language", "en") if project else "en"
+
     stats = db.get_project_stats(pid)
     return {
         "content": [{
@@ -358,9 +388,10 @@ def _store_knowledge(args):
                 f"  Title: {title}\n"
                 f"  Category: {category}\n"
                 f"  Tags: {', '.join(tags) if tags else '(none)'}\n"
+                f"  Language: {lang}\n"
                 f"  ID: {entry_id}\n\n"
                 f"Project: {pid} — {stats['pending']} pending, {stats['indexed']} indexed\n"
-                f"Call rag_open_approval_ui to review."
+                f"Approve at http://127.0.0.1:8000/api"
             )
         }]
     }
@@ -381,7 +412,7 @@ def _import_document(args):
                 f"Imported {len(entry_ids)} entries from {filepath}.\n"
                 f"  Project: {pid}\n"
                 f"  Status: pending (needs approval)\n\n"
-                f"Call rag_open_approval_ui to review."
+                f"Approve at http://127.0.0.1:8000/api"
             )
         }]
     }
@@ -402,8 +433,13 @@ def _search(args):
     if not entries:
         return {"content": [{"type": "text", "text": f"No indexed knowledge in '{project['name']}'. Use rag_store_knowledge and approve entries first."}]}
 
-    index = search_engine.build_index_from_entries(entries)
-    results = index.search(query, top_k=top_k, category=category, tags=tags)
+    query_vec = embeddings.embed_query(query)
+    results = db.search_entries_by_embedding(
+        query_vec, project_id=pid, k=top_k, category=category, tags=tags,
+    )
+
+    MIN_SCORE = 0.0
+    results = [r for r in results if r.get("score", 0) > MIN_SCORE]
 
     if not results:
         return {"content": [{"type": "text", "text": f"No results for '{query}' in '{project['name']}'."}]}
@@ -464,8 +500,7 @@ def _remove_knowledge(args):
 
 
 def _open_approval_ui(args):
-    port = args.get("port", 8765)
-    port = web_ui.start_web_server(port)
+    port = args.get("port", 8000)
     url = f"http://127.0.0.1:{port}"
 
     try:
@@ -474,7 +509,7 @@ def _open_approval_ui(args):
     except Exception:
         pass
 
-    return {"content": [{"type": "text", "text": f"Approval UI at {url}\nReview and approve/reject pending entries."}]}
+    return {"content": [{"type": "text", "text": f"Admin panel at {url}"}]}
 
 
 def _status(args):
@@ -495,7 +530,8 @@ def _status(args):
     lines = [
         f"Project: {project['name']} ({project['id']})",
         f"  Root: {project['root_path']}",
-        f"  Description: {project.get('description') or '(none)'}\n",
+        f"  Description: {project.get('description') or '(none)'}",
+        f"  Language: {project.get('language', 'en')}\n",
         f"  Total: {stats['total']} | Indexed: {stats['indexed']} | Pending: {stats['pending']} | Rejected: {stats['rejected']}",
     ]
 
@@ -519,9 +555,37 @@ def _list_projects(args):
     for p in projects:
         lines.append(f"  {p['name']} ({p['id']})")
         lines.append(f"    Path: {p['root_path']}")
+        lines.append(f"    Language: {p.get('language', 'en')}")
         lines.append(f"    Indexed: {p['indexed_count']} | Pending: {p['pending_count']}\n")
 
     return {"content": [{"type": "text", "text": "\n".join(lines)}]}
+
+
+def _set_language(args):
+    pid = _resolve_project_id(args)
+    language = args["language"]
+
+    project = db.get_project(pid)
+    if project:
+        db.upsert_project(
+            pid, project["name"], project["root_path"],
+            project.get("description", ""), project.get("project_type", ""),
+            language=language,
+        )
+    else:
+        root_path = args.get("root_path", os.getcwd())
+        name = args.get("project_name", os.path.basename(os.path.abspath(root_path)))
+        db.upsert_project(pid, name, root_path, "", "", language=language)
+
+    return {
+        "content": [{
+            "type": "text",
+            "text": (
+                f"Language set to '{language}' for project '{pid}'.\n"
+                f"All knowledge entries should be stored in this language."
+            )
+        }]
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -533,10 +597,11 @@ def main():
     log("Knowledge Base RAG MCP server starting...")
 
     try:
-        web_ui.start_web_server(8765)
-        log("Approval UI at http://127.0.0.1:8765")
+        api.start_api_server(8000)
+        log("Admin panel API at http://127.0.0.1:8000")
+        log("Admin panel UI at http://127.0.0.1:8765")
     except Exception as e:
-        log(f"Could not start web UI: {e}")
+        log(f"Could not start API server: {e}")
 
     while True:
         msg = read_message()

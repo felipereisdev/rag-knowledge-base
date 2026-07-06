@@ -1,10 +1,23 @@
 services:
-  rag:
-    build: .
-    container_name: rag-knowledge-base
-    stdin_open: true
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    container_name: rag-api
+    ports:
+      - "8000:8000"
     volumes:
       - ~/.rag:/root/.rag
+      - ~/.cache/huggingface:/root/.cache/huggingface
+    restart: unless-stopped
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+    container_name: rag-web
     ports:
-      - "8765:8765"
+      - "8765:80"
+    depends_on:
+      - api
     restart: unless-stopped

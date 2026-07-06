@@ -15,7 +15,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 
 import db
 import doc_import
-import web_ui
+import api
 
 
 def main():
@@ -58,11 +58,11 @@ def main():
     print(f"  Status: pending (needs approval)")
 
     if not args.no_ui:
-        port = web_ui.start_web_server(8765)
-        print(f"\nApproval UI: http://127.0.0.1:{port}")
+        api.start_api_server(8000)
+        print(f"\nAdmin panel API: http://127.0.0.1:8000")
         try:
             import webbrowser
-            webbrowser.open(f"http://127.0.0.1:{port}")
+            webbrowser.open("http://127.0.0.1:8000")
         except Exception:
             pass
         print("Press Ctrl+C to stop.")

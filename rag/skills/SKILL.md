@@ -29,9 +29,9 @@ You MUST call RAG tools automatically when these patterns appear:
 - A user asks "what's in the knowledge base?"
 - A user wants to browse entries by category or tags
 
-### `rag_open_approval_ui` — CALL AFTER:
-- Every `rag_store_knowledge` or `rag_import_document` call
-- So the user can review and approve what's pending
+### `rag_open_approval_ui` — CALL WHEN:
+- A user asks to review or approve pending entries
+- Do NOT call automatically after storing/importing
 
 ### `rag_status` — CALL WHEN:
 - A user asks "what's the status of the knowledge base?"
@@ -40,10 +40,10 @@ You MUST call RAG tools automatically when these patterns appear:
 ## Workflow examples
 
 **User says:** "Remember, orders over 1000 need manager approval"
-→ `rag_store_knowledge({"title": "Order approval threshold", "content": "Orders over 1000 require manager approval", "category": "business-rule", "tags": ["orders", "approval"]})` → `rag_open_approval_ui({})`
+→ `rag_store_knowledge({"title": "Order approval threshold", "content": "Orders over 1000 require manager approval", "category": "business-rule", "tags": ["orders", "approval"]})`
 
 **User says:** "Import this file: docs/rules.md"
-→ `rag_import_document({"file_path": "docs/rules.md", "category": "business-rule"})` → `rag_open_approval_ui({})`
+→ `rag_import_document({"file_path": "docs/rules.md", "category": "business-rule"})`
 
 **User asks:** "What are our authentication rules?"
 → `rag_search({"query": "authentication rules"})` — if empty, suggest storing knowledge first

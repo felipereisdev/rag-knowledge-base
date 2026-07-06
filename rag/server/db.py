@@ -2,9 +2,14 @@
 
 import json
 import os
-import sqlite3
 import time
 import uuid
+import embeddings
+
+try:
+    from pysqlite3 import dbapi2 as sqlite3
+except ImportError:
+    import sqlite3
 
 DATA_DIR = os.path.expanduser("~/.rag")
 DB_PATH = os.path.join(DATA_DIR, "knowledge.db")
@@ -21,6 +26,15 @@ def get_connection():
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
+    try:
+        import sqlite_vec
+        try:
+            sqlite_vec.load(conn)
+        except Exception:
+            conn.enable_load_extension(True)
+            conn.load_extension(sqlite_vec.loadable_path())
+    except Exception:
+        pass
     return conn
 
 
@@ -34,6 +48,7 @@ def init_db():
                 root_path TEXT NOT NULL,
                 description TEXT DEFAULT '',
                 project_type TEXT DEFAULT '',
+                language TEXT DEFAULT 'en',
                 created_at REAL NOT NULL,
                 updated_at REAL NOT NULL
             );
@@ -77,28 +92,51 @@ def init_db():
             CREATE INDEX IF NOT EXISTS idx_entry_tags_entry
                 ON entry_tags(entry_id);
         """)
+        dim = embeddings.EMBEDDING_DIM
+        conn.execute(f"""
+            CREATE VIRTUAL TABLE IF NOT EXISTS entry_embeddings USING vec0(
+                entry_id TEXT PRIMARY KEY,
+                embedding FLOAT[{dim}]
+            )
+        """)
         conn.commit()
+
+        # Migration: add language column if missing (for existing DBs)
+        cols = [r[1] for r in conn.execute("PRAGMA table_info(projects)").fetchall()]
+        if "language" not in cols:
+            conn.execute("ALTER TABLE projects ADD COLUMN language TEXT DEFAULT 'en'")
+            conn.commit()
     finally:
         conn.close()
 
 
-# ---- Project operations ----
-
-
-def upsert_project(project_id, name, root_path, description="", project_type=""):
+def upsert_project(project_id, name, root_path, description="", project_type="", language=""):
     conn = get_connection()
     try:
         now = time.time()
-        conn.execute("""
-            INSERT INTO projects (id, name, root_path, description, project_type, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(id) DO UPDATE SET
-                name=excluded.name,
-                root_path=excluded.root_path,
-                description=excluded.description,
-                project_type=excluded.project_type,
-                updated_at=excluded.updated_at
-        """, (project_id, name, root_path, description, project_type, now, now))
+        if language:
+            conn.execute("""
+                INSERT INTO projects (id, name, root_path, description, project_type, language, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    name=excluded.name,
+                    root_path=excluded.root_path,
+                    description=excluded.description,
+                    project_type=excluded.project_type,
+                    language=excluded.language,
+                    updated_at=excluded.updated_at
+            """, (project_id, name, root_path, description, project_type, language, now, now))
+        else:
+            conn.execute("""
+                INSERT INTO projects (id, name, root_path, description, project_type, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    name=excluded.name,
+                    root_path=excluded.root_path,
+                    description=excluded.description,
+                    project_type=excluded.project_type,
+                    updated_at=excluded.updated_at
+            """, (project_id, name, root_path, description, project_type, now, now))
         conn.commit()
     finally:
         conn.close()
@@ -403,5 +441,109 @@ def get_project_stats(project_id):
                 (SELECT COUNT(*) FROM knowledge_entries WHERE project_id = ?) as total
         """, (project_id, project_id, project_id, project_id)).fetchone()
         return dict(row) if row else {"indexed": 0, "pending": 0, "rejected": 0, "total": 0}
+    finally:
+        conn.close()
+
+
+# ---- Vector embedding operations ----
+
+def store_embedding(entry_id, embedding):
+    """Store or replace an entry's embedding."""
+    import struct
+    blob = struct.pack(f"{len(embedding)}f", *embedding)
+    conn = get_connection()
+    try:
+        conn.execute("DELETE FROM entry_embeddings WHERE entry_id = ?", (entry_id,))
+        conn.execute(
+            "INSERT INTO entry_embeddings (entry_id, embedding) VALUES (?, ?)",
+            (entry_id, blob),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_embedding(entry_id):
+    """Get an entry's embedding as (entry_id, embedding_list) or None."""
+    import struct
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            "SELECT entry_id, embedding FROM entry_embeddings WHERE entry_id = ?",
+            (entry_id,),
+        ).fetchone()
+        if not row:
+            return None
+        blob = row["embedding"]
+        dim = len(blob) // 4
+        embedding = list(struct.unpack(f"{dim}f", blob))
+        return {"entry_id": row["entry_id"], "embedding": embedding}
+    finally:
+        conn.close()
+
+
+def delete_embedding(entry_id):
+    """Remove an entry's embedding."""
+    conn = get_connection()
+    try:
+        conn.execute("DELETE FROM entry_embeddings WHERE entry_id = ?", (entry_id,))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def search_embeddings(query_embedding, k=10):
+    """Find nearest neighbors by cosine similarity. Returns list of {entry_id, distance}."""
+    import struct
+    blob = struct.pack(f"{len(query_embedding)}f", *query_embedding)
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            "SELECT entry_id, distance FROM entry_embeddings WHERE embedding MATCH ? AND k = ? ORDER BY distance",
+            (blob, k),
+        ).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+def search_entries_by_embedding(query_embedding, project_id, k=10, category=None, tags=None):
+    """Search entries by embedding similarity with project/category/tag filtering."""
+    neighbors = search_embeddings(query_embedding, k=k)
+    if not neighbors:
+        return []
+    entry_ids = [n["entry_id"] for n in neighbors]
+    placeholders = ",".join("?" for _ in entry_ids)
+    conn = get_connection()
+    try:
+        sql = f"""
+            SELECT ke.*, e.entry_id
+            FROM entry_embeddings e
+            JOIN knowledge_entries ke ON ke.id = e.entry_id
+            WHERE e.entry_id IN ({placeholders})
+            AND ke.project_id = ?
+        """
+        params = entry_ids + [project_id]
+        if category:
+            sql += " AND ke.category = ?"
+            params.append(category)
+        if tags:
+            for tag in tags:
+                sql += " AND e.entry_id IN (SELECT et.entry_id FROM entry_tags et JOIN tags t ON t.id = et.tag_id WHERE t.name = ? AND t.project_id = ?)"
+                params.extend([tag.lower(), project_id])
+        sql += " ORDER BY CASE e.entry_id"
+        for i, eid in enumerate(entry_ids):
+            sql += f" WHEN ? THEN {i}"
+            params.append(eid)
+        sql += " END"
+        rows = conn.execute(sql, params).fetchall()
+        score_map = {n["entry_id"]: round(1 - n["distance"], 4) for n in neighbors}
+        results = []
+        for r in rows:
+            entry = dict(r)
+            entry["tags"] = get_tags_for_entry(entry["entry_id"])
+            entry["score"] = score_map.get(entry["entry_id"], 0)
+            results.append(entry)
+        return results
     finally:
         conn.close()
