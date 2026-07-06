@@ -51,6 +51,10 @@ class EntryUpdate(BaseModel):
     tags: list[str] | None = None
 
 
+class PathCreate(BaseModel):
+    path: str
+
+
 # ---- Project endpoints ----
 
 @app.get("/api/projects")
@@ -72,6 +76,7 @@ def get_project(project_id: str):
     proj = db.get_project(project_id)
     if not proj:
         raise HTTPException(404, "Project not found")
+    proj["paths"] = db.list_project_paths(project_id)
     return proj
 
 
@@ -139,6 +144,37 @@ def reject_all(project_id: str):
     if entry_ids:
         db.reject_entries(entry_ids)
     return {"ok": True, "rejected": len(entry_ids)}
+
+
+@app.get("/api/projects/{project_id}/paths")
+def list_project_paths(project_id: str):
+    proj = db.get_project(project_id)
+    if not proj:
+        raise HTTPException(404, "Project not found")
+    return db.list_project_paths(project_id)
+
+
+@app.post("/api/projects/{project_id}/paths")
+def add_project_path(project_id: str, data: PathCreate):
+    proj = db.get_project(project_id)
+    if not proj:
+        raise HTTPException(404, "Project not found")
+    db.add_project_path(project_id, data.path)
+    proj = db.get_project(project_id)
+    proj["paths"] = db.list_project_paths(project_id)
+    return proj
+
+
+@app.delete("/api/projects/{project_id}/paths", status_code=204)
+def remove_project_path(project_id: str, path: str = Query(...)):
+    proj = db.get_project(project_id)
+    if not proj:
+        raise HTTPException(404, "Project not found")
+    try:
+        db.remove_project_path(project_id, path)
+    except ValueError:
+        raise HTTPException(400, "Cannot remove the last path from a project")
+    return None
 
 
 # ---- Entry endpoints ----

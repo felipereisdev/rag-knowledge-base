@@ -306,3 +306,51 @@ class TestTags:
         temp_db.store_knowledge_entry("proj", "R1", "c1", "insight", tags=["Auth"])
         tags = temp_db.get_all_tags("proj")
         assert "auth" in tags
+
+
+class TestProjectPaths:
+    def test_add_project_path(self, temp_db):
+        temp_db.upsert_project("p1", "Proj1", "/tmp/p1")
+        temp_db.add_project_path("p1", "/tmp/p1-frontend")
+        paths = temp_db.list_project_paths("p1")
+        assert "/tmp/p1-frontend" in paths
+        assert "/tmp/p1" in paths
+
+    def test_add_duplicate_path_ignored(self, temp_db):
+        temp_db.upsert_project("p1", "Proj1", "/tmp/p1")
+        temp_db.add_project_path("p1", "/tmp/p1-frontend")
+        temp_db.add_project_path("p1", "/tmp/p1-frontend")
+        paths = temp_db.list_project_paths("p1")
+        assert paths.count("/tmp/p1-frontend") == 1
+
+    def test_remove_project_path(self, temp_db):
+        temp_db.upsert_project("p1", "Proj1", "/tmp/p1")
+        temp_db.add_project_path("p1", "/tmp/p1-frontend")
+        temp_db.remove_project_path("p1", "/tmp/p1-frontend")
+        paths = temp_db.list_project_paths("p1")
+        assert "/tmp/p1-frontend" not in paths
+
+    def test_remove_last_path_raises(self, temp_db):
+        temp_db.upsert_project("p1", "Proj1", "/tmp/p1")
+        with pytest.raises(ValueError, match="last"):
+            temp_db.remove_project_path("p1", "/tmp/p1")
+
+    def test_get_project_by_path_finds_additional_path(self, temp_db):
+        temp_db.upsert_project("p1", "Proj1", "/tmp/p1")
+        temp_db.add_project_path("p1", "/tmp/p1-frontend")
+        project = temp_db.get_project_by_path("/tmp/p1-frontend")
+        assert project is not None
+        assert project["id"] == "p1"
+
+    def test_list_projects_includes_paths(self, temp_db):
+        temp_db.upsert_project("p1", "Proj1", "/tmp/p1")
+        temp_db.add_project_path("p1", "/tmp/p1-frontend")
+        projects = temp_db.list_projects()
+        assert "paths" in projects[0]
+        assert "/tmp/p1" in projects[0]["paths"]
+        assert "/tmp/p1-frontend" in projects[0]["paths"]
+
+    def test_upsert_project_ensures_root_path_in_project_paths(self, temp_db):
+        temp_db.upsert_project("p1", "Proj1", "/tmp/p1")
+        paths = temp_db.list_project_paths("p1")
+        assert "/tmp/p1" in paths

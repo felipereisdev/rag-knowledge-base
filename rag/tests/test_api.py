@@ -296,3 +296,57 @@ class TestEmbeddingLifecycle:
         client.delete(f"/api/entries/{eid}")
         import db
         assert db.get_embedding(eid) is None
+
+
+class TestProjectPaths:
+    def _setup_project(self, client):
+        client.post("/api/projects", json={
+            "id": "test-proj", "name": "Test", "root_path": "/tmp/test",
+        })
+
+    def test_list_paths(self, client):
+        self._setup_project(client)
+        resp = client.get("/api/projects/test-proj/paths")
+        assert resp.status_code == 200
+        paths = resp.json()
+        assert "/tmp/test" in paths
+
+    def test_add_path(self, client):
+        self._setup_project(client)
+        resp = client.post("/api/projects/test-proj/paths", json={"path": "/tmp/frontend"})
+        assert resp.status_code == 200
+        assert "/tmp/frontend" in resp.json()["paths"]
+
+    def test_add_duplicate_path(self, client):
+        self._setup_project(client)
+        client.post("/api/projects/test-proj/paths", json={"path": "/tmp/frontend"})
+        resp = client.post("/api/projects/test-proj/paths", json={"path": "/tmp/frontend"})
+        assert resp.status_code == 200
+        paths = resp.json()["paths"]
+        assert paths.count("/tmp/frontend") == 1
+
+    def test_remove_path(self, client):
+        self._setup_project(client)
+        client.post("/api/projects/test-proj/paths", json={"path": "/tmp/frontend"})
+        resp = client.delete("/api/projects/test-proj/paths?path=/tmp/frontend")
+        assert resp.status_code == 204
+        paths = client.get("/api/projects/test-proj/paths").json()
+        assert "/tmp/frontend" not in paths
+
+    def test_remove_last_path_returns_400(self, client):
+        self._setup_project(client)
+        resp = client.delete("/api/projects/test-proj/paths?path=/tmp/test")
+        assert resp.status_code == 400
+
+    def test_project_response_includes_paths(self, client):
+        self._setup_project(client)
+        resp = client.get("/api/projects/test-proj")
+        assert resp.status_code == 200
+        assert "paths" in resp.json()
+        assert "/tmp/test" in resp.json()["paths"]
+
+    def test_list_projects_includes_paths(self, client):
+        self._setup_project(client)
+        resp = client.get("/api/projects")
+        assert resp.status_code == 200
+        assert "paths" in resp.json()[0]

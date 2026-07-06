@@ -11,6 +11,7 @@ export interface Project {
   updated_at: number;
   indexed_count?: number;
   pending_count?: number;
+  paths?: string[];
 }
 
 export interface Entry {
@@ -88,6 +89,10 @@ export const api = {
     fetchJSON<{ ok: boolean }>(`/projects/${id}/approve-all`, { method: "POST" }),
   rejectAll: (id: string) =>
     fetchJSON<{ ok: boolean }>(`/projects/${id}/reject-all`, { method: "POST" }),
+  addProjectPath: (projectId: string, path: string) =>
+    fetchJSON<Project>(`/projects/${projectId}/paths`, { method: "POST", body: JSON.stringify({ path }) }),
+  removeProjectPath: (projectId: string, path: string) =>
+    fetchJSON<void>(`/projects/${projectId}/paths?path=${encodeURIComponent(path)}`, { method: "DELETE" }),
 
   listEntries: (params: { project_id: string; category?: string; status?: string; tags?: string[] }) => {
     const search = new URLSearchParams({ project_id: params.project_id });

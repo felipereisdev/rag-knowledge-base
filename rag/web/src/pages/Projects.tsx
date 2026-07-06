@@ -17,6 +17,8 @@ export default function Projects() {
   const [deleteProject, setDeleteProject] = useState<Project | null>(null);
 
   const [form, setForm] = useState({ id: "", name: "", root_path: "", description: "", language: "en" });
+  const [additionalPaths, setAdditionalPaths] = useState<string[]>([]);
+  const [newPath, setNewPath] = useState("");
 
   async function load() {
     try {
@@ -32,6 +34,8 @@ export default function Projects() {
     await api.createProject(form);
     setShowCreate(false);
     setForm({ id: "", name: "", root_path: "", description: "", language: "en" });
+    setAdditionalPaths([]);
+    setNewPath("");
     await load();
   }
 
@@ -56,6 +60,21 @@ export default function Projects() {
   function openEdit(p: Project) {
     setEditProject(p);
     setForm({ id: p.id, name: p.name, root_path: p.root_path, description: p.description, language: p.language });
+    setAdditionalPaths((p.paths ?? []).filter(path => path !== p.root_path));
+    setNewPath("");
+  }
+
+  async function addPath() {
+    if (!newPath.trim() || !editProject) return;
+    await api.addProjectPath(editProject.id, newPath.trim());
+    setAdditionalPaths([...additionalPaths, newPath.trim()]);
+    setNewPath("");
+  }
+
+  async function removePath(path: string) {
+    if (!editProject) return;
+    await api.removeProjectPath(editProject.id, path);
+    setAdditionalPaths(additionalPaths.filter(p => p !== path));
   }
 
   if (loading) return <div className="p-8 text-muted-foreground">Loading...</div>;
@@ -64,7 +83,7 @@ export default function Projects() {
     <div className="p-8 space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold">Projects</h1>
-        <Button onClick={() => { setForm({ id: "", name: "", root_path: "", description: "", language: "en" }); setShowCreate(true); }}>
+        <Button onClick={() => { setForm({ id: "", name: "", root_path: "", description: "", language: "en" }); setAdditionalPaths([]); setNewPath(""); setShowCreate(true); }}>
           New Project
         </Button>
       </div>
@@ -84,7 +103,12 @@ export default function Projects() {
           {projects.map((p) => (
             <TableRow key={p.id}>
               <TableCell className="font-medium">{p.name}</TableCell>
-              <TableCell className="text-muted-foreground text-xs">{p.root_path}</TableCell>
+              <TableCell className="text-muted-foreground text-xs">
+                {p.root_path}
+                {(p.paths ?? []).length > 1 && (
+                  <Badge variant="secondary" className="ml-1">+{(p.paths ?? []).length - 1}</Badge>
+                )}
+              </TableCell>
               <TableCell><Badge variant="outline">{p.language}</Badge></TableCell>
               <TableCell>{p.indexed_count}</TableCell>
               <TableCell>{p.pending_count}</TableCell>
@@ -132,6 +156,26 @@ export default function Projects() {
                 <option value="fr">Français</option>
               </Select>
             </div>
+            {editProject && (
+              <div className="space-y-2">
+                <Label>Additional Paths</Label>
+                {additionalPaths.map((path) => (
+                  <div key={path} className="flex items-center gap-2">
+                    <span className="text-sm text-muted-foreground flex-1">{path}</span>
+                    <Button size="sm" variant="ghost" className="text-destructive" onClick={() => removePath(path)}>Remove</Button>
+                  </div>
+                ))}
+                <div className="flex gap-2">
+                  <Input
+                    value={newPath}
+                    onChange={(e) => setNewPath(e.target.value)}
+                    placeholder="/path/to/another/repo"
+                    onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addPath(); } }}
+                  />
+                  <Button type="button" size="sm" onClick={addPath}>Add</Button>
+                </div>
+              </div>
+            )}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => { setShowCreate(false); setEditProject(null); }}>Cancel</Button>

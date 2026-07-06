@@ -106,6 +106,24 @@ def init_db():
         if "language" not in cols:
             conn.execute("ALTER TABLE projects ADD COLUMN language TEXT DEFAULT 'en'")
             conn.commit()
+
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS project_paths (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                path TEXT NOT NULL,
+                UNIQUE(project_id, path)
+            )
+        """)
+
+        # Migrate existing root_path values to project_paths
+        projects = conn.execute("SELECT id, root_path FROM projects").fetchall()
+        for p in projects:
+            conn.execute(
+                "INSERT OR IGNORE INTO project_paths (project_id, path) VALUES (?, ?)",
+                (p["id"], p["root_path"]),
+            )
+        conn.commit()
     finally:
         conn.close()
 
@@ -138,6 +156,11 @@ def upsert_project(project_id, name, root_path, description="", project_type="",
                     updated_at=excluded.updated_at
             """, (project_id, name, root_path, description, project_type, now, now))
         conn.commit()
+        conn.execute(
+            "INSERT OR IGNORE INTO project_paths (project_id, path) VALUES (?, ?)",
+            (project_id, os.path.abspath(root_path)),
+        )
+        conn.commit()
     finally:
         conn.close()
 
@@ -151,11 +174,63 @@ def get_project(project_id):
         conn.close()
 
 
-def get_project_by_path(root_path):
+def get_project_by_path(path):
+    path = os.path.abspath(path)
     conn = get_connection()
     try:
-        row = conn.execute("SELECT * FROM projects WHERE root_path = ?", (root_path,)).fetchone()
+        row = conn.execute("""
+            SELECT p.* FROM projects p
+            JOIN project_paths pp ON pp.project_id = p.id
+            WHERE pp.path = ?
+        """, (path,)).fetchone()
         return dict(row) if row else None
+    finally:
+        conn.close()
+
+
+def add_project_path(project_id, path):
+    """Associate an additional path with a project."""
+    path = os.path.abspath(path)
+    conn = get_connection()
+    try:
+        conn.execute(
+            "INSERT OR IGNORE INTO project_paths (project_id, path) VALUES (?, ?)",
+            (project_id, path),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def remove_project_path(project_id, path):
+    """Remove a path from a project. Raises ValueError if it's the last path."""
+    path = os.path.abspath(path)
+    conn = get_connection()
+    try:
+        count = conn.execute(
+            "SELECT COUNT(*) as cnt FROM project_paths WHERE project_id = ?",
+            (project_id,),
+        ).fetchone()
+        if count["cnt"] <= 1:
+            raise ValueError("Cannot remove the last path from a project")
+        conn.execute(
+            "DELETE FROM project_paths WHERE project_id = ? AND path = ?",
+            (project_id, path),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def list_project_paths(project_id):
+    """List all paths for a project."""
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            "SELECT path FROM project_paths WHERE project_id = ? ORDER BY path",
+            (project_id,),
+        ).fetchall()
+        return [r["path"] for r in rows]
     finally:
         conn.close()
 
@@ -169,7 +244,12 @@ def list_projects():
                    (SELECT COUNT(*) FROM knowledge_entries e WHERE e.project_id = p.id AND e.status = 'pending') as pending_count
             FROM projects p ORDER BY p.updated_at DESC
         """).fetchall()
-        return [dict(r) for r in rows]
+        projects = []
+        for r in rows:
+            p = dict(r)
+            p["paths"] = list_project_paths(p["id"])
+            projects.append(p)
+        return projects
     finally:
         conn.close()
 
