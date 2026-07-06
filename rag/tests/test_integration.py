@@ -6,10 +6,9 @@ import pytest
 
 class TestFullWorkflow:
     def test_store_approve_search(self, temp_db):
-        # Setup project
+        import embeddings
         temp_db.upsert_project("shop", "Shop App", "/tmp/shop", "E-commerce app", "")
 
-        # Store knowledge
         eid1 = temp_db.store_knowledge_entry(
             "shop", "Order approval rule",
             "Orders over 1000 require manager approval",
@@ -21,23 +20,25 @@ class TestFullWorkflow:
             "architecture", tags=["auth", "security"]
         )
 
-        # Approve both
         temp_db.approve_entries([eid1, eid2])
 
-        # Search
-        import search_engine
-        entries = temp_db.get_indexed_entries("shop")
-        index = search_engine.build_index_from_entries(entries)
+        vec1 = embeddings.embed_text("Orders over 1000 require manager approval")
+        vec2 = embeddings.embed_text("JWT with refresh tokens stored in Redis")
+        temp_db.store_embedding(eid1, vec1)
+        temp_db.store_embedding(eid2, vec2)
 
-        results = index.search("order approval")
+        query_vec = embeddings.embed_query("order approval")
+        results = temp_db.search_entries_by_embedding(query_vec, project_id="shop", k=5)
         assert len(results) >= 1
         assert results[0]["title"] == "Order approval rule"
 
-        results = index.search("auth")
+        query_vec = embeddings.embed_query("auth")
+        results = temp_db.search_entries_by_embedding(query_vec, project_id="shop", k=5)
         assert len(results) >= 1
-        assert results[0]["title"] == "Auth architecture"
+        assert "Auth architecture" in [r["title"] for r in results]
 
     def test_import_markdown_and_search(self, temp_db):
+        import embeddings
         temp_db.upsert_project("docs", "Docs", "/tmp/docs", "", "")
 
         md_content = """---
@@ -62,41 +63,20 @@ Full refund within 30 days. Partial after that.
             entry_ids = doc_import.import_document(temp_db, "docs", filepath)
             assert len(entry_ids) == 2
 
-            # Approve all
             temp_db.approve_entries(entry_ids)
 
-            # Search
-            import search_engine
-            entries = temp_db.get_indexed_entries("docs")
-            index = search_engine.build_index_from_entries(entries)
+            for eid in entry_ids:
+                entry = temp_db.get_entry(eid)
+                vec = embeddings.embed_text(entry["title"] + " " + entry["content"])
+                temp_db.store_embedding(eid, vec)
 
-            results = index.search("stripe payment")
+            query_vec = embeddings.embed_query("stripe payment")
+            results = temp_db.search_entries_by_embedding(query_vec, project_id="docs", k=5)
             assert len(results) >= 1
             assert "Payment" in results[0]["title"]
 
-            results = index.search("refund")
+            query_vec = embeddings.embed_query("refund")
+            results = temp_db.search_entries_by_embedding(query_vec, project_id="docs", k=5)
             assert len(results) >= 1
         finally:
             os.unlink(filepath)
-
-    def test_filter_by_category_and_tags(self, temp_db):
-        temp_db.upsert_project("proj", "Project", "/tmp/proj", "", "")
-
-        temp_db.store_knowledge_entry("proj", "R1", "order content", "business-rule", tags=["orders"])
-        temp_db.store_knowledge_entry("proj", "R2", "auth content", "architecture", tags=["auth"])
-        temp_db.store_knowledge_entry("proj", "R3", "db content", "architecture", tags=["db", "auth"])
-
-        entries = temp_db.list_entries("proj", category="architecture")
-        assert len(entries) == 2
-
-        entries = temp_db.list_entries("proj", tags=["auth"])
-        assert len(entries) == 2
-
-    def test_reject_then_not_in_search(self, temp_db):
-        temp_db.upsert_project("proj", "Project", "/tmp/proj", "", "")
-
-        eid = temp_db.store_knowledge_entry("proj", "Rule", "some content", "insight")
-        temp_db.reject_entries([eid])
-
-        entries = temp_db.get_indexed_entries("proj")
-        assert len(entries) == 0

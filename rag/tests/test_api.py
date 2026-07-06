@@ -252,3 +252,47 @@ class TestTags:
         resp = client.get("/api/tags?project_id=test-proj")
         assert resp.status_code == 200
         assert resp.json() == []
+
+
+class TestEmbeddingLifecycle:
+    def test_approve_generates_embedding(self, client):
+        client.post("/api/projects", json={
+            "id": "test-proj", "name": "Test", "root_path": "/tmp/test",
+        })
+        create = client.post("/api/entries", json={
+            "project_id": "test-proj", "title": "Rule", "content": "content",
+        }).json()
+        eid = create["id"]
+        client.post(f"/api/entries/{eid}/approve")
+        import db
+        emb = db.get_embedding(eid)
+        assert emb is not None
+
+    def test_update_regenerates_embedding(self, client):
+        client.post("/api/projects", json={
+            "id": "test-proj", "name": "Test", "root_path": "/tmp/test",
+        })
+        create = client.post("/api/entries", json={
+            "project_id": "test-proj", "title": "Rule", "content": "content",
+        }).json()
+        eid = create["id"]
+        client.post(f"/api/entries/{eid}/approve")
+        import db
+        emb_before = db.get_embedding(eid)
+        client.put(f"/api/entries/{eid}", json={"title": "New Title", "content": "new content"})
+        emb_after = db.get_embedding(eid)
+        assert emb_after is not None
+        assert emb_after["embedding"] != emb_before["embedding"]
+
+    def test_delete_removes_embedding(self, client):
+        client.post("/api/projects", json={
+            "id": "test-proj", "name": "Test", "root_path": "/tmp/test",
+        })
+        create = client.post("/api/entries", json={
+            "project_id": "test-proj", "title": "Rule", "content": "content",
+        }).json()
+        eid = create["id"]
+        client.post(f"/api/entries/{eid}/approve")
+        client.delete(f"/api/entries/{eid}")
+        import db
+        assert db.get_embedding(eid) is None
