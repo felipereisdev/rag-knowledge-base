@@ -244,8 +244,7 @@ def search(
         category=category,
         tags=tags,
     )
-    MIN_SCORE = -0.2
-    return [r for r in results if r.get("score", 0) > MIN_SCORE]
+    return results
 
 
 @app.get("/api/tags")

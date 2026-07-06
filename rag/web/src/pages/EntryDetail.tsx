@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
+import ReactMarkdown from "react-markdown";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
@@ -66,7 +67,7 @@ export default function EntryDetail() {
   }
 
   return (
-    <div className="p-8 space-y-6 max-w-3xl">
+    <div className="p-8 space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold">{entry.title}</h1>
         <div className="flex gap-2">
@@ -85,7 +86,9 @@ export default function EntryDetail() {
 
       <Card>
         <CardContent>
-          <pre className="whitespace-pre-wrap text-sm mt-4">{entry.content}</pre>
+          <div className="prose prose-sm dark:prose-invert max-w-none mt-4">
+            <ReactMarkdown>{entry.content}</ReactMarkdown>
+          </div>
         </CardContent>
       </Card>
 

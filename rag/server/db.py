@@ -537,7 +537,7 @@ def search_entries_by_embedding(query_embedding, project_id, k=10, category=None
             params.append(eid)
         sql += " END"
         rows = conn.execute(sql, params).fetchall()
-        score_map = {n["entry_id"]: round(1 - n["distance"], 4) for n in neighbors}
+        score_map = {n["entry_id"]: round(1.0 / (1.0 + n["distance"]), 4) for n in neighbors}
         results = []
         for r in rows:
             entry = dict(r)

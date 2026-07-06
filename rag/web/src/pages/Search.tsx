@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import ReactMarkdown from "react-markdown";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
@@ -73,7 +74,9 @@ export default function Search() {
                       <Badge variant="outline">score: {r.score}</Badge>
                     </div>
                   </div>
-                  <p className="text-sm text-muted-foreground">{r.content.slice(0, 200)}...</p>
+                  <div className="prose prose-sm dark:prose-invert max-w-none text-muted-foreground">
+                    <ReactMarkdown>{r.content.slice(0, 200) + "..."}</ReactMarkdown>
+                  </div>
                   {r.tags.length > 0 && (
                     <div className="flex gap-1 mt-2">
                       {r.tags.map((t) => <Badge key={t} variant="outline">{t}</Badge>)}

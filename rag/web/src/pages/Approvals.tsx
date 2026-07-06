@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import ReactMarkdown from "react-markdown";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
@@ -84,7 +85,9 @@ export default function Approvals() {
                     {e.tags.map((t) => <Badge key={t} variant="outline">{t}</Badge>)}
                   </div>
                 )}
-                <pre className="text-sm text-muted-foreground whitespace-pre-wrap">{e.content.slice(0, 300)}{e.content.length > 300 ? "..." : ""}</pre>
+                <div className="prose prose-sm dark:prose-invert max-w-none text-muted-foreground">
+                  <ReactMarkdown>{e.content.slice(0, 300) + (e.content.length > 300 ? "..." : "")}</ReactMarkdown>
+                </div>
                 <div className="flex gap-2">
                   <Button size="sm" onClick={() => approveEntry(e.id, p.id)}>Approve</Button>
                   <Button size="sm" variant="destructive" onClick={() => rejectEntry(e.id, p.id)}>Reject</Button>
