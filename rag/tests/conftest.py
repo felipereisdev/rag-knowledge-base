@@ -18,3 +18,13 @@ def temp_db(monkeypatch):
         import db
         db.init_db()
         yield db
+
+
+@pytest.fixture
+def client(temp_db):
+    """FastAPI TestClient with a temp database."""
+    from fastapi.testclient import TestClient
+    import api
+    api.db = temp_db
+    with TestClient(api.app) as c:
+        yield c
