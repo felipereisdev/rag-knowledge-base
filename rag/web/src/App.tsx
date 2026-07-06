@@ -5,10 +5,8 @@ import Projects from "@/pages/Projects";
 import Entries from "@/pages/Entries";
 import EntryDetail from "@/pages/EntryDetail";
 import NewEntry from "@/pages/NewEntry";
-
-function Placeholder({ name }: { name: string }) {
-  return <div className="p-8 text-muted-foreground">{name} — coming soon</div>;
-}
+import Approvals from "@/pages/Approvals";
+import Search from "@/pages/Search";
 
 export default function App() {
   return (
@@ -19,8 +17,8 @@ export default function App() {
         <Route path="entries" element={<Entries />} />
         <Route path="entries/new" element={<NewEntry />} />
         <Route path="entries/:id" element={<EntryDetail />} />
-        <Route path="approvals" element={<Placeholder name="Approvals" />} />
-        <Route path="search" element={<Placeholder name="Search" />} />
+        <Route path="approvals" element={<Approvals />} />
+        <Route path="search" element={<Search />} />
       </Route>
     </Routes>
   );
