@@ -135,6 +135,82 @@ def reject_all(project_id: str):
     return {"ok": True, "rejected": len(entry_ids)}
 
 
+# ---- Entry endpoints ----
+
+@app.get("/api/entries")
+def list_entries(
+    project_id: str = Query(...),
+    category: str | None = None,
+    tags: list[str] | None = Query(default=None),
+    status: str | None = None,
+    limit: int = 500,
+):
+    return db.list_entries(project_id, category=category, tags=tags, status=status, limit=limit)
+
+
+@app.post("/api/entries", status_code=201)
+def create_entry(entry: EntryCreate):
+    entry_id = db.store_knowledge_entry(
+        project_id=entry.project_id,
+        title=entry.title,
+        content=entry.content,
+        category=entry.category,
+        source="manual",
+        tags=entry.tags,
+    )
+    return db.get_entry(entry_id)
+
+
+@app.get("/api/entries/{entry_id}")
+def get_entry(entry_id: str):
+    entry = db.get_entry(entry_id)
+    if not entry:
+        raise HTTPException(404, "Entry not found")
+    return entry
+
+
+@app.put("/api/entries/{entry_id}")
+def update_entry(entry_id: str, update: EntryUpdate):
+    entry = db.get_entry(entry_id)
+    if not entry:
+        raise HTTPException(404, "Entry not found")
+    db.update_entry(
+        entry_id,
+        title=update.title,
+        content=update.content,
+        category=update.category,
+        tags=update.tags,
+    )
+    return db.get_entry(entry_id)
+
+
+@app.delete("/api/entries/{entry_id}", status_code=204)
+def delete_entry(entry_id: str):
+    entry = db.get_entry(entry_id)
+    if not entry:
+        raise HTTPException(404, "Entry not found")
+    db.remove_entry(entry_id)
+    return None
+
+
+@app.post("/api/entries/{entry_id}/approve")
+def approve_entry(entry_id: str):
+    entry = db.get_entry(entry_id)
+    if not entry:
+        raise HTTPException(404, "Entry not found")
+    db.approve_entries([entry_id])
+    return {"ok": True}
+
+
+@app.post("/api/entries/{entry_id}/reject")
+def reject_entry(entry_id: str):
+    entry = db.get_entry(entry_id)
+    if not entry:
+        raise HTTPException(404, "Entry not found")
+    db.reject_entries([entry_id])
+    return {"ok": True}
+
+
 # ---- Server startup ----
 
 _server_thread = None
