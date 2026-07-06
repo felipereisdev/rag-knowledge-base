@@ -2,10 +2,14 @@
 
 import json
 import os
-import sqlite3
 import time
 import uuid
 import embeddings
+
+try:
+    from pysqlite3 import dbapi2 as sqlite3
+except ImportError:
+    import sqlite3
 
 DATA_DIR = os.path.expanduser("~/.rag")
 DB_PATH = os.path.join(DATA_DIR, "knowledge.db")
