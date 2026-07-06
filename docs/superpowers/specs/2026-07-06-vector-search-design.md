@@ -56,16 +56,23 @@ def embed_query(query):
 
 ### Modified: `rag/server/db.py`
 
-Add virtual table and embedding management functions:
+Add virtual table and embedding management functions. The table dimension is fetched dynamically from the loaded model rather than hardcoded:
 
-```sql
-CREATE VIRTUAL TABLE IF NOT EXISTS entry_embeddings USING vec0(
-    entry_id TEXT PRIMARY KEY,
-    embedding FLOAT[768]
-);
+```python
+import embeddings
+
+dim = embeddings.get_embedding_dim()
+conn.execute(f"""
+    CREATE VIRTUAL TABLE IF NOT EXISTS entry_embeddings USING vec0(
+        entry_id TEXT PRIMARY KEY,
+        embedding FLOAT[{dim}]
+    )
+""")
 ```
 
-**Note:** The dimension (768) is hardcoded in the schema. If the model changes, a migration is needed to recreate the table. The test model (384-dim) requires a separate table or the dimension to match — tests will use the production model dimension by creating the table with the correct size at init time.
+This allows tests to use a different model (`all-MiniLM-L6-v2`, 384-dim) by setting `RAG_EMBEDDING_MODEL` — the table will be created with the correct dimension for whichever model is loaded.
+
+**Migration note:** If the model changes in the future, the table must be dropped and recreated (embedding dimensions won't match). Existing embeddings must be regenerated.
 
 New functions:
 - `store_embedding(entry_id, embedding)` — INSERT OR REPLACE into `entry_embeddings`
@@ -193,4 +200,4 @@ Existing indexed entries need embeddings generated. A one-time migration script 
 - **Model download size:** ~1.1GB for `mpnet-base-v2` on first run. Mitigated by Docker volume for `~/.cache/huggingface`.
 - **Memory usage:** Model stays in memory after first load (~1-2GB RAM). Acceptable for a local tool.
 - **`sqlite-vec` extension loading:** Requires the extension to be available at runtime. The `sqlite-vec` pip package bundles the extension, but `sqlite3` must support `load_extension`. On macOS, the system `sqlite3` may not — the `sqlite-vec` package handles this by providing a bundled SQLite.
-- **Dimension mismatch in tests:** The test model (`all-MiniLM-L6-v2`) produces 384-dim vectors while production uses 768-dim. The virtual table dimension must match the model. Tests will set `RAG_EMBEDDING_MODEL=all-MiniLM-L6-v2` and the table creation must use the model's actual dimension.
+- **Dimension mismatch in tests:** The test model (`all-MiniLM-L6-v2`) produces 384-dim vectors while production uses 768-dim. Mitigated by creating the table with `embeddings.get_embedding_dim()`. Tests set `RAG_EMBEDDING_MODEL=all-MiniLM-L6-v2` and the table is created with 384-dim automatically.
