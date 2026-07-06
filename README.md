@@ -38,7 +38,7 @@ it becomes searchable.
 
 ## Docker
 
-Run the MCP server and approval UI in a container — no Python installation needed.
+Run the admin panel (React SPA + FastAPI API) in two containers.
 
 ### Installation
 
@@ -48,7 +48,8 @@ cd ~/rag-knowledge-base
 docker compose up -d
 ```
 
-The approval UI is available at `http://127.0.0.1:8765`.
+- **Admin panel:** `http://127.0.0.1:8765`
+- **API:** `http://127.0.0.1:8000/api`
 
 The SQLite database is persisted via a volume mount at `~/.rag/knowledge.db`.
 
@@ -56,18 +57,18 @@ The SQLite database is persisted via a volume mount at `~/.rag/knowledge.db`.
 
 ```bash
 docker compose up -d      # start in background
-docker compose logs -f    # view logs
-docker compose down       # stop
+docker compose logs -f     # view logs
+docker compose down        # stop
 ```
 
-To use the MCP server from an assistant, configure it to run inside the container:
+To use the MCP server from an assistant, configure it to run inside the API container:
 
 ```json
 {
   "mcpServers": {
     "rag": {
       "command": "docker",
-      "args": ["exec", "-i", "rag-knowledge-base", "python3", "rag/server/main.py"]
+      "args": ["exec", "-i", "rag-api", "python3", "server/main.py"]
     }
   }
 }
@@ -183,23 +184,31 @@ to store, search, and import knowledge.
 ```
 ~/.rag/knowledge.db          ← SQLite database (shared by all assistants)
 ~/rag-knowledge-base/
-├── Dockerfile                ← Docker image for MCP server + approval UI
+├── Dockerfile.api            ← FastAPI container (API + MCP server)
+├── Dockerfile.web            ← nginx + React build container
+├── nginx.conf                ← nginx config (SPA + API proxy)
 ├── docker-compose.yml        ← Container orchestration
 ├── rag/
+│   ├── requirements.txt      ← Python dependencies
 │   ├── .codex-plugin/
 │   │   └── plugin.json       ← Codex plugin manifest
 │   ├── .mcp.json             ← MCP server config
 │   ├── server/
 │   │   ├── main.py           ← MCP server (JSON-RPC over stdio)
+│   │   ├── api.py            ← FastAPI REST API for admin panel
 │   │   ├── db.py             ← SQLite layer (entries, tags, projects)
 │   │   ├── search_engine.py  ← TF-IDF search over knowledge entries
-│   │   ├── doc_import.py     ← Markdown/text import parser
-│   │   ├── web_ui.py         ← Approval web UI
-│   │   └── templates/approval.html
+│   │   └── doc_import.py     ← Markdown/text import parser
+│   ├── web/                   ← React admin panel
+│   │   ├── src/
+│   │   │   ├── pages/        ← Dashboard, Projects, Entries, Approvals, Search
+│   │   │   ├── components/   ← Layout, EntryForm, shadcn/ui components
+│   │   │   └── lib/api.ts    ← API client
+│   │   └── package.json
 │   ├── scripts/              ← CLI scripts for non-Codex assistants
-│   │   ├── store.py          ← Store a knowledge entry
-│   │   ├── import.py         ← Import a .md or .txt file
-│   │   └── search.py         ← Search the knowledge base
+│   │   ├── store.py
+│   │   ├── import.py
+│   │   └── search.py
 │   ├── skills/SKILL.md       ← Codex skill instructions
 │   └── README.md
 ```
