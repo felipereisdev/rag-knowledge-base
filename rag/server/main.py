@@ -16,7 +16,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import db
 import search_engine
 import doc_import
-import web_ui
+import api
 
 MCP_VERSION = "2024-11-05"
 SERVER_NAME = "rag"
@@ -496,7 +496,6 @@ def _remove_knowledge(args):
 
 def _open_approval_ui(args):
     port = args.get("port", 8765)
-    port = web_ui.start_web_server(port)
     url = f"http://127.0.0.1:{port}"
 
     try:
@@ -505,7 +504,7 @@ def _open_approval_ui(args):
     except Exception:
         pass
 
-    return {"content": [{"type": "text", "text": f"Approval UI at {url}\nReview and approve/reject pending entries."}]}
+    return {"content": [{"type": "text", "text": f"Admin panel at {url}"}]}
 
 
 def _status(args):
@@ -593,10 +592,11 @@ def main():
     log("Knowledge Base RAG MCP server starting...")
 
     try:
-        web_ui.start_web_server(8765)
-        log("Approval UI at http://127.0.0.1:8765")
+        api.start_api_server(8000)
+        log("Admin panel API at http://127.0.0.1:8000")
+        log("Admin panel UI at http://127.0.0.1:8765")
     except Exception as e:
-        log(f"Could not start web UI: {e}")
+        log(f"Could not start API server: {e}")
 
     while True:
         msg = read_message()
