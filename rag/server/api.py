@@ -234,12 +234,18 @@ def search(
     tags: list[str] | None = Query(None),
     top_k: int = 5,
 ):
-    import search_engine
-    entries = db.get_indexed_entries(project_id)
-    if not entries:
+    if not q.strip():
         return []
-    index = search_engine.build_index_from_entries(entries)
-    return index.search(q, top_k=top_k, category=category, tags=tags)
+    query_vec = embeddings.embed_query(q)
+    results = db.search_entries_by_embedding(
+        query_vec,
+        project_id=project_id,
+        k=top_k,
+        category=category,
+        tags=tags,
+    )
+    MIN_SCORE = -0.2
+    return [r for r in results if r.get("score", 0) > MIN_SCORE]
 
 
 @app.get("/api/tags")
