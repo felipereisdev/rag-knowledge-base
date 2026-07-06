@@ -268,7 +268,7 @@ TOOLS = [
     {
         "name": "rag_open_approval_ui",
         "description": (
-            "Open the web UI to review and approve/reject pending knowledge entries. "
+            "Open the admin panel to review and approve/reject pending knowledge entries. "
             "Call this after storing or importing knowledge so the user can review."
         ),
         "inputSchema": {
@@ -276,8 +276,8 @@ TOOLS = [
             "properties": {
                 "port": {
                     "type": "number",
-                    "description": "Port for the web UI (default: 8765).",
-                    "default": 8765
+                    "description": "Port for the admin panel (default: 8000).",
+                    "default": 8000
                 }
             }
         }
@@ -391,7 +391,7 @@ def _store_knowledge(args):
                 f"  Language: {lang}\n"
                 f"  ID: {entry_id}\n\n"
                 f"Project: {pid} — {stats['pending']} pending, {stats['indexed']} indexed\n"
-                f"Approve at http://127.0.0.1:8765"
+                f"Approve at http://127.0.0.1:8000/api"
             )
         }]
     }
@@ -412,7 +412,7 @@ def _import_document(args):
                 f"Imported {len(entry_ids)} entries from {filepath}.\n"
                 f"  Project: {pid}\n"
                 f"  Status: pending (needs approval)\n\n"
-                f"Approve at http://127.0.0.1:8765"
+                f"Approve at http://127.0.0.1:8000/api"
             )
         }]
     }
@@ -495,7 +495,7 @@ def _remove_knowledge(args):
 
 
 def _open_approval_ui(args):
-    port = args.get("port", 8765)
+    port = args.get("port", 8000)
     url = f"http://127.0.0.1:{port}"
 
     try:
