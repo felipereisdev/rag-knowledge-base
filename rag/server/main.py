@@ -325,6 +325,27 @@ TOOLS = [
             },
             "required": ["language"]
         }
+    },
+    {
+        "name": "rag_add_project_path",
+        "description": (
+            "Associate an additional filesystem path with an existing project. "
+            "Useful for multi-repo projects (e.g., separate frontend and backend repos)."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "project_id": {
+                    "type": "string",
+                    "description": "Project ID",
+                },
+                "path": {
+                    "type": "string",
+                    "description": "Filesystem path to associate",
+                },
+            },
+            "required": ["project_id", "path"],
+        },
     }
 ]
 
@@ -353,6 +374,8 @@ def handle_tool_call(name, args):
             return _list_projects(args)
         elif name == "rag_set_language":
             return _set_language(args)
+        elif name == "rag_add_project_path":
+            return _add_project_path(args)
         else:
             return {"content": [{"type": "text", "text": f"Unknown tool: {name}"}], "isError": True}
     except Exception as e:
@@ -554,7 +577,8 @@ def _list_projects(args):
     lines = ["Projects in Knowledge Base:\n"]
     for p in projects:
         lines.append(f"  {p['name']} ({p['id']})")
-        lines.append(f"    Path: {p['root_path']}")
+        for path in p.get("paths", [p["root_path"]]):
+            lines.append(f"    Path: {path}")
         lines.append(f"    Language: {p.get('language', 'en')}")
         lines.append(f"    Indexed: {p['indexed_count']} | Pending: {p['pending_count']}\n")
 
@@ -586,6 +610,21 @@ def _set_language(args):
             )
         }]
     }
+
+
+def _add_project_path(args):
+    pid = args["project_id"]
+    path = args["path"]
+
+    project = db.get_project(pid)
+    if not project:
+        return {"content": [{"type": "text", "text": f"Project '{pid}' not found."}]}
+
+    db.add_project_path(pid, path)
+    paths = db.list_project_paths(pid)
+    paths_str = "\n  ".join(paths)
+
+    return {"content": [{"type": "text", "text": f"Path added to project '{project['name']}'.\n  {paths_str}"}]}
 
 
 # ---------------------------------------------------------------------------
