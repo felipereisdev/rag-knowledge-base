@@ -182,3 +182,73 @@ class TestEntries:
         results = client.get("/api/entries?project_id=test-proj&category=business-rule").json()
         assert len(results) == 1
         assert results[0]["title"] == "R1"
+
+
+class TestSearch:
+    def _setup_with_data(self, client):
+        client.post("/api/projects", json={
+            "id": "test-proj", "name": "Test", "root_path": "/tmp/test",
+        })
+        e1 = client.post("/api/entries", json={
+            "project_id": "test-proj", "title": "Order approval rule",
+            "content": "Orders over 1000 need manager approval",
+            "category": "business-rule", "tags": ["orders"],
+        }).json()["id"]
+        e2 = client.post("/api/entries", json={
+            "project_id": "test-proj", "title": "Auth architecture",
+            "content": "JWT with refresh tokens in Redis",
+            "category": "architecture", "tags": ["auth"],
+        }).json()["id"]
+        client.post(f"/api/entries/{e1}/approve")
+        client.post(f"/api/entries/{e2}/approve")
+
+    def test_search_returns_results(self, client):
+        self._setup_with_data(client)
+        resp = client.get("/api/search?q=order+approval&project_id=test-proj")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data) >= 1
+        assert data[0]["title"] == "Order approval rule"
+
+    def test_search_no_results(self, client):
+        self._setup_with_data(client)
+        resp = client.get("/api/search?q=nonexistent&project_id=test-proj")
+        assert resp.status_code == 200
+        assert resp.json() == []
+
+    def test_search_filter_by_category(self, client):
+        self._setup_with_data(client)
+        resp = client.get("/api/search?q=approval&project_id=test-proj&category=architecture")
+        assert resp.status_code == 200
+        for result in resp.json():
+            assert result["category"] == "architecture"
+
+    def test_search_top_k(self, client):
+        self._setup_with_data(client)
+        resp = client.get("/api/search?q=approval&project_id=test-proj&top_k=1")
+        assert resp.status_code == 200
+        assert len(resp.json()) <= 1
+
+
+class TestTags:
+    def test_list_tags(self, client):
+        client.post("/api/projects", json={
+            "id": "test-proj", "name": "Test", "root_path": "/tmp/test",
+        })
+        client.post("/api/entries", json={
+            "project_id": "test-proj", "title": "R1", "content": "c1",
+            "tags": ["auth", "security"],
+        })
+        resp = client.get("/api/tags?project_id=test-proj")
+        assert resp.status_code == 200
+        tags = resp.json()
+        assert "auth" in tags
+        assert "security" in tags
+
+    def test_list_tags_empty(self, client):
+        client.post("/api/projects", json={
+            "id": "test-proj", "name": "Test", "root_path": "/tmp/test",
+        })
+        resp = client.get("/api/tags?project_id=test-proj")
+        assert resp.status_code == 200
+        assert resp.json() == []

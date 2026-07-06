@@ -211,6 +211,29 @@ def reject_entry(entry_id: str):
     return {"ok": True}
 
 
+# ---- Search and tags ----
+
+@app.get("/api/search")
+def search(
+    q: str = Query(...),
+    project_id: str = Query(...),
+    category: str | None = None,
+    tags: list[str] | None = Query(None),
+    top_k: int = 5,
+):
+    import search_engine
+    entries = db.get_indexed_entries(project_id)
+    if not entries:
+        return []
+    index = search_engine.build_index_from_entries(entries)
+    return index.search(q, top_k=top_k, category=category, tags=tags)
+
+
+@app.get("/api/tags")
+def list_tags(project_id: str = Query(...)):
+    return db.get_all_tags(project_id)
+
+
 # ---- Server startup ----
 
 _server_thread = None
