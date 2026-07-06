@@ -14,7 +14,7 @@ import re
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import db
-import search_engine
+import embeddings
 import doc_import
 import api
 
@@ -433,8 +433,10 @@ def _search(args):
     if not entries:
         return {"content": [{"type": "text", "text": f"No indexed knowledge in '{project['name']}'. Use rag_store_knowledge and approve entries first."}]}
 
-    index = search_engine.build_index_from_entries(entries)
-    results = index.search(query, top_k=top_k, category=category, tags=tags)
+    query_vec = embeddings.embed_query(query)
+    results = db.search_entries_by_embedding(
+        query_vec, project_id=pid, k=top_k, category=category, tags=tags,
+    )
 
     if not results:
         return {"content": [{"type": "text", "text": f"No results for '{query}' in '{project['name']}'."}]}

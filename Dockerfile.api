@@ -9,6 +9,7 @@ COPY rag/server/ /app/server/
 
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONPATH=/app/server
+ENV HF_HOME=/root/.cache/huggingface
 
 EXPOSE 8000
 
