@@ -3,6 +3,7 @@
 import json
 import os
 import re
+import struct
 import time
 import uuid
 import embeddings
@@ -26,6 +27,7 @@ def get_connection():
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA busy_timeout=5000")
     conn.execute("PRAGMA foreign_keys=ON")
     try:
         import sqlite_vec
@@ -39,156 +41,208 @@ def get_connection():
     return conn
 
 
+BASE_SCHEMA = """
+    CREATE TABLE IF NOT EXISTS projects (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        root_path TEXT NOT NULL,
+        description TEXT DEFAULT '',
+        project_type TEXT DEFAULT '',
+        language TEXT DEFAULT 'en',
+        created_at REAL NOT NULL,
+        updated_at REAL NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS knowledge_entries (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+        title TEXT NOT NULL,
+        content TEXT NOT NULL DEFAULT '',
+        category TEXT NOT NULL DEFAULT 'insight',
+        source TEXT NOT NULL DEFAULT 'manual',
+        author TEXT NOT NULL DEFAULT '',
+        status TEXT NOT NULL DEFAULT 'pending',
+        metadata TEXT NOT NULL DEFAULT '{}',
+        created_at REAL NOT NULL,
+        updated_at REAL NOT NULL,
+        UNIQUE(project_id, title)
+    );
+
+    CREATE TABLE IF NOT EXISTS tags (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+        name TEXT NOT NULL,
+        UNIQUE(project_id, name)
+    );
+
+    CREATE TABLE IF NOT EXISTS entry_tags (
+        entry_id TEXT NOT NULL REFERENCES knowledge_entries(id) ON DELETE CASCADE,
+        tag_id INTEGER NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
+        PRIMARY KEY(entry_id, tag_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS project_paths (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+        path TEXT NOT NULL,
+        created_at REAL NOT NULL DEFAULT 0,
+        UNIQUE(project_id, path)
+    );
+
+    CREATE TABLE IF NOT EXISTS entities (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+        name TEXT NOT NULL,
+        norm_name TEXT NOT NULL,
+        type TEXT NOT NULL DEFAULT '',
+        created_at REAL NOT NULL,
+        UNIQUE(project_id, norm_name)
+    );
+
+    CREATE TABLE IF NOT EXISTS relations (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+        subject_id INTEGER NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+        predicate TEXT NOT NULL,
+        object_id INTEGER NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+        entry_id TEXT REFERENCES knowledge_entries(id) ON DELETE CASCADE,
+        created_at REAL NOT NULL
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_relations_unique
+        ON relations(project_id, subject_id, predicate, object_id, IFNULL(entry_id, ''));
+
+    CREATE TABLE IF NOT EXISTS entry_entities (
+        entry_id TEXT NOT NULL REFERENCES knowledge_entries(id) ON DELETE CASCADE,
+        entity_id INTEGER NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+        PRIMARY KEY(entry_id, entity_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS entry_links (
+        from_entry TEXT NOT NULL REFERENCES knowledge_entries(id) ON DELETE CASCADE,
+        to_entry TEXT NOT NULL REFERENCES knowledge_entries(id) ON DELETE CASCADE,
+        relation TEXT NOT NULL DEFAULT 'related',
+        PRIMARY KEY(from_entry, to_entry, relation)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_knowledge_entries_project ON knowledge_entries(project_id);
+    CREATE INDEX IF NOT EXISTS idx_knowledge_entries_status ON knowledge_entries(status);
+    CREATE INDEX IF NOT EXISTS idx_knowledge_entries_category ON knowledge_entries(category);
+    CREATE INDEX IF NOT EXISTS idx_tags_project ON tags(project_id);
+    CREATE INDEX IF NOT EXISTS idx_entry_tags_entry ON entry_tags(entry_id);
+    CREATE INDEX IF NOT EXISTS idx_entities_project ON entities(project_id);
+    CREATE INDEX IF NOT EXISTS idx_relations_subject ON relations(subject_id);
+    CREATE INDEX IF NOT EXISTS idx_relations_object ON relations(object_id);
+    CREATE INDEX IF NOT EXISTS idx_relations_entry ON relations(entry_id);
+    CREATE INDEX IF NOT EXISTS idx_entry_entities_entity ON entry_entities(entity_id);
+"""
+
+
+def _create_virtual_tables(conn):
+    dim = embeddings.EMBEDDING_DIM
+    conn.execute(f"""
+        CREATE VIRTUAL TABLE IF NOT EXISTS chunk_embeddings USING vec0(
+            embedding FLOAT[{dim}] distance_metric=cosine,
+            project_id TEXT partition key,
+            entry_id TEXT,
+            chunk_index INTEGER
+        )
+    """)
+    conn.execute("CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT)")
+    conn.execute("""
+        CREATE VIRTUAL TABLE IF NOT EXISTS entry_fts USING fts5(
+            title, content, tags,
+            entry_id UNINDEXED, project_id UNINDEXED
+        )
+    """)
+
+
+def _migration_0001_add_language_column(conn):
+    cols = [r[1] for r in conn.execute("PRAGMA table_info(projects)").fetchall()]
+    if "language" not in cols:
+        conn.execute("ALTER TABLE projects ADD COLUMN language TEXT DEFAULT 'en'")
+
+
+def _migration_0002_project_paths_created_at(conn):
+    pp_cols = [r[1] for r in conn.execute("PRAGMA table_info(project_paths)").fetchall()]
+    if "created_at" not in pp_cols:
+        conn.execute("ALTER TABLE project_paths ADD COLUMN created_at REAL NOT NULL DEFAULT 0")
+        conn.execute("""
+            UPDATE project_paths SET created_at = (
+                SELECT COALESCE(MIN(pp2.id), 0) FROM project_paths pp2
+                WHERE pp2.project_id = project_paths.project_id
+            ) * 0.001 + id * 0.001
+        """)
+        for p in conn.execute("SELECT id, root_path FROM projects").fetchall():
+            conn.execute("""
+                UPDATE project_paths SET created_at = -1
+                WHERE project_id = ? AND path = ?
+            """, (p["id"], p["root_path"]))
+
+
+def _migration_0003_backfill_root_paths(conn):
+    for p in conn.execute("SELECT id, root_path FROM projects").fetchall():
+        conn.execute(
+            "INSERT OR IGNORE INTO project_paths (project_id, path, created_at) VALUES (?, ?, ?)",
+            (p["id"], p["root_path"], 0),
+        )
+
+
+def _migration_0004_purge_orphan_embeddings(conn):
+    tables = {r[0] for r in conn.execute(
+        "SELECT name FROM sqlite_master WHERE type = 'table'"
+    ).fetchall()}
+    if "entry_embeddings" in tables:
+        conn.execute("""
+            DELETE FROM entry_embeddings
+            WHERE entry_id NOT IN (SELECT id FROM knowledge_entries)
+        """)
+
+
+def _migration_0005_drop_legacy_entry_embeddings(conn):
+    conn.execute("DROP TABLE IF EXISTS entry_embeddings")
+
+
+def _migration_0006_create_and_backfill_fts(conn):
+    conn.execute("""
+        CREATE VIRTUAL TABLE IF NOT EXISTS entry_fts USING fts5(
+            title, content, tags,
+            entry_id UNINDEXED, project_id UNINDEXED
+        )
+    """)
+    conn.execute("DELETE FROM entry_fts")
+    conn.execute("""
+        INSERT INTO entry_fts (title, content, tags, entry_id, project_id)
+        SELECT e.title, e.content,
+               COALESCE((SELECT GROUP_CONCAT(t.name, ' ') FROM tags t
+                         JOIN entry_tags et ON et.tag_id = t.id
+                         WHERE et.entry_id = e.id), ''),
+               e.id, e.project_id
+        FROM knowledge_entries e
+        WHERE e.status = 'indexed'
+    """)
+
+
+MIGRATIONS = [
+    _migration_0001_add_language_column,
+    _migration_0002_project_paths_created_at,
+    _migration_0003_backfill_root_paths,
+    _migration_0004_purge_orphan_embeddings,
+    _migration_0005_drop_legacy_entry_embeddings,
+    _migration_0006_create_and_backfill_fts,
+]
+
+
 def init_db():
     conn = get_connection()
     try:
-        conn.executescript("""
-            CREATE TABLE IF NOT EXISTS projects (
-                id TEXT PRIMARY KEY,
-                name TEXT NOT NULL,
-                root_path TEXT NOT NULL,
-                description TEXT DEFAULT '',
-                project_type TEXT DEFAULT '',
-                language TEXT DEFAULT 'en',
-                created_at REAL NOT NULL,
-                updated_at REAL NOT NULL
-            );
-
-            CREATE TABLE IF NOT EXISTS knowledge_entries (
-                id TEXT PRIMARY KEY,
-                project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-                title TEXT NOT NULL,
-                content TEXT NOT NULL DEFAULT '',
-                category TEXT NOT NULL DEFAULT 'insight',
-                source TEXT NOT NULL DEFAULT 'manual',
-                author TEXT NOT NULL DEFAULT '',
-                status TEXT NOT NULL DEFAULT 'pending',
-                metadata TEXT NOT NULL DEFAULT '{}',
-                created_at REAL NOT NULL,
-                updated_at REAL NOT NULL,
-                UNIQUE(project_id, title)
-            );
-
-            CREATE TABLE IF NOT EXISTS tags (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-                name TEXT NOT NULL,
-                UNIQUE(project_id, name)
-            );
-
-            CREATE TABLE IF NOT EXISTS entry_tags (
-                entry_id TEXT NOT NULL REFERENCES knowledge_entries(id) ON DELETE CASCADE,
-                tag_id INTEGER NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
-                PRIMARY KEY(entry_id, tag_id)
-            );
-
-            CREATE INDEX IF NOT EXISTS idx_knowledge_entries_project
-                ON knowledge_entries(project_id);
-            CREATE INDEX IF NOT EXISTS idx_knowledge_entries_status
-                ON knowledge_entries(status);
-            CREATE INDEX IF NOT EXISTS idx_knowledge_entries_category
-                ON knowledge_entries(category);
-            CREATE INDEX IF NOT EXISTS idx_tags_project
-                ON tags(project_id);
-            CREATE INDEX IF NOT EXISTS idx_entry_tags_entry
-                ON entry_tags(entry_id);
-        """)
-        dim = embeddings.EMBEDDING_DIM
-        conn.execute(f"""
-            CREATE VIRTUAL TABLE IF NOT EXISTS entry_embeddings USING vec0(
-                entry_id TEXT PRIMARY KEY,
-                embedding FLOAT[{dim}]
-            )
-        """)
+        conn.executescript(BASE_SCHEMA)
+        _create_virtual_tables(conn)
         conn.commit()
-
-        # Migration: add language column if missing (for existing DBs)
-        cols = [r[1] for r in conn.execute("PRAGMA table_info(projects)").fetchall()]
-        if "language" not in cols:
-            conn.execute("ALTER TABLE projects ADD COLUMN language TEXT DEFAULT 'en'")
+        version = conn.execute("PRAGMA user_version").fetchone()[0]
+        for i, migration in enumerate(MIGRATIONS[version:], start=version + 1):
+            migration(conn)
+            conn.execute(f"PRAGMA user_version = {i}")
             conn.commit()
-
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS project_paths (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-                path TEXT NOT NULL,
-                created_at REAL NOT NULL DEFAULT 0,
-                UNIQUE(project_id, path)
-            )
-        """)
-
-        # Migration: add created_at column if missing (for existing DBs)
-        pp_cols = [r[1] for r in conn.execute("PRAGMA table_info(project_paths)").fetchall()]
-        if "created_at" not in pp_cols:
-            conn.execute("ALTER TABLE project_paths ADD COLUMN created_at REAL NOT NULL DEFAULT 0")
-            # Backfill: order existing rows by id so root_path (migrated earlier) stays first
-            conn.execute("""
-                UPDATE project_paths SET created_at = (
-                    SELECT COALESCE(MIN(pp2.id), 0) FROM project_paths pp2
-                    WHERE pp2.project_id = project_paths.project_id
-                ) * 0.001 + id * 0.001
-            """)
-            # Ensure the row matching projects.root_path gets the smallest created_at
-            for p in conn.execute("SELECT id, root_path FROM projects").fetchall():
-                conn.execute("""
-                    UPDATE project_paths SET created_at = -1
-                    WHERE project_id = ? AND path = ?
-                """, (p["id"], p["root_path"]))
-            conn.commit()
-
-        # Migrate existing root_path values to project_paths (first by created_at)
-        projects = conn.execute("SELECT id, root_path FROM projects").fetchall()
-        for p in projects:
-            conn.execute(
-                "INSERT OR IGNORE INTO project_paths (project_id, path, created_at) VALUES (?, ?, ?)",
-                (p["id"], p["root_path"], 0),
-            )
-        conn.commit()
-
-        conn.executescript("""
-            CREATE TABLE IF NOT EXISTS entities (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-                name TEXT NOT NULL,
-                norm_name TEXT NOT NULL,
-                type TEXT NOT NULL DEFAULT '',
-                created_at REAL NOT NULL,
-                UNIQUE(project_id, norm_name)
-            );
-
-            CREATE TABLE IF NOT EXISTS relations (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-                subject_id INTEGER NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
-                predicate TEXT NOT NULL,
-                object_id INTEGER NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
-                entry_id TEXT REFERENCES knowledge_entries(id) ON DELETE CASCADE,
-                created_at REAL NOT NULL
-            );
-            CREATE UNIQUE INDEX IF NOT EXISTS idx_relations_unique
-                ON relations(project_id, subject_id, predicate, object_id, IFNULL(entry_id, ''));
-
-            CREATE TABLE IF NOT EXISTS entry_entities (
-                entry_id TEXT NOT NULL REFERENCES knowledge_entries(id) ON DELETE CASCADE,
-                entity_id INTEGER NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
-                PRIMARY KEY(entry_id, entity_id)
-            );
-
-            CREATE TABLE IF NOT EXISTS entry_links (
-                from_entry TEXT NOT NULL REFERENCES knowledge_entries(id) ON DELETE CASCADE,
-                to_entry TEXT NOT NULL REFERENCES knowledge_entries(id) ON DELETE CASCADE,
-                relation TEXT NOT NULL DEFAULT 'related',
-                PRIMARY KEY(from_entry, to_entry, relation)
-            );
-
-            CREATE INDEX IF NOT EXISTS idx_entities_project ON entities(project_id);
-            CREATE INDEX IF NOT EXISTS idx_relations_subject ON relations(subject_id);
-            CREATE INDEX IF NOT EXISTS idx_relations_object ON relations(object_id);
-            CREATE INDEX IF NOT EXISTS idx_relations_entry ON relations(entry_id);
-            CREATE INDEX IF NOT EXISTS idx_entry_entities_entity ON entry_entities(entity_id);
-        """)
-        conn.commit()
     finally:
         conn.close()
 
@@ -447,12 +501,11 @@ def list_entries(project_id=None, category=None, tags=None, status=None, limit=5
         params.append(limit)
 
         rows = conn.execute(query, params).fetchall()
-        entries = []
-        for r in rows:
-            entry = dict(r)
-            entry["tags"] = get_tags_for_entry(entry["id"])
+        entries = [dict(r) for r in rows]
+        tags_map = _tags_for_entries(conn, [e["id"] for e in entries])
+        for entry in entries:
+            entry["tags"] = tags_map[entry["id"]]
             entry["metadata"] = json.loads(entry.get("metadata") or "{}")
-            entries.append(entry)
         return entries
     finally:
         conn.close()
@@ -496,7 +549,29 @@ def update_entry(entry_id, title=None, content=None, category=None, tags=None):
 def remove_entry(entry_id):
     conn = get_connection()
     try:
+        _delete_entry_chunks(conn, entry_id)
+        conn.execute("DELETE FROM entry_fts WHERE entry_id = ?", (entry_id,))
         conn.execute("DELETE FROM knowledge_entries WHERE id = ?", (entry_id,))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def remove_project(project_id):
+    """Delete a project, its entries (FK cascade), and their embeddings."""
+    conn = get_connection()
+    try:
+        rows = conn.execute("""
+            SELECT rowid FROM chunk_embeddings WHERE entry_id IN
+                (SELECT id FROM knowledge_entries WHERE project_id = ?)
+        """, (project_id,)).fetchall()
+        for r in rows:
+            conn.execute("DELETE FROM chunk_embeddings WHERE rowid = ?", (r[0],))
+        conn.execute("""
+            DELETE FROM entry_fts WHERE entry_id IN
+                (SELECT id FROM knowledge_entries WHERE project_id = ?)
+        """, (project_id,))
+        conn.execute("DELETE FROM projects WHERE id = ?", (project_id,))
         conn.commit()
     finally:
         conn.close()
@@ -514,6 +589,23 @@ def get_tags_for_entry(entry_id):
         return [r["name"] for r in rows]
     finally:
         conn.close()
+
+
+def _tags_for_entries(conn, entry_ids):
+    """Fetch tags for many entries in one query. Returns {entry_id: [tag, ...]}."""
+    tags_map = {eid: [] for eid in entry_ids}
+    if not entry_ids:
+        return tags_map
+    placeholders = ",".join("?" for _ in entry_ids)
+    rows = conn.execute(f"""
+        SELECT et.entry_id, t.name FROM tags t
+        JOIN entry_tags et ON et.tag_id = t.id
+        WHERE et.entry_id IN ({placeholders})
+        ORDER BY t.name
+    """, list(entry_ids)).fetchall()
+    for r in rows:
+        tags_map[r["entry_id"]].append(r["name"])
+    return tags_map
 
 
 def get_all_tags(project_id):
@@ -546,11 +638,10 @@ def get_pending_entries(project_id=None):
                 WHERE status = 'pending'
                 ORDER BY created_at DESC
             """).fetchall()
-        entries = []
-        for r in rows:
-            entry = dict(r)
-            entry["tags"] = get_tags_for_entry(entry["id"])
-            entries.append(entry)
+        entries = [dict(r) for r in rows]
+        tags_map = _tags_for_entries(conn, [e["id"] for e in entries])
+        for entry in entries:
+            entry["tags"] = tags_map[entry["id"]]
         return entries
     finally:
         conn.close()
@@ -598,11 +689,10 @@ def get_indexed_entries(project_id, limit=5000):
             ORDER BY created_at DESC
             LIMIT ?
         """, (project_id, limit)).fetchall()
-        entries = []
-        for r in rows:
-            entry = dict(r)
-            entry["tags"] = get_tags_for_entry(entry["id"])
-            entries.append(entry)
+        entries = [dict(r) for r in rows]
+        tags_map = _tags_for_entries(conn, [e["id"] for e in entries])
+        for entry in entries:
+            entry["tags"] = tags_map[entry["id"]]
         return entries
     finally:
         conn.close()
@@ -625,111 +715,239 @@ def get_project_stats(project_id):
 
 # ---- Vector embedding operations ----
 
-def store_embedding(entry_id, embedding):
-    """Store or replace an entry's embedding."""
-    import struct
-    blob = struct.pack(f"{len(embedding)}f", *embedding)
+# KNN over-fetch factor: several chunks can belong to the same entry, so ask
+# vec0 for more rows than entries wanted before deduping per entry.
+CHUNK_OVERFETCH = 4
+
+
+def _pack(vector):
+    return struct.pack(f"{len(vector)}f", *vector)
+
+
+def store_entry_embeddings(entry_id, project_id, vectors):
+    """Replace all chunk embeddings for an entry (one row per chunk)."""
     conn = get_connection()
     try:
-        conn.execute("DELETE FROM entry_embeddings WHERE entry_id = ?", (entry_id,))
+        _delete_entry_chunks(conn, entry_id)
+        for i, vec in enumerate(vectors):
+            conn.execute(
+                "INSERT INTO chunk_embeddings (embedding, project_id, entry_id, chunk_index)"
+                " VALUES (?, ?, ?, ?)",
+                (_pack(vec), project_id, entry_id, i),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _delete_entry_chunks(conn, entry_id):
+    # vec0 DELETE by metadata predicate is version-sensitive; resolve rowids first.
+    rows = conn.execute(
+        "SELECT rowid FROM chunk_embeddings WHERE entry_id = ?", (entry_id,)
+    ).fetchall()
+    for r in rows:
+        conn.execute("DELETE FROM chunk_embeddings WHERE rowid = ?", (r[0],))
+
+
+def delete_entry_embeddings(entry_id):
+    conn = get_connection()
+    try:
+        _delete_entry_chunks(conn, entry_id)
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def search_chunks(query_embedding, project_id=None, k=10):
+    """Project-scoped KNN over chunks, deduped per entry (best chunk wins).
+
+    Returns [{"entry_id", "distance"}] ascending by cosine distance, ≤ k items.
+    """
+    conn = get_connection()
+    try:
+        sql = "SELECT entry_id, distance FROM chunk_embeddings WHERE embedding MATCH ? AND k = ?"
+        params = [_pack(query_embedding), k * CHUNK_OVERFETCH]
+        if project_id:
+            sql += " AND project_id = ?"
+            params.append(project_id)
+        sql += " ORDER BY distance"
+        rows = conn.execute(sql, params).fetchall()
+    finally:
+        conn.close()
+    best = {}
+    for r in rows:
+        if r["entry_id"] not in best:
+            best[r["entry_id"]] = r["distance"]
+    ordered = sorted(best.items(), key=lambda kv: kv[1])[:k]
+    return [{"entry_id": eid, "distance": dist} for eid, dist in ordered]
+
+
+def search_entries_by_embedding(query_embedding, project_id=None, k=10, category=None, tags=None):
+    """Search entries by chunk-embedding similarity with category/tag filtering."""
+    hits = search_chunks(query_embedding, project_id=project_id, k=k)
+    if not hits:
+        return []
+    entry_ids = [h["entry_id"] for h in hits]
+    score_map = {h["entry_id"]: round(1.0 - h["distance"], 4) for h in hits}
+    entries = _fetch_entries_in_order(entry_ids, project_id=project_id, category=category, tags=tags)
+    for entry in entries:
+        entry["score"] = score_map.get(entry["id"], 0.0)
+    return entries
+
+
+RRF_K = 60
+
+
+def hybrid_search(query, query_embedding, project_id=None, k=10,
+                  category=None, tags=None, min_score=0.0):
+    """Vector + BM25 search fused with Reciprocal Rank Fusion.
+
+    min_score gates the vector list only: FTS hits are exact keyword matches
+    and always pass. Results carry `score` (cosine sim of best chunk, 0.0 for
+    FTS-only hits) and `rrf`, ordered by rrf desc.
+    """
+    vec_hits = search_chunks(query_embedding, project_id=project_id, k=k)
+    vec_hits = [h for h in vec_hits if 1.0 - h["distance"] >= min_score]
+    fts_hits = search_fts(query, project_id=project_id, k=k)
+
+    rrf = {}
+    sim = {}
+    for rank, h in enumerate(vec_hits, start=1):
+        rrf[h["entry_id"]] = rrf.get(h["entry_id"], 0.0) + 1.0 / (RRF_K + rank)
+        sim[h["entry_id"]] = round(1.0 - h["distance"], 4)
+    for rank, h in enumerate(fts_hits, start=1):
+        rrf[h["entry_id"]] = rrf.get(h["entry_id"], 0.0) + 1.0 / (RRF_K + rank)
+
+    if not rrf:
+        return []
+    ordered_ids = sorted(rrf, key=rrf.get, reverse=True)
+    entries = _fetch_entries_in_order(ordered_ids, project_id=project_id,
+                                      category=category, tags=tags)
+    for e in entries:
+        e["score"] = sim.get(e["id"], 0.0)
+        e["rrf"] = round(rrf[e["id"]], 6)
+    return entries[:k]
+
+
+def _fetch_entries_in_order(entry_ids, project_id=None, category=None, tags=None):
+    """Hydrate entries by id, preserving the given order, with optional filters."""
+    placeholders = ",".join("?" for _ in entry_ids)
+    conditions = [f"ke.id IN ({placeholders})"]
+    params = list(entry_ids)
+    if project_id:
+        conditions.append("ke.project_id = ?")
+        params.append(project_id)
+    if category:
+        conditions.append("ke.category = ?")
+        params.append(category)
+    sql = f"SELECT ke.* FROM knowledge_entries ke WHERE {' AND '.join(conditions)}"
+    if tags:
+        for tag in tags:
+            sql += (" AND ke.id IN (SELECT et.entry_id FROM entry_tags et"
+                    " JOIN tags t ON t.id = et.tag_id WHERE t.name = ?"
+                    " AND t.project_id = ke.project_id)")
+            params.append(tag.lower())
+    conn = get_connection()
+    try:
+        rows = conn.execute(sql, params).fetchall()
+        entries = [dict(r) for r in rows]
+        tags_map = _tags_for_entries(conn, [e["id"] for e in entries])
+    finally:
+        conn.close()
+    order = {eid: i for i, eid in enumerate(entry_ids)}
+    for e in entries:
+        e["tags"] = tags_map[e["id"]]
+        e["metadata"] = json.loads(e.get("metadata") or "{}")
+    entries.sort(key=lambda e: order[e["id"]])
+    return entries
+
+
+# ---- Embedding metadata (model versioning) ----
+
+def get_embedding_meta():
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            "SELECT key, value FROM meta WHERE key IN ('embedding_model', 'embedding_dim')"
+        ).fetchall()
+    finally:
+        conn.close()
+    kv = {r["key"]: r["value"] for r in rows}
+    dim = kv.get("embedding_dim")
+    return {"model": kv.get("embedding_model"), "dim": int(dim) if dim else None}
+
+
+def set_embedding_meta(model, dim):
+    conn = get_connection()
+    try:
+        conn.execute("INSERT OR REPLACE INTO meta (key, value) VALUES ('embedding_model', ?)", (model,))
+        conn.execute("INSERT OR REPLACE INTO meta (key, value) VALUES ('embedding_dim', ?)", (str(dim),))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def rebuild_chunk_table():
+    """Drop and recreate chunk_embeddings (used when the embedding model changes)."""
+    conn = get_connection()
+    try:
+        conn.execute("DROP TABLE IF EXISTS chunk_embeddings")
+        _create_virtual_tables(conn)
+        conn.commit()
+    finally:
+        conn.close()
+
+
+# ---- Full-text (FTS5 / BM25) operations ----
+
+
+def _fts_escape(query):
+    """Quote each token so user text can't inject FTS5 syntax."""
+    tokens = [t for t in query.split() if t]
+    return " ".join('"' + t.replace('"', '""') + '"' for t in tokens)
+
+
+def fts_index_entry(entry):
+    """Insert or replace an entry's row in the FTS index."""
+    conn = get_connection()
+    try:
+        conn.execute("DELETE FROM entry_fts WHERE entry_id = ?", (entry["id"],))
         conn.execute(
-            "INSERT INTO entry_embeddings (entry_id, embedding) VALUES (?, ?)",
-            (entry_id, blob),
+            "INSERT INTO entry_fts (title, content, tags, entry_id, project_id)"
+            " VALUES (?, ?, ?, ?, ?)",
+            (entry["title"], entry["content"], " ".join(entry.get("tags") or []),
+             entry["id"], entry["project_id"]),
         )
         conn.commit()
     finally:
         conn.close()
 
 
-def get_embedding(entry_id):
-    """Get an entry's embedding as (entry_id, embedding_list) or None."""
-    import struct
+def fts_delete_entry(entry_id):
     conn = get_connection()
     try:
-        row = conn.execute(
-            "SELECT entry_id, embedding FROM entry_embeddings WHERE entry_id = ?",
-            (entry_id,),
-        ).fetchone()
-        if not row:
-            return None
-        blob = row["embedding"]
-        dim = len(blob) // 4
-        embedding = list(struct.unpack(f"{dim}f", blob))
-        return {"entry_id": row["entry_id"], "embedding": embedding}
-    finally:
-        conn.close()
-
-
-def delete_embedding(entry_id):
-    """Remove an entry's embedding."""
-    conn = get_connection()
-    try:
-        conn.execute("DELETE FROM entry_embeddings WHERE entry_id = ?", (entry_id,))
+        conn.execute("DELETE FROM entry_fts WHERE entry_id = ?", (entry_id,))
         conn.commit()
     finally:
         conn.close()
 
 
-def search_embeddings(query_embedding, k=10):
-    """Find nearest neighbors by cosine similarity. Returns list of {entry_id, distance}."""
-    import struct
-    blob = struct.pack(f"{len(query_embedding)}f", *query_embedding)
-    conn = get_connection()
-    try:
-        rows = conn.execute(
-            "SELECT entry_id, distance FROM entry_embeddings WHERE embedding MATCH ? AND k = ? ORDER BY distance",
-            (blob, k),
-        ).fetchall()
-        return [dict(r) for r in rows]
-    finally:
-        conn.close()
-
-
-def search_entries_by_embedding(query_embedding, project_id=None, k=10, category=None, tags=None):
-    """Search entries by embedding similarity with project/category/tag filtering."""
-    neighbors = search_embeddings(query_embedding, k=k)
-    if not neighbors:
+def search_fts(query, project_id=None, k=10):
+    """BM25 search. Returns [{"entry_id", "rank"}], most relevant first."""
+    match = _fts_escape(query)
+    if not match:
         return []
-    entry_ids = [n["entry_id"] for n in neighbors]
-    placeholders = ",".join("?" for _ in entry_ids)
+    sql = "SELECT entry_id, rank FROM entry_fts WHERE entry_fts MATCH ?"
+    params = [match]
+    if project_id:
+        sql += " AND project_id = ?"
+        params.append(project_id)
+    sql += " ORDER BY rank LIMIT ?"
+    params.append(k)
     conn = get_connection()
     try:
-        conditions = [f"e.entry_id IN ({placeholders})"]
-        params = list(entry_ids)
-        if project_id:
-            conditions.append("ke.project_id = ?")
-            params.append(project_id)
-        sql = f"""
-            SELECT ke.*, e.entry_id
-            FROM entry_embeddings e
-            JOIN knowledge_entries ke ON ke.id = e.entry_id
-            WHERE {" AND ".join(conditions)}
-        """
-        if category:
-            sql += " AND ke.category = ?"
-            params.append(category)
-        if tags:
-            for tag in tags:
-                if project_id:
-                    sql += " AND e.entry_id IN (SELECT et.entry_id FROM entry_tags et JOIN tags t ON t.id = et.tag_id WHERE t.name = ? AND t.project_id = ?)"
-                    params.extend([tag.lower(), project_id])
-                else:
-                    sql += " AND e.entry_id IN (SELECT et.entry_id FROM entry_tags et JOIN tags t ON t.id = et.tag_id WHERE t.name = ?)"
-                    params.append(tag.lower())
-        sql += " ORDER BY CASE e.entry_id"
-        for i, eid in enumerate(entry_ids):
-            sql += f" WHEN ? THEN {i}"
-            params.append(eid)
-        sql += " END"
         rows = conn.execute(sql, params).fetchall()
-        score_map = {n["entry_id"]: round(1.0 / (1.0 + n["distance"]), 4) for n in neighbors}
-        results = []
-        for r in rows:
-            entry = dict(r)
-            entry["tags"] = get_tags_for_entry(entry["entry_id"])
-            entry["score"] = score_map.get(entry["entry_id"], 0)
-            results.append(entry)
-        return results
+        return [dict(r) for r in rows]
     finally:
         conn.close()
 
@@ -974,10 +1192,10 @@ def query_entity_graph(project_id, entity_name, depth=1):
                 WHERE ee.entity_id IN ({placeholders}) AND ke.status = 'indexed'
                 ORDER BY ke.created_at DESC
             """, list(visited)).fetchall()
-            for r in entry_rows:
-                e = dict(r)
-                e["tags"] = get_tags_for_entry(e["id"])
-                entries.append(e)
+            entries = [dict(r) for r in entry_rows]
+            tags_map = _tags_for_entries(conn, [e["id"] for e in entries])
+            for e in entries:
+                e["tags"] = tags_map[e["id"]]
 
         return {"entity": entity, "triples": triples, "entries": entries}
     finally:
@@ -1038,10 +1256,10 @@ def expand_entries_via_graph(project_id, seed_entry_ids, depth=1, limit=10):
                 ORDER BY created_at DESC
                 LIMIT ?
             """, list(related_ids) + [limit]).fetchall()
-            for r in entry_rows:
-                e = dict(r)
-                e["tags"] = get_tags_for_entry(e["id"])
-                related_entries.append(e)
+            related_entries = [dict(r) for r in entry_rows]
+            tags_map = _tags_for_entries(conn, [e["id"] for e in related_entries])
+            for e in related_entries:
+                e["tags"] = tags_map[e["id"]]
 
         return {"triples": triples, "related_entries": related_entries}
     finally:

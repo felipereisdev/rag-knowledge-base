@@ -14,11 +14,13 @@ def clean_env():
     old_model = os.environ.get("RAG_EMBEDDING_MODEL")
     old_dim = os.environ.get("RAG_EMBEDDING_DIM")
     old_min_score = os.environ.get("RAG_SEARCH_MIN_SCORE")
+    old_embed_remote = os.environ.get("RAG_EMBED_REMOTE")
     os.environ["RAG_EMBEDDING_MODEL"] = "all-MiniLM-L6-v2"
     os.environ["RAG_EMBEDDING_DIM"] = "384"
-    # Calibrated for all-MiniLM-L6-v2: unrelated queries score <= ~0.435,
-    # relevant matches >= ~0.457 (see search_min_score in server/api.py).
-    os.environ["RAG_SEARCH_MIN_SCORE"] = "0.44"
+    # Calibrated for all-MiniLM-L6-v2 under cosine similarity (see Task 5 of
+    # docs/superpowers/plans/2026-07-07-rag-retrieval-overhaul.md, Step 6).
+    os.environ["RAG_SEARCH_MIN_SCORE"] = "0.30"
+    os.environ["RAG_EMBED_REMOTE"] = "0"
     yield
     if old_model:
         os.environ["RAG_EMBEDDING_MODEL"] = old_model
@@ -32,6 +34,10 @@ def clean_env():
         os.environ["RAG_SEARCH_MIN_SCORE"] = old_min_score
     else:
         os.environ.pop("RAG_SEARCH_MIN_SCORE", None)
+    if old_embed_remote:
+        os.environ["RAG_EMBED_REMOTE"] = old_embed_remote
+    else:
+        os.environ.pop("RAG_EMBED_REMOTE", None)
 
 
 @pytest.fixture

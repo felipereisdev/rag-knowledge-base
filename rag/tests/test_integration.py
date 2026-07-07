@@ -22,10 +22,9 @@ class TestFullWorkflow:
 
         temp_db.approve_entries([eid1, eid2])
 
-        vec1 = embeddings.embed_text("Orders over 1000 require manager approval")
-        vec2 = embeddings.embed_text("JWT with refresh tokens stored in Redis")
-        temp_db.store_embedding(eid1, vec1)
-        temp_db.store_embedding(eid2, vec2)
+        import indexing
+        indexing.index_entry(temp_db.get_entry(eid1))
+        indexing.index_entry(temp_db.get_entry(eid2))
 
         query_vec = embeddings.embed_query("order approval")
         results = temp_db.search_entries_by_embedding(query_vec, project_id="shop", k=5)
@@ -65,10 +64,9 @@ Full refund within 30 days. Partial after that.
 
             temp_db.approve_entries(entry_ids)
 
+            import indexing
             for eid in entry_ids:
-                entry = temp_db.get_entry(eid)
-                vec = embeddings.embed_text(entry["title"] + " " + entry["content"])
-                temp_db.store_embedding(eid, vec)
+                indexing.index_entry(temp_db.get_entry(eid))
 
             query_vec = embeddings.embed_query("stripe payment")
             results = temp_db.search_entries_by_embedding(query_vec, project_id="docs", k=5)

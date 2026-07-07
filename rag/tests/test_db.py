@@ -587,3 +587,256 @@ class TestGraph:
         conn.close()
         assert rel_count == 0
         assert ee_count == 0
+
+
+class TestMigrationFramework:
+    def test_fresh_db_is_stamped_with_latest_version(self, temp_db):
+        conn = temp_db.get_connection()
+        try:
+            version = conn.execute("PRAGMA user_version").fetchone()[0]
+        finally:
+            conn.close()
+        assert version == len(temp_db.MIGRATIONS)
+        assert version >= 3
+
+    def test_init_db_is_idempotent(self, temp_db):
+        temp_db.init_db()
+        temp_db.init_db()
+        conn = temp_db.get_connection()
+        try:
+            version = conn.execute("PRAGMA user_version").fetchone()[0]
+        finally:
+            conn.close()
+        assert version == len(temp_db.MIGRATIONS)
+
+    def test_legacy_db_without_language_column_is_migrated(self, monkeypatch, tmp_path):
+        import importlib
+        import db as db_mod
+        db_path = str(tmp_path / "legacy.db")
+        monkeypatch.setattr(db_mod, "DB_PATH", db_path)
+        monkeypatch.setattr(db_mod, "DATA_DIR", str(tmp_path))
+        # Simulate a pre-language, pre-project_paths database at user_version 0
+        conn = db_mod.get_connection()
+        try:
+            conn.executescript("""
+                CREATE TABLE projects (
+                    id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    root_path TEXT NOT NULL,
+                    description TEXT DEFAULT '',
+                    project_type TEXT DEFAULT '',
+                    created_at REAL NOT NULL,
+                    updated_at REAL NOT NULL
+                );
+            """)
+            conn.execute(
+                "INSERT INTO projects (id, name, root_path, created_at, updated_at) VALUES ('p1', 'P1', '/tmp/p1', 1, 1)"
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        db_mod.init_db()
+
+        conn = db_mod.get_connection()
+        try:
+            cols = [r[1] for r in conn.execute("PRAGMA table_info(projects)").fetchall()]
+            assert "language" in cols
+            paths = conn.execute(
+                "SELECT path FROM project_paths WHERE project_id = 'p1'"
+            ).fetchall()
+            assert [r["path"] for r in paths] == ["/tmp/p1"]
+            version = conn.execute("PRAGMA user_version").fetchone()[0]
+            assert version == len(db_mod.MIGRATIONS)
+        finally:
+            conn.close()
+
+    def test_connection_sets_busy_timeout(self, temp_db):
+        conn = temp_db.get_connection()
+        try:
+            timeout = conn.execute("PRAGMA busy_timeout").fetchone()[0]
+        finally:
+            conn.close()
+        assert timeout == 5000
+
+
+class TestBatchTags:
+    def test_tags_for_entries_batches(self, temp_db):
+        temp_db.upsert_project("p1", "P1", "/tmp/p1")
+        e1 = temp_db.store_knowledge_entry("p1", "T1", "c", tags=["a", "b"])
+        e2 = temp_db.store_knowledge_entry("p1", "T2", "c", tags=["b"])
+        e3 = temp_db.store_knowledge_entry("p1", "T3", "c")
+        conn = temp_db.get_connection()
+        try:
+            tags_map = temp_db._tags_for_entries(conn, [e1, e2, e3])
+        finally:
+            conn.close()
+        assert tags_map[e1] == ["a", "b"]
+        assert tags_map[e2] == ["b"]
+        assert tags_map[e3] == []
+
+    def test_tags_for_entries_empty_input(self, temp_db):
+        conn = temp_db.get_connection()
+        try:
+            assert temp_db._tags_for_entries(conn, []) == {}
+        finally:
+            conn.close()
+
+
+class TestEmbeddingCleanup:
+    def test_remove_entry_deletes_embedding(self, temp_db):
+        import embeddings
+        temp_db.upsert_project("p1", "P1", "/tmp/p1")
+        eid = temp_db.store_knowledge_entry("p1", "T1", "content")
+        temp_db.store_entry_embeddings(eid, "p1", [embeddings.embed_text("content")])
+        temp_db.remove_entry(eid)
+        assert temp_db.search_chunks(embeddings.embed_query("content"), project_id="p1", k=5) == []
+
+    def test_remove_project_deletes_entry_embeddings(self, temp_db):
+        import embeddings
+        temp_db.upsert_project("p1", "P1", "/tmp/p1")
+        eid = temp_db.store_knowledge_entry("p1", "T1", "content")
+        temp_db.store_entry_embeddings(eid, "p1", [embeddings.embed_text("content")])
+        temp_db.remove_project("p1")
+        assert temp_db.get_project("p1") is None
+        assert temp_db.get_entry(eid) is None
+        assert temp_db.search_chunks(embeddings.embed_query("content"), project_id="p1", k=5) == []
+
+    def test_migration_purges_orphan_embeddings_legacy_table(self, temp_db):
+        conn = temp_db.get_connection()
+        try:
+            dim = 384
+            conn.execute(f"""
+                CREATE VIRTUAL TABLE IF NOT EXISTS entry_embeddings USING vec0(
+                    entry_id TEXT PRIMARY KEY,
+                    embedding FLOAT[{dim}]
+                )
+            """)
+            import struct
+            conn.execute(
+                "INSERT INTO entry_embeddings (entry_id, embedding) VALUES (?, ?)",
+                ("ghost", struct.pack(f"{dim}f", *([0.1] * dim))),
+            )
+            conn.execute("PRAGMA user_version = 3")
+            conn.commit()
+        finally:
+            conn.close()
+        temp_db.init_db()
+        conn = temp_db.get_connection()
+        try:
+            tables = {r[0] for r in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'entry_embeddings'"
+            ).fetchall()}
+        finally:
+            conn.close()
+        assert tables == set()  # migration 0005 dropped the legacy table
+
+
+class TestFtsSearch:
+    def _indexed_entry(self, temp_db, title, content, tags=None, project="p1"):
+        temp_db.upsert_project(project, project, f"/tmp/{project}")
+        eid = temp_db.store_knowledge_entry(project, title, content, tags=tags or [])
+        temp_db.approve_entries([eid])
+        entry = temp_db.get_entry(eid)
+        temp_db.fts_index_entry(entry)
+        return eid
+
+    def test_exact_identifier_match(self, temp_db):
+        eid = self._indexed_entry(
+            temp_db, "Timeout config", "PIX_TIMEOUT_MS controls the payment timeout"
+        )
+        hits = temp_db.search_fts("PIX_TIMEOUT_MS", project_id="p1", k=5)
+        assert [h["entry_id"] for h in hits] == [eid]
+
+    def test_project_scoping(self, temp_db):
+        self._indexed_entry(temp_db, "Timeout config", "PIX_TIMEOUT_MS docs", project="other")
+        hits = temp_db.search_fts("PIX_TIMEOUT_MS", project_id="p1", k=5)
+        assert hits == []
+
+    def test_query_with_fts_operators_does_not_crash(self, temp_db):
+        self._indexed_entry(temp_db, "Notes", "some content")
+        assert temp_db.search_fts('AND OR NOT "unbalanced', project_id="p1", k=5) == []
+
+    def test_reindex_replaces_previous_row(self, temp_db):
+        eid = self._indexed_entry(temp_db, "Old title", "old words here")
+        entry = temp_db.get_entry(eid)
+        entry["title"] = "New title"
+        entry["content"] = "completely different"
+        temp_db.fts_index_entry(entry)
+        assert temp_db.search_fts("old words", project_id="p1", k=5) == []
+        hits = temp_db.search_fts("completely different", project_id="p1", k=5)
+        assert [h["entry_id"] for h in hits] == [eid]
+
+    def test_delete_removes_from_fts(self, temp_db):
+        eid = self._indexed_entry(temp_db, "T", "searchable words")
+        temp_db.remove_entry(eid)
+        assert temp_db.search_fts("searchable words", project_id="p1", k=5) == []
+
+    def test_migration_backfills_indexed_entries(self, temp_db):
+        temp_db.upsert_project("p1", "P1", "/tmp/p1")
+        eid = temp_db.store_knowledge_entry("p1", "Backfill me", "unique backfill token")
+        temp_db.approve_entries([eid])
+        conn = temp_db.get_connection()
+        try:
+            conn.execute("DROP TABLE entry_fts")
+            conn.execute("PRAGMA user_version = 5")
+            conn.commit()
+        finally:
+            conn.close()
+        temp_db.init_db()
+        hits = temp_db.search_fts("backfill token", project_id="p1", k=5)
+        assert [h["entry_id"] for h in hits] == [eid]
+
+
+class TestHybridSearch:
+    def _index(self, temp_db, title, content, project="p1", tags=None):
+        import indexing
+        temp_db.upsert_project(project, project, f"/tmp/{project}")
+        eid = temp_db.store_knowledge_entry(project, title, content, tags=tags or [])
+        temp_db.approve_entries([eid])
+        indexing.index_entry(temp_db.get_entry(eid))
+        return eid
+
+    def test_semantic_match_found_without_keyword_overlap(self, temp_db):
+        import embeddings
+        eid = self._index(temp_db, "Order rule", "Purchases above 1000 euros need a supervisor sign-off")
+        results = temp_db.hybrid_search(
+            "order approval", embeddings.embed_query("order approval"),
+            project_id="p1", k=5,
+        )
+        assert eid in [r["id"] for r in results]
+
+    def test_exact_identifier_found_despite_semantic_miss(self, temp_db):
+        import embeddings
+        eid = self._index(temp_db, "Config", "PIX_TIMEOUT_MS=5000 is the payment gateway timeout")
+        self._index(temp_db, "Unrelated", "Team lunch happens on Fridays")
+        results = temp_db.hybrid_search(
+            "PIX_TIMEOUT_MS", embeddings.embed_query("PIX_TIMEOUT_MS"),
+            project_id="p1", k=5, min_score=0.99,  # force the vector list to contribute nothing
+        )
+        assert [r["id"] for r in results] == [eid]
+        assert results[0]["score"] == 0.0  # FTS-only hit
+
+    def test_entry_in_both_lists_ranks_first(self, temp_db):
+        import embeddings
+        both = self._index(temp_db, "Stripe payments", "All payments go through Stripe")
+        self._index(temp_db, "Refund policy", "Refunds are allowed within 30 days")
+        results = temp_db.hybrid_search(
+            "stripe payments", embeddings.embed_query("stripe payments"),
+            project_id="p1", k=5,
+        )
+        assert results and results[0]["id"] == both
+        assert results[0]["rrf"] >= results[-1]["rrf"]
+
+    def test_category_filter(self, temp_db):
+        import embeddings
+        temp_db.upsert_project("p1", "p1", "/tmp/p1")
+        import indexing
+        e1 = temp_db.store_knowledge_entry("p1", "Rule", "orders need approval", category="business-rule")
+        temp_db.approve_entries([e1])
+        indexing.index_entry(temp_db.get_entry(e1))
+        results = temp_db.hybrid_search(
+            "orders", embeddings.embed_query("orders"),
+            project_id="p1", k=5, category="architecture",
+        )
+        assert results == []

@@ -429,9 +429,9 @@ class TestEmbeddingLifecycle:
         }).json()
         eid = create["id"]
         client.post(f"/api/entries/{eid}/approve")
-        import db
-        emb = db.get_embedding(eid)
-        assert emb is not None
+        import db, embeddings
+        hits = db.search_chunks(embeddings.embed_query("content"), project_id="test-proj", k=5)
+        assert any(h["entry_id"] == eid for h in hits)
 
     def test_update_regenerates_embedding(self, client):
         client.post("/api/projects", json={
@@ -443,11 +443,22 @@ class TestEmbeddingLifecycle:
         eid = create["id"]
         client.post(f"/api/entries/{eid}/approve")
         import db
-        emb_before = db.get_embedding(eid)
+        conn = db.get_connection()
+        try:
+            before = conn.execute(
+                "SELECT embedding FROM chunk_embeddings WHERE entry_id = ?", (eid,)
+            ).fetchone()["embedding"]
+        finally:
+            conn.close()
         client.put(f"/api/entries/{eid}", json={"title": "New Title", "content": "new content"})
-        emb_after = db.get_embedding(eid)
-        assert emb_after is not None
-        assert emb_after["embedding"] != emb_before["embedding"]
+        conn = db.get_connection()
+        try:
+            after = conn.execute(
+                "SELECT embedding FROM chunk_embeddings WHERE entry_id = ?", (eid,)
+            ).fetchone()["embedding"]
+        finally:
+            conn.close()
+        assert after != before
 
     def test_delete_removes_embedding(self, client):
         client.post("/api/projects", json={
@@ -459,8 +470,9 @@ class TestEmbeddingLifecycle:
         eid = create["id"]
         client.post(f"/api/entries/{eid}/approve")
         client.delete(f"/api/entries/{eid}")
-        import db
-        assert db.get_embedding(eid) is None
+        import db, embeddings
+        hits = db.search_chunks(embeddings.embed_query("content"), project_id="test-proj", k=5)
+        assert hits == []
 
 
 class TestProjectPaths:
@@ -515,3 +527,66 @@ class TestProjectPaths:
         resp = client.get("/api/projects")
         assert resp.status_code == 200
         assert "paths" in resp.json()[0]
+
+
+class TestEmbedEndpoint:
+    def test_embed_endpoint_returns_vectors(self, client):
+        import embeddings
+        resp = client.post("/api/embed", json={"texts": ["hello", "world"]})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["model"] == embeddings.MODEL_NAME
+        assert data["dim"] == embeddings.EMBEDDING_DIM
+        assert len(data["embeddings"]) == 2
+        assert len(data["embeddings"][0]) == embeddings.EMBEDDING_DIM
+
+
+class TestDuplicateTitleConflict:
+    def _project(self, client):
+        client.post("/api/projects", json={"id": "p1", "name": "P1", "root_path": "/tmp/p1"})
+
+    def test_create_duplicate_title_returns_409(self, client):
+        self._project(client)
+        body = {"project_id": "p1", "title": "Same", "content": "a"}
+        assert client.post("/api/entries", json=body).status_code == 201
+        resp = client.post("/api/entries", json={**body, "content": "b"})
+        assert resp.status_code == 409
+        assert "title" in resp.json()["detail"].lower()
+
+    def test_update_to_duplicate_title_returns_409(self, client):
+        self._project(client)
+        client.post("/api/entries", json={"project_id": "p1", "title": "First", "content": "a"})
+        r2 = client.post("/api/entries", json={"project_id": "p1", "title": "Second", "content": "b"})
+        eid2 = r2.json()["id"]
+        resp = client.put(f"/api/entries/{eid2}", json={"title": "First"})
+        assert resp.status_code == 409
+
+
+class TestStartupLifespan:
+    def test_lifespan_initializes_fresh_db(self, monkeypatch, tmp_path):
+        import db as db_mod
+        monkeypatch.setattr(db_mod, "DB_PATH", str(tmp_path / "fresh.db"))
+        monkeypatch.setattr(db_mod, "DATA_DIR", str(tmp_path))
+        from fastapi.testclient import TestClient
+        import api
+        with TestClient(api.app) as c:
+            resp = c.get("/api/projects")
+        assert resp.status_code == 200
+        assert resp.json() == []
+
+    def test_lifespan_sets_serving_locally(self, client):
+        import embeddings
+        assert embeddings.serving_locally is True
+
+
+class TestStartApiServerPortProbe:
+    def test_skips_uvicorn_when_port_taken(self, temp_db, monkeypatch):
+        import api, embeddings
+        monkeypatch.setattr(api, "_server_thread", None)
+        monkeypatch.setattr(api, "_server_port", None)
+        monkeypatch.setattr(api, "_port_in_use", lambda port: True)
+        monkeypatch.setattr(embeddings, "serving_locally", False)
+        port = api.start_api_server(8000)
+        assert port == 8000
+        assert api._server_thread is None
+        assert embeddings.serving_locally is False

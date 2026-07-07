@@ -3,28 +3,41 @@ from __future__ import annotations
 import os
 import threading
 import uvicorn
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 import db
 import embeddings
+import indexing
 
-app = FastAPI(title="RAG Admin API", version="0.4.0")
+
+@asynccontextmanager
+async def lifespan(app):
+    # The process serving /api/embed must embed with its own model —
+    # remote-first would call back into this same server.
+    embeddings.serving_locally = True
+    db.init_db()
+    indexing.ensure_index_current()
+    yield
+
+
+app = FastAPI(title="RAG Admin API", version="0.4.0", lifespan=lifespan)
 
 
 def search_min_score():
-    """Minimum relevance score (1 / (1 + L2 distance)) for a search hit to count
-    as a real match rather than nearest-neighbor noise. Score scales differ per
-    embedding model, so the cutoff is configurable via RAG_SEARCH_MIN_SCORE:
-    measured ~0.44 separates noise for all-MiniLM-L6-v2 (test model), while
-    paraphrase-multilingual-mpnet-base-v2 (production default) scores relevant
-    matches at 0.29-0.35 and unrelated queries below 0.24 — hence 0.25 default.
+    """Minimum cosine similarity (1 - cosine distance) for a search hit to count
+    as a real match rather than nearest-neighbor noise. Configurable via
+    RAG_SEARCH_MIN_SCORE. Calibrated defaults: relevant matches score well above
+    0.30 for both all-MiniLM-L6-v2 (test model) and
+    paraphrase-multilingual-mpnet-base-v2 (production default), while unrelated
+    queries land below it.
     """
     try:
-        return float(os.environ.get("RAG_SEARCH_MIN_SCORE", "0.25"))
+        return float(os.environ.get("RAG_SEARCH_MIN_SCORE", "0.30"))
     except ValueError:
-        return 0.25
+        return 0.30
 
 app.add_middleware(
     CORSMiddleware,
@@ -135,12 +148,7 @@ def delete_project(project_id: str):
     proj = db.get_project(project_id)
     if not proj:
         raise HTTPException(404, "Project not found")
-    conn = db.get_connection()
-    try:
-        conn.execute("DELETE FROM projects WHERE id = ?", (project_id,))
-        conn.commit()
-    finally:
-        conn.close()
+    db.remove_project(project_id)
     return None
 
 
@@ -164,8 +172,7 @@ def approve_all(project_id: str):
         for eid in entry_ids:
             entry_approved = db.get_entry(eid)
             if entry_approved:
-                vec = embeddings.embed_text(entry_approved["title"] + " " + entry_approved["content"])
-                db.store_embedding(eid, vec)
+                indexing.index_entry(entry_approved)
     return {"ok": True, "approved": len(entry_ids)}
 
 
@@ -236,14 +243,17 @@ def list_entries(
 
 @app.post("/api/entries", status_code=201)
 def create_entry(entry: EntryCreate):
-    entry_id = db.store_knowledge_entry(
-        project_id=entry.project_id,
-        title=entry.title,
-        content=entry.content,
-        category=entry.category,
-        source="manual",
-        tags=entry.tags,
-    )
+    try:
+        entry_id = db.store_knowledge_entry(
+            project_id=entry.project_id,
+            title=entry.title,
+            content=entry.content,
+            category=entry.category,
+            source="manual",
+            tags=entry.tags,
+        )
+    except db.sqlite3.IntegrityError:
+        raise HTTPException(409, "An entry with this title already exists in this project")
     _persist_graph_data(entry.project_id, entry_id, entry.entities, entry.relations)
     return db.get_entry(entry_id)
 
@@ -261,13 +271,16 @@ def update_entry(entry_id: str, update: EntryUpdate):
     entry = db.get_entry(entry_id)
     if not entry:
         raise HTTPException(404, "Entry not found")
-    db.update_entry(
-        entry_id,
-        title=update.title,
-        content=update.content,
-        category=update.category,
-        tags=update.tags,
-    )
+    try:
+        db.update_entry(
+            entry_id,
+            title=update.title,
+            content=update.content,
+            category=update.category,
+            tags=update.tags,
+        )
+    except db.sqlite3.IntegrityError:
+        raise HTTPException(409, "An entry with this title already exists in this project")
     if update.relations is not None:
         conn = db.get_connection()
         try:
@@ -280,8 +293,7 @@ def update_entry(entry_id: str, update: EntryUpdate):
         _persist_graph_data(entry["project_id"], entry_id, update.entities, update.relations)
     entry_new = db.get_entry(entry_id)
     if entry_new["status"] == "indexed":
-        vec = embeddings.embed_text(entry_new["title"] + " " + entry_new["content"])
-        db.store_embedding(entry_id, vec)
+        indexing.index_entry(entry_new)
     return db.get_entry(entry_id)
 
 
@@ -290,7 +302,7 @@ def delete_entry(entry_id: str):
     entry = db.get_entry(entry_id)
     if not entry:
         raise HTTPException(404, "Entry not found")
-    db.delete_embedding(entry_id)
+    indexing.unindex_entry(entry_id)
     db.remove_entry(entry_id)
     return None
 
@@ -301,8 +313,7 @@ def approve_entry(entry_id: str):
     if not entry:
         raise HTTPException(404, "Entry not found")
     db.approve_entries([entry_id])
-    vec = embeddings.embed_text(entry["title"] + " " + entry["content"])
-    db.store_embedding(entry_id, vec)
+    indexing.index_entry(db.get_entry(entry_id))
     return {"ok": True}
 
 
@@ -366,19 +377,16 @@ def search(
             return {"results": [], "graph": {"triples": [], "related_entries": []}}
         return []
     query_vec = embeddings.embed_query(q)
-    results = db.search_entries_by_embedding(
-        query_vec,
-        project_id=project_id,
-        k=top_k,
-        category=category,
-        tags=tags,
+    results = db.hybrid_search(
+        q, query_vec,
+        project_id=project_id, k=top_k, category=category, tags=tags,
+        min_score=search_min_score(),
     )
-    results = [r for r in results if r.get("score", 0) >= search_min_score()]
     if not expand:
         return results
     graph = {"triples": [], "related_entries": []}
     if project_id and results:
-        seed_ids = [r["entry_id"] for r in results]
+        seed_ids = [r["id"] for r in results]
         graph = db.expand_entries_via_graph(project_id, seed_ids, depth=depth, limit=5)
     return {"results": results, "graph": graph}
 
@@ -388,17 +396,49 @@ def list_tags(project_id: str = Query(...)):
     return db.get_all_tags(project_id)
 
 
+# ---- Shared embedding endpoint ----
+
+class EmbedRequest(BaseModel):
+    texts: list[str]
+
+
+@app.post("/api/embed")
+def embed_texts(req: EmbedRequest):
+    return {
+        "model": embeddings.MODEL_NAME,
+        "dim": embeddings.EMBEDDING_DIM,
+        "embeddings": [embeddings.embed_local(t) for t in req.texts],
+    }
+
+
 # ---- Server startup ----
 
 _server_thread = None
 _server_port = None
 
 
+def _port_in_use(port):
+    """True if something is already listening on 127.0.0.1:port."""
+    import socket
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.settimeout(0.5)
+        return s.connect_ex(("127.0.0.1", port)) == 0
+
+
 def start_api_server(port=8000):
-    """Start uvicorn in a daemon thread. Returns the port."""
+    """Start uvicorn in a daemon thread. Returns the port.
+
+    When another process already serves the port (e.g. a second MCP session),
+    this process skips starting uvicorn and keeps serving_locally False so
+    embeddings are fetched from the existing server via /api/embed.
+    """
     global _server_thread, _server_port
     if _server_thread is not None:
         return _server_port
+    if _port_in_use(port):
+        _server_port = port
+        return _server_port
+    embeddings.serving_locally = True
     config = uvicorn.Config(app, host="0.0.0.0", port=port, log_level="warning")
     server = uvicorn.Server(config)
     _server_thread = threading.Thread(target=server.run, daemon=True)
