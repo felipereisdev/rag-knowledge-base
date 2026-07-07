@@ -60,6 +60,17 @@ class TestEnsureIndexCurrent:
         meta = temp_db.get_embedding_meta()
         assert meta == {"model": embeddings.MODEL_NAME, "dim": embeddings.EMBEDDING_DIM}
 
+    def test_first_run_with_existing_entries_reindexes(self, temp_db):
+        import indexing, embeddings
+        entry = _make_entry(temp_db, "Orders over 1000 need approval")
+        # entry was approved but never indexed (pre-meta database state)
+        assert temp_db.get_embedding_meta() == {"model": None, "dim": None}
+        indexing.ensure_index_current()
+        hits = temp_db.search_chunks(
+            embeddings.embed_query("order approval"), project_id="p1", k=5
+        )
+        assert hits and hits[0]["entry_id"] == entry["id"]
+
     def test_model_change_triggers_reindex(self, temp_db):
         import indexing, embeddings
         entry = _make_entry(temp_db, "Orders over 1000 need approval")

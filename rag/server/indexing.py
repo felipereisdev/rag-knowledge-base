@@ -25,21 +25,28 @@ def unindex_entry(entry_id):
 
 
 def ensure_index_current(log=None):
-    """Rebuild the vector index if the embedding model or dimension changed."""
+    """Rebuild the vector index if the embedding model or dimension changed.
+
+    Also covers the first run against a pre-existing database (meta empty but
+    indexed entries present, e.g. right after the legacy-table migration):
+    every indexed entry is (re-)embedded so nothing is left unsearchable.
+    """
     meta = db.get_embedding_meta()
     current = {"model": embeddings.MODEL_NAME, "dim": embeddings.EMBEDDING_DIM}
     if meta == current:
         return
-    if meta["model"] is not None:
-        if log:
-            log(f"Embedding config changed ({meta['model']}/{meta['dim']} -> "
-                f"{current['model']}/{current['dim']}); rebuilding vector index...")
-        db.rebuild_chunk_table()
-        total = 0
-        for project in db.list_projects():
-            for entry in db.get_indexed_entries(project["id"]):
-                index_entry(entry)
-                total += 1
-        if log:
+    if log and meta["model"] is not None:
+        log(f"Embedding config changed ({meta['model']}/{meta['dim']} -> "
+            f"{current['model']}/{current['dim']}); rebuilding vector index...")
+    db.rebuild_chunk_table()
+    total = 0
+    for project in db.list_projects():
+        for entry in db.get_indexed_entries(project["id"]):
+            index_entry(entry)
+            total += 1
+    if log and total > 0:
+        if meta["model"] is not None:
             log(f"Re-embedded {total} entries.")
+        else:
+            log(f"Building vector index for {total} entries.")
     db.set_embedding_meta(current["model"], current["dim"])
