@@ -650,3 +650,26 @@ class TestMigrationFramework:
             assert version == len(db_mod.MIGRATIONS)
         finally:
             conn.close()
+
+
+class TestBatchTags:
+    def test_tags_for_entries_batches(self, temp_db):
+        temp_db.upsert_project("p1", "P1", "/tmp/p1")
+        e1 = temp_db.store_knowledge_entry("p1", "T1", "c", tags=["a", "b"])
+        e2 = temp_db.store_knowledge_entry("p1", "T2", "c", tags=["b"])
+        e3 = temp_db.store_knowledge_entry("p1", "T3", "c")
+        conn = temp_db.get_connection()
+        try:
+            tags_map = temp_db._tags_for_entries(conn, [e1, e2, e3])
+        finally:
+            conn.close()
+        assert tags_map[e1] == ["a", "b"]
+        assert tags_map[e2] == ["b"]
+        assert tags_map[e3] == []
+
+    def test_tags_for_entries_empty_input(self, temp_db):
+        conn = temp_db.get_connection()
+        try:
+            assert temp_db._tags_for_entries(conn, []) == {}
+        finally:
+            conn.close()

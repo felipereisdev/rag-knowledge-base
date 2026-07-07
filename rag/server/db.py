@@ -452,12 +452,11 @@ def list_entries(project_id=None, category=None, tags=None, status=None, limit=5
         params.append(limit)
 
         rows = conn.execute(query, params).fetchall()
-        entries = []
-        for r in rows:
-            entry = dict(r)
-            entry["tags"] = get_tags_for_entry(entry["id"])
+        entries = [dict(r) for r in rows]
+        tags_map = _tags_for_entries(conn, [e["id"] for e in entries])
+        for entry in entries:
+            entry["tags"] = tags_map[entry["id"]]
             entry["metadata"] = json.loads(entry.get("metadata") or "{}")
-            entries.append(entry)
         return entries
     finally:
         conn.close()
@@ -521,6 +520,23 @@ def get_tags_for_entry(entry_id):
         conn.close()
 
 
+def _tags_for_entries(conn, entry_ids):
+    """Fetch tags for many entries in one query. Returns {entry_id: [tag, ...]}."""
+    tags_map = {eid: [] for eid in entry_ids}
+    if not entry_ids:
+        return tags_map
+    placeholders = ",".join("?" for _ in entry_ids)
+    rows = conn.execute(f"""
+        SELECT et.entry_id, t.name FROM tags t
+        JOIN entry_tags et ON et.tag_id = t.id
+        WHERE et.entry_id IN ({placeholders})
+        ORDER BY t.name
+    """, list(entry_ids)).fetchall()
+    for r in rows:
+        tags_map[r["entry_id"]].append(r["name"])
+    return tags_map
+
+
 def get_all_tags(project_id):
     conn = get_connection()
     try:
@@ -551,11 +567,10 @@ def get_pending_entries(project_id=None):
                 WHERE status = 'pending'
                 ORDER BY created_at DESC
             """).fetchall()
-        entries = []
-        for r in rows:
-            entry = dict(r)
-            entry["tags"] = get_tags_for_entry(entry["id"])
-            entries.append(entry)
+        entries = [dict(r) for r in rows]
+        tags_map = _tags_for_entries(conn, [e["id"] for e in entries])
+        for entry in entries:
+            entry["tags"] = tags_map[entry["id"]]
         return entries
     finally:
         conn.close()
@@ -603,11 +618,10 @@ def get_indexed_entries(project_id, limit=5000):
             ORDER BY created_at DESC
             LIMIT ?
         """, (project_id, limit)).fetchall()
-        entries = []
-        for r in rows:
-            entry = dict(r)
-            entry["tags"] = get_tags_for_entry(entry["id"])
-            entries.append(entry)
+        entries = [dict(r) for r in rows]
+        tags_map = _tags_for_entries(conn, [e["id"] for e in entries])
+        for entry in entries:
+            entry["tags"] = tags_map[entry["id"]]
         return entries
     finally:
         conn.close()
@@ -728,12 +742,11 @@ def search_entries_by_embedding(query_embedding, project_id=None, k=10, category
         sql += " END"
         rows = conn.execute(sql, params).fetchall()
         score_map = {n["entry_id"]: round(1.0 / (1.0 + n["distance"]), 4) for n in neighbors}
-        results = []
-        for r in rows:
-            entry = dict(r)
-            entry["tags"] = get_tags_for_entry(entry["entry_id"])
+        results = [dict(r) for r in rows]
+        tags_map = _tags_for_entries(conn, [e["entry_id"] for e in results])
+        for entry in results:
+            entry["tags"] = tags_map[entry["entry_id"]]
             entry["score"] = score_map.get(entry["entry_id"], 0)
-            results.append(entry)
         return results
     finally:
         conn.close()
@@ -979,10 +992,10 @@ def query_entity_graph(project_id, entity_name, depth=1):
                 WHERE ee.entity_id IN ({placeholders}) AND ke.status = 'indexed'
                 ORDER BY ke.created_at DESC
             """, list(visited)).fetchall()
-            for r in entry_rows:
-                e = dict(r)
-                e["tags"] = get_tags_for_entry(e["id"])
-                entries.append(e)
+            entries = [dict(r) for r in entry_rows]
+            tags_map = _tags_for_entries(conn, [e["id"] for e in entries])
+            for e in entries:
+                e["tags"] = tags_map[e["id"]]
 
         return {"entity": entity, "triples": triples, "entries": entries}
     finally:
@@ -1043,10 +1056,10 @@ def expand_entries_via_graph(project_id, seed_entry_ids, depth=1, limit=10):
                 ORDER BY created_at DESC
                 LIMIT ?
             """, list(related_ids) + [limit]).fetchall()
-            for r in entry_rows:
-                e = dict(r)
-                e["tags"] = get_tags_for_entry(e["id"])
-                related_entries.append(e)
+            related_entries = [dict(r) for r in entry_rows]
+            tags_map = _tags_for_entries(conn, [e["id"] for e in related_entries])
+            for e in related_entries:
+                e["tags"] = tags_map[e["id"]]
 
         return {"triples": triples, "related_entries": related_entries}
     finally:
