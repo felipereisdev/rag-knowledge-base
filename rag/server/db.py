@@ -136,7 +136,7 @@ BASE_SCHEMA = """
 """
 
 
-def _create_vector_table(conn):
+def _create_virtual_tables(conn):
     dim = embeddings.EMBEDDING_DIM
     conn.execute(f"""
         CREATE VIRTUAL TABLE IF NOT EXISTS chunk_embeddings USING vec0(
@@ -147,6 +147,12 @@ def _create_vector_table(conn):
         )
     """)
     conn.execute("CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT)")
+    conn.execute("""
+        CREATE VIRTUAL TABLE IF NOT EXISTS entry_fts USING fts5(
+            title, content, tags,
+            entry_id UNINDEXED, project_id UNINDEXED
+        )
+    """)
 
 
 def _migration_0001_add_language_column(conn):
@@ -195,12 +201,33 @@ def _migration_0005_drop_legacy_entry_embeddings(conn):
     conn.execute("DROP TABLE IF EXISTS entry_embeddings")
 
 
+def _migration_0006_create_and_backfill_fts(conn):
+    conn.execute("""
+        CREATE VIRTUAL TABLE IF NOT EXISTS entry_fts USING fts5(
+            title, content, tags,
+            entry_id UNINDEXED, project_id UNINDEXED
+        )
+    """)
+    conn.execute("DELETE FROM entry_fts")
+    conn.execute("""
+        INSERT INTO entry_fts (title, content, tags, entry_id, project_id)
+        SELECT e.title, e.content,
+               COALESCE((SELECT GROUP_CONCAT(t.name, ' ') FROM tags t
+                         JOIN entry_tags et ON et.tag_id = t.id
+                         WHERE et.entry_id = e.id), ''),
+               e.id, e.project_id
+        FROM knowledge_entries e
+        WHERE e.status = 'indexed'
+    """)
+
+
 MIGRATIONS = [
     _migration_0001_add_language_column,
     _migration_0002_project_paths_created_at,
     _migration_0003_backfill_root_paths,
     _migration_0004_purge_orphan_embeddings,
     _migration_0005_drop_legacy_entry_embeddings,
+    _migration_0006_create_and_backfill_fts,
 ]
 
 
@@ -208,7 +235,7 @@ def init_db():
     conn = get_connection()
     try:
         conn.executescript(BASE_SCHEMA)
-        _create_vector_table(conn)
+        _create_virtual_tables(conn)
         conn.commit()
         version = conn.execute("PRAGMA user_version").fetchone()[0]
         for i, migration in enumerate(MIGRATIONS[version:], start=version + 1):
@@ -522,6 +549,7 @@ def remove_entry(entry_id):
     conn = get_connection()
     try:
         _delete_entry_chunks(conn, entry_id)
+        conn.execute("DELETE FROM entry_fts WHERE entry_id = ?", (entry_id,))
         conn.execute("DELETE FROM knowledge_entries WHERE id = ?", (entry_id,))
         conn.commit()
     finally:
@@ -538,6 +566,10 @@ def remove_project(project_id):
         """, (project_id,)).fetchall()
         for r in rows:
             conn.execute("DELETE FROM chunk_embeddings WHERE rowid = ?", (r[0],))
+        conn.execute("""
+            DELETE FROM entry_fts WHERE entry_id IN
+                (SELECT id FROM knowledge_entries WHERE project_id = ?)
+        """, (project_id,))
         conn.execute("DELETE FROM projects WHERE id = ?", (project_id,))
         conn.commit()
     finally:
@@ -828,8 +860,62 @@ def rebuild_chunk_table():
     conn = get_connection()
     try:
         conn.execute("DROP TABLE IF EXISTS chunk_embeddings")
-        _create_vector_table(conn)
+        _create_virtual_tables(conn)
         conn.commit()
+    finally:
+        conn.close()
+
+
+# ---- Full-text (FTS5 / BM25) operations ----
+
+
+def _fts_escape(query):
+    """Quote each token so user text can't inject FTS5 syntax."""
+    tokens = [t for t in query.split() if t]
+    return " ".join('"' + t.replace('"', '""') + '"' for t in tokens)
+
+
+def fts_index_entry(entry):
+    """Insert or replace an entry's row in the FTS index."""
+    conn = get_connection()
+    try:
+        conn.execute("DELETE FROM entry_fts WHERE entry_id = ?", (entry["id"],))
+        conn.execute(
+            "INSERT INTO entry_fts (title, content, tags, entry_id, project_id)"
+            " VALUES (?, ?, ?, ?, ?)",
+            (entry["title"], entry["content"], " ".join(entry.get("tags") or []),
+             entry["id"], entry["project_id"]),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def fts_delete_entry(entry_id):
+    conn = get_connection()
+    try:
+        conn.execute("DELETE FROM entry_fts WHERE entry_id = ?", (entry_id,))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def search_fts(query, project_id=None, k=10):
+    """BM25 search. Returns [{"entry_id", "rank"}], most relevant first."""
+    match = _fts_escape(query)
+    if not match:
+        return []
+    sql = "SELECT entry_id, rank FROM entry_fts WHERE entry_fts MATCH ?"
+    params = [match]
+    if project_id:
+        sql += " AND project_id = ?"
+        params.append(project_id)
+    sql += " ORDER BY rank LIMIT ?"
+    params.append(k)
+    conn = get_connection()
+    try:
+        rows = conn.execute(sql, params).fetchall()
+        return [dict(r) for r in rows]
     finally:
         conn.close()
 

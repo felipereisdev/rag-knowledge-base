@@ -722,3 +722,59 @@ class TestEmbeddingCleanup:
         finally:
             conn.close()
         assert tables == set()  # migration 0005 dropped the legacy table
+
+
+class TestFtsSearch:
+    def _indexed_entry(self, temp_db, title, content, tags=None, project="p1"):
+        temp_db.upsert_project(project, project, f"/tmp/{project}")
+        eid = temp_db.store_knowledge_entry(project, title, content, tags=tags or [])
+        temp_db.approve_entries([eid])
+        entry = temp_db.get_entry(eid)
+        temp_db.fts_index_entry(entry)
+        return eid
+
+    def test_exact_identifier_match(self, temp_db):
+        eid = self._indexed_entry(
+            temp_db, "Timeout config", "PIX_TIMEOUT_MS controls the payment timeout"
+        )
+        hits = temp_db.search_fts("PIX_TIMEOUT_MS", project_id="p1", k=5)
+        assert [h["entry_id"] for h in hits] == [eid]
+
+    def test_project_scoping(self, temp_db):
+        self._indexed_entry(temp_db, "Timeout config", "PIX_TIMEOUT_MS docs", project="other")
+        hits = temp_db.search_fts("PIX_TIMEOUT_MS", project_id="p1", k=5)
+        assert hits == []
+
+    def test_query_with_fts_operators_does_not_crash(self, temp_db):
+        self._indexed_entry(temp_db, "Notes", "some content")
+        assert temp_db.search_fts('AND OR NOT "unbalanced', project_id="p1", k=5) == []
+
+    def test_reindex_replaces_previous_row(self, temp_db):
+        eid = self._indexed_entry(temp_db, "Old title", "old words here")
+        entry = temp_db.get_entry(eid)
+        entry["title"] = "New title"
+        entry["content"] = "completely different"
+        temp_db.fts_index_entry(entry)
+        assert temp_db.search_fts("old words", project_id="p1", k=5) == []
+        hits = temp_db.search_fts("completely different", project_id="p1", k=5)
+        assert [h["entry_id"] for h in hits] == [eid]
+
+    def test_delete_removes_from_fts(self, temp_db):
+        eid = self._indexed_entry(temp_db, "T", "searchable words")
+        temp_db.remove_entry(eid)
+        assert temp_db.search_fts("searchable words", project_id="p1", k=5) == []
+
+    def test_migration_backfills_indexed_entries(self, temp_db):
+        temp_db.upsert_project("p1", "P1", "/tmp/p1")
+        eid = temp_db.store_knowledge_entry("p1", "Backfill me", "unique backfill token")
+        temp_db.approve_entries([eid])
+        conn = temp_db.get_connection()
+        try:
+            conn.execute("DROP TABLE entry_fts")
+            conn.execute("PRAGMA user_version = 5")
+            conn.commit()
+        finally:
+            conn.close()
+        temp_db.init_db()
+        hits = temp_db.search_fts("backfill token", project_id="p1", k=5)
+        assert [h["entry_id"] for h in hits] == [eid]

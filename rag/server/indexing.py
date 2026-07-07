@@ -10,7 +10,7 @@ import embeddings
 
 
 def index_entry(entry):
-    """Make one entry searchable. `entry` needs id, project_id, title, content."""
+    """Make one entry searchable. `entry` needs id, project_id, title, content, tags."""
     chunks = chunking.chunk_text(entry["content"])
     if chunks:
         texts = [f"{entry['title']}\n\n{chunk}" for chunk in chunks]
@@ -18,10 +18,12 @@ def index_entry(entry):
         texts = [entry["title"]]
     vectors = [embeddings.embed_text(t) for t in texts]
     db.store_entry_embeddings(entry["id"], entry["project_id"], vectors)
+    db.fts_index_entry(entry)
 
 
 def unindex_entry(entry_id):
     db.delete_entry_embeddings(entry_id)
+    db.fts_delete_entry(entry_id)
 
 
 def ensure_index_current(log=None):
