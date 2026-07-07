@@ -4,13 +4,24 @@
     "type": "module",
     "scripts": {
         "build": "vite build",
+        "build:extensions": "vite build --config vite.extensions.config.ts",
         "dev": "vite"
     },
     "devDependencies": {
+        "@phosphor-icons/react": "^2",
         "@tailwindcss/vite": "^4.0.0",
+        "@types/node": "^20 || ^22 || ^25",
+        "@types/react": "^18 || ^19",
+        "@types/react-dom": "^18 || ^19",
+        "@vitejs/plugin-react": "^4 || ^5 || ^6",
         "concurrently": "^9.0.1",
         "laravel-vite-plugin": "^3.1",
         "tailwindcss": "^4.0.0",
+        "typescript": "^5 || ^6",
         "vite": "^8.0.0"
+    },
+    "dependencies": {
+        "react": "^18 || ^19",
+        "react-dom": "^18 || ^19"
     }
 }

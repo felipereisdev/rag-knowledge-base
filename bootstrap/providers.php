@@ -3,5 +3,6 @@
 use App\Providers\AppServiceProvider;
 
 return [
-    AppServiceProvider::class,
+    App\Providers\MartisServiceProvider::class,
+AppServiceProvider::class,
 ];
