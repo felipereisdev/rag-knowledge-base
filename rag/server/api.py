@@ -135,12 +135,7 @@ def delete_project(project_id: str):
     proj = db.get_project(project_id)
     if not proj:
         raise HTTPException(404, "Project not found")
-    conn = db.get_connection()
-    try:
-        conn.execute("DELETE FROM projects WHERE id = ?", (project_id,))
-        conn.commit()
-    finally:
-        conn.close()
+    db.remove_project(project_id)
     return None
 
 

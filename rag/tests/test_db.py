@@ -673,3 +673,36 @@ class TestBatchTags:
             assert temp_db._tags_for_entries(conn, []) == {}
         finally:
             conn.close()
+
+
+class TestEmbeddingCleanup:
+    def test_remove_entry_deletes_embedding(self, temp_db):
+        import embeddings
+        temp_db.upsert_project("p1", "P1", "/tmp/p1")
+        eid = temp_db.store_knowledge_entry("p1", "T1", "content")
+        temp_db.store_embedding(eid, embeddings.embed_text("content"))
+        temp_db.remove_entry(eid)
+        assert temp_db.get_embedding(eid) is None
+
+    def test_remove_project_deletes_entry_embeddings(self, temp_db):
+        import embeddings
+        temp_db.upsert_project("p1", "P1", "/tmp/p1")
+        eid = temp_db.store_knowledge_entry("p1", "T1", "content")
+        temp_db.store_embedding(eid, embeddings.embed_text("content"))
+        temp_db.remove_project("p1")
+        assert temp_db.get_project("p1") is None
+        assert temp_db.get_entry(eid) is None
+        assert temp_db.get_embedding(eid) is None
+
+    def test_migration_purges_orphan_embeddings(self, temp_db):
+        import embeddings
+        # Orphan: embedding with no matching knowledge_entries row
+        temp_db.store_embedding("ghost", embeddings.embed_text("ghost"))
+        conn = temp_db.get_connection()
+        try:
+            conn.execute("PRAGMA user_version = 3")
+            conn.commit()
+        finally:
+            conn.close()
+        temp_db.init_db()
+        assert temp_db.get_embedding("ghost") is None

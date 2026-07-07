@@ -176,10 +176,18 @@ def _migration_0003_backfill_root_paths(conn):
         )
 
 
+def _migration_0004_purge_orphan_embeddings(conn):
+    conn.execute("""
+        DELETE FROM entry_embeddings
+        WHERE entry_id NOT IN (SELECT id FROM knowledge_entries)
+    """)
+
+
 MIGRATIONS = [
     _migration_0001_add_language_column,
     _migration_0002_project_paths_created_at,
     _migration_0003_backfill_root_paths,
+    _migration_0004_purge_orphan_embeddings,
 ]
 
 
@@ -500,7 +508,22 @@ def update_entry(entry_id, title=None, content=None, category=None, tags=None):
 def remove_entry(entry_id):
     conn = get_connection()
     try:
+        conn.execute("DELETE FROM entry_embeddings WHERE entry_id = ?", (entry_id,))
         conn.execute("DELETE FROM knowledge_entries WHERE id = ?", (entry_id,))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def remove_project(project_id):
+    """Delete a project, its entries (FK cascade), and their embeddings."""
+    conn = get_connection()
+    try:
+        conn.execute("""
+            DELETE FROM entry_embeddings WHERE entry_id IN
+                (SELECT id FROM knowledge_entries WHERE project_id = ?)
+        """, (project_id,))
+        conn.execute("DELETE FROM projects WHERE id = ?", (project_id,))
         conn.commit()
     finally:
         conn.close()
