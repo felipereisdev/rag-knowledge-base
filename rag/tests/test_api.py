@@ -560,3 +560,33 @@ class TestDuplicateTitleConflict:
         eid2 = r2.json()["id"]
         resp = client.put(f"/api/entries/{eid2}", json={"title": "First"})
         assert resp.status_code == 409
+
+
+class TestStartupLifespan:
+    def test_lifespan_initializes_fresh_db(self, monkeypatch, tmp_path):
+        import db as db_mod
+        monkeypatch.setattr(db_mod, "DB_PATH", str(tmp_path / "fresh.db"))
+        monkeypatch.setattr(db_mod, "DATA_DIR", str(tmp_path))
+        from fastapi.testclient import TestClient
+        import api
+        with TestClient(api.app) as c:
+            resp = c.get("/api/projects")
+        assert resp.status_code == 200
+        assert resp.json() == []
+
+    def test_lifespan_sets_serving_locally(self, client):
+        import embeddings
+        assert embeddings.serving_locally is True
+
+
+class TestStartApiServerPortProbe:
+    def test_skips_uvicorn_when_port_taken(self, temp_db, monkeypatch):
+        import api, embeddings
+        monkeypatch.setattr(api, "_server_thread", None)
+        monkeypatch.setattr(api, "_server_port", None)
+        monkeypatch.setattr(api, "_port_in_use", lambda port: True)
+        monkeypatch.setattr(embeddings, "serving_locally", False)
+        port = api.start_api_server(8000)
+        assert port == 8000
+        assert api._server_thread is None
+        assert embeddings.serving_locally is False

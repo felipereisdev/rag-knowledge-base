@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import threading
 import uvicorn
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -11,7 +12,18 @@ import db
 import embeddings
 import indexing
 
-app = FastAPI(title="RAG Admin API", version="0.4.0")
+
+@asynccontextmanager
+async def lifespan(app):
+    # The process serving /api/embed must embed with its own model —
+    # remote-first would call back into this same server.
+    embeddings.serving_locally = True
+    db.init_db()
+    indexing.ensure_index_current()
+    yield
+
+
+app = FastAPI(title="RAG Admin API", version="0.4.0", lifespan=lifespan)
 
 
 def search_min_score():
@@ -405,12 +417,28 @@ _server_thread = None
 _server_port = None
 
 
+def _port_in_use(port):
+    """True if something is already listening on 127.0.0.1:port."""
+    import socket
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.settimeout(0.5)
+        return s.connect_ex(("127.0.0.1", port)) == 0
+
+
 def start_api_server(port=8000):
-    """Start uvicorn in a daemon thread. Returns the port."""
-    embeddings.serving_locally = True
+    """Start uvicorn in a daemon thread. Returns the port.
+
+    When another process already serves the port (e.g. a second MCP session),
+    this process skips starting uvicorn and keeps serving_locally False so
+    embeddings are fetched from the existing server via /api/embed.
+    """
     global _server_thread, _server_port
     if _server_thread is not None:
         return _server_port
+    if _port_in_use(port):
+        _server_port = port
+        return _server_port
+    embeddings.serving_locally = True
     config = uvicorn.Config(app, host="0.0.0.0", port=port, log_level="warning")
     server = uvicorn.Server(config)
     _server_thread = threading.Thread(target=server.run, daemon=True)

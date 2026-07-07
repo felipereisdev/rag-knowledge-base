@@ -651,6 +651,14 @@ class TestMigrationFramework:
         finally:
             conn.close()
 
+    def test_connection_sets_busy_timeout(self, temp_db):
+        conn = temp_db.get_connection()
+        try:
+            timeout = conn.execute("PRAGMA busy_timeout").fetchone()[0]
+        finally:
+            conn.close()
+        assert timeout == 5000
+
 
 class TestBatchTags:
     def test_tags_for_entries_batches(self, temp_db):
