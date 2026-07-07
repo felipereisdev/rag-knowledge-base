@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import ReactMarkdown from "react-markdown";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -6,9 +7,12 @@ import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { api, type Project, type Entry } from "@/lib/api";
 
 export default function Approvals() {
+  const navigate = useNavigate();
   const [projects, setProjects] = useState<Project[]>([]);
   const [pendingByProject, setPendingByProject] = useState<Record<string, Entry[]>>({});
   const [loading, setLoading] = useState(true);
+  const [actingIds, setActingIds] = useState<Record<string, "approve" | "reject">>({});
+  const [actingProject, setActingProject] = useState<Record<string, "approve" | "reject">>({});
 
   async function load() {
     try {
@@ -30,25 +34,45 @@ export default function Approvals() {
   useEffect(() => { load(); }, []);
 
   async function approveEntry(id: string, projectId: string) {
-    await api.approveEntry(id);
-    const updated = pendingByProject[projectId].filter((e) => e.id !== id);
-    setPendingByProject({ ...pendingByProject, [projectId]: updated });
+    setActingIds((m) => ({ ...m, [id]: "approve" }));
+    try {
+      await api.approveEntry(id);
+      const updated = pendingByProject[projectId].filter((e) => e.id !== id);
+      setPendingByProject({ ...pendingByProject, [projectId]: updated });
+    } finally {
+      setActingIds((m) => { const c = { ...m }; delete c[id]; return c; });
+    }
   }
 
   async function rejectEntry(id: string, projectId: string) {
-    await api.rejectEntry(id);
-    const updated = pendingByProject[projectId].filter((e) => e.id !== id);
-    setPendingByProject({ ...pendingByProject, [projectId]: updated });
+    setActingIds((m) => ({ ...m, [id]: "reject" }));
+    try {
+      await api.rejectEntry(id);
+      const updated = pendingByProject[projectId].filter((e) => e.id !== id);
+      setPendingByProject({ ...pendingByProject, [projectId]: updated });
+    } finally {
+      setActingIds((m) => { const c = { ...m }; delete c[id]; return c; });
+    }
   }
 
   async function approveAll(projectId: string) {
-    await api.approveAll(projectId);
-    setPendingByProject({ ...pendingByProject, [projectId]: [] });
+    setActingProject((m) => ({ ...m, [projectId]: "approve" }));
+    try {
+      await api.approveAll(projectId);
+      setPendingByProject({ ...pendingByProject, [projectId]: [] });
+    } finally {
+      setActingProject((m) => { const c = { ...m }; delete c[projectId]; return c; });
+    }
   }
 
   async function rejectAll(projectId: string) {
-    await api.rejectAll(projectId);
-    setPendingByProject({ ...pendingByProject, [projectId]: [] });
+    setActingProject((m) => ({ ...m, [projectId]: "reject" }));
+    try {
+      await api.rejectAll(projectId);
+      setPendingByProject({ ...pendingByProject, [projectId]: [] });
+    } finally {
+      setActingProject((m) => { const c = { ...m }; delete c[projectId]; return c; });
+    }
   }
 
   if (loading) return <div className="p-8 text-muted-foreground">Loading...</div>;
@@ -68,8 +92,12 @@ export default function Approvals() {
             <div className="flex items-center justify-between">
               <CardTitle>{p.name}</CardTitle>
               <div className="flex gap-2">
-                <Button size="sm" onClick={() => approveAll(p.id)}>Approve All</Button>
-                <Button size="sm" variant="destructive" onClick={() => rejectAll(p.id)}>Reject All</Button>
+                <Button size="sm" onClick={() => approveAll(p.id)} disabled={!!actingProject[p.id]}>
+                  {actingProject[p.id] === "approve" ? "Approving..." : "Approve All"}
+                </Button>
+                <Button size="sm" variant="destructive" onClick={() => rejectAll(p.id)} disabled={!!actingProject[p.id]}>
+                  {actingProject[p.id] === "reject" ? "Rejecting..." : "Reject All"}
+                </Button>
               </div>
             </div>
           </CardHeader>
@@ -77,7 +105,12 @@ export default function Approvals() {
             {pendingByProject[p.id].map((e) => (
               <div key={e.id} className="border rounded-md p-3 space-y-2">
                 <div className="flex items-center justify-between">
-                  <span className="font-medium">{e.title}</span>
+                  <button
+                    className="font-medium text-left hover:underline cursor-pointer"
+                    onClick={() => navigate(`/entries/${e.id}`)}
+                  >
+                    {e.title}
+                  </button>
                   <Badge variant="secondary">{e.category}</Badge>
                 </div>
                 {e.tags.length > 0 && (
@@ -89,8 +122,12 @@ export default function Approvals() {
                   <ReactMarkdown>{e.content.slice(0, 300) + (e.content.length > 300 ? "..." : "")}</ReactMarkdown>
                 </div>
                 <div className="flex gap-2">
-                  <Button size="sm" onClick={() => approveEntry(e.id, p.id)}>Approve</Button>
-                  <Button size="sm" variant="destructive" onClick={() => rejectEntry(e.id, p.id)}>Reject</Button>
+                  <Button size="sm" onClick={() => approveEntry(e.id, p.id)} disabled={!!actingIds[e.id]}>
+                    {actingIds[e.id] === "approve" ? "Approving..." : "Approve"}
+                  </Button>
+                  <Button size="sm" variant="destructive" onClick={() => rejectEntry(e.id, p.id)} disabled={!!actingIds[e.id]}>
+                    {actingIds[e.id] === "reject" ? "Rejecting..." : "Reject"}
+                  </Button>
                 </div>
               </div>
             ))}

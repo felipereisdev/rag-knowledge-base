@@ -41,7 +41,8 @@ export interface SearchResult {
 export interface ProjectCreate {
   id: string;
   name: string;
-  root_path: string;
+  root_path?: string;
+  paths?: string[];
   description?: string;
   language?: string;
 }

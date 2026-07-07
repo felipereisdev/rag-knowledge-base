@@ -126,7 +126,7 @@ TOOLS = [
                 },
                 "content": {
                     "type": "string",
-                    "description": "The full content/body of the knowledge entry."
+                    "description": "The full content/body of the knowledge entry, formatted as Markdown (use ## headings, - lists, ``` code blocks, **bold**, etc.)."
                 },
                 "category": {
                     "type": "string",
@@ -403,6 +403,7 @@ def _store_knowledge(args):
     lang = project.get("language", "en") if project else "en"
 
     stats = db.get_project_stats(pid)
+
     return {
         "content": [{
             "type": "text",
@@ -550,9 +551,11 @@ def _status(args):
     for e in entries:
         cat_counts[e["category"]] = cat_counts.get(e["category"], 0) + 1
 
+    paths = project.get("paths") or []
+    root_display = paths[0] if paths else project.get("root_path", "(none)")
     lines = [
         f"Project: {project['name']} ({project['id']})",
-        f"  Root: {project['root_path']}",
+        f"  Root: {root_display}",
         f"  Description: {project.get('description') or '(none)'}",
         f"  Language: {project.get('language', 'en')}\n",
         f"  Total: {stats['total']} | Indexed: {stats['indexed']} | Pending: {stats['pending']} | Rejected: {stats['rejected']}",
@@ -577,8 +580,9 @@ def _list_projects(args):
     lines = ["Projects in Knowledge Base:\n"]
     for p in projects:
         lines.append(f"  {p['name']} ({p['id']})")
-        for path in p.get("paths", [p["root_path"]]):
-            lines.append(f"    Path: {path}")
+        for path in p.get("paths") or [p.get("root_path")] or []:
+            if path:
+                lines.append(f"    Path: {path}")
         lines.append(f"    Language: {p.get('language', 'en')}")
         lines.append(f"    Indexed: {p['indexed_count']} | Pending: {p['pending_count']}\n")
 

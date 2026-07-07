@@ -24,7 +24,8 @@ app.add_middleware(
 class ProjectCreate(BaseModel):
     id: str
     name: str
-    root_path: str
+    root_path: str | None = None
+    paths: list[str] | None = None
     description: str = ""
     project_type: str = ""
     language: str = "en"
@@ -64,9 +65,13 @@ def list_projects():
 
 @app.post("/api/projects", status_code=201)
 def create_project(proj: ProjectCreate):
+    root = proj.root_path or (proj.paths[0] if proj.paths else None)
+    if not root:
+        raise HTTPException(400, "root_path or paths is required")
     db.upsert_project(
-        proj.id, proj.name, proj.root_path,
+        proj.id, proj.name, root,
         proj.description, proj.project_type, proj.language,
+        paths=proj.paths,
     )
     return db.get_project(proj.id)
 

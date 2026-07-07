@@ -112,23 +112,55 @@ def init_db():
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
                 path TEXT NOT NULL,
+                created_at REAL NOT NULL DEFAULT 0,
                 UNIQUE(project_id, path)
             )
         """)
 
-        # Migrate existing root_path values to project_paths
+        # Migration: add created_at column if missing (for existing DBs)
+        pp_cols = [r[1] for r in conn.execute("PRAGMA table_info(project_paths)").fetchall()]
+        if "created_at" not in pp_cols:
+            conn.execute("ALTER TABLE project_paths ADD COLUMN created_at REAL NOT NULL DEFAULT 0")
+            # Backfill: order existing rows by id so root_path (migrated earlier) stays first
+            conn.execute("""
+                UPDATE project_paths SET created_at = (
+                    SELECT COALESCE(MIN(pp2.id), 0) FROM project_paths pp2
+                    WHERE pp2.project_id = project_paths.project_id
+                ) * 0.001 + id * 0.001
+            """)
+            # Ensure the row matching projects.root_path gets the smallest created_at
+            for p in conn.execute("SELECT id, root_path FROM projects").fetchall():
+                conn.execute("""
+                    UPDATE project_paths SET created_at = -1
+                    WHERE project_id = ? AND path = ?
+                """, (p["id"], p["root_path"]))
+            conn.commit()
+
+        # Migrate existing root_path values to project_paths (first by created_at)
         projects = conn.execute("SELECT id, root_path FROM projects").fetchall()
         for p in projects:
             conn.execute(
-                "INSERT OR IGNORE INTO project_paths (project_id, path) VALUES (?, ?)",
-                (p["id"], p["root_path"]),
+                "INSERT OR IGNORE INTO project_paths (project_id, path, created_at) VALUES (?, ?, ?)",
+                (p["id"], p["root_path"], 0),
             )
         conn.commit()
     finally:
         conn.close()
 
 
-def upsert_project(project_id, name, root_path, description="", project_type="", language=""):
+def upsert_project(project_id, name, root_path=None, description="", project_type="", language="", paths=None):
+    """Create or update a project.
+
+    The "root" path is the one with the smallest created_at in project_paths.
+    `root_path` is kept for backwards compatibility; when provided, it is inserted
+    with created_at=0 so it becomes the primary path. `paths` (if given) is an
+    ordered list of additional paths appended after the root.
+    """
+    if root_path is None and paths:
+        root_path = paths[0]
+    if root_path is None:
+        raise ValueError("upsert_project requires at least one path")
+
     conn = get_connection()
     try:
         now = time.time()
@@ -156,10 +188,20 @@ def upsert_project(project_id, name, root_path, description="", project_type="",
                     updated_at=excluded.updated_at
             """, (project_id, name, root_path, description, project_type, now, now))
         conn.commit()
+        # Ensure root_path is present as the primary path (created_at=0, smallest)
         conn.execute(
-            "INSERT OR IGNORE INTO project_paths (project_id, path) VALUES (?, ?)",
-            (project_id, os.path.abspath(root_path)),
+            "INSERT OR IGNORE INTO project_paths (project_id, path, created_at) VALUES (?, ?, ?)",
+            (project_id, os.path.abspath(root_path), 0),
         )
+        # Append additional paths in order
+        if paths:
+            for i, p in enumerate(paths):
+                if os.path.abspath(p) == os.path.abspath(root_path):
+                    continue
+                conn.execute(
+                    "INSERT OR IGNORE INTO project_paths (project_id, path, created_at) VALUES (?, ?, ?)",
+                    (project_id, os.path.abspath(p), now + i + 1),
+                )
         conn.commit()
     finally:
         conn.close()
@@ -169,7 +211,14 @@ def get_project(project_id):
     conn = get_connection()
     try:
         row = conn.execute("SELECT * FROM projects WHERE id = ?", (project_id,)).fetchone()
-        return dict(row) if row else None
+        if not row:
+            return None
+        p = dict(row)
+        # Derive root_path from the primary path (first by created_at) for consistency
+        paths = list_project_paths(project_id)
+        if paths:
+            p["root_path"] = paths[0]
+        return p
     finally:
         conn.close()
 
@@ -189,13 +238,14 @@ def get_project_by_path(path):
 
 
 def add_project_path(project_id, path):
-    """Associate an additional path with a project."""
+    """Associate an additional path with a project (appended after existing ones)."""
     path = os.path.abspath(path)
     conn = get_connection()
     try:
+        now = time.time()
         conn.execute(
-            "INSERT OR IGNORE INTO project_paths (project_id, path) VALUES (?, ?)",
-            (project_id, path),
+            "INSERT OR IGNORE INTO project_paths (project_id, path, created_at) VALUES (?, ?, ?)",
+            (project_id, path, now),
         )
         conn.commit()
     finally:
@@ -223,11 +273,11 @@ def remove_project_path(project_id, path):
 
 
 def list_project_paths(project_id):
-    """List all paths for a project."""
+    """List all paths for a project, ordered by creation (first = root/primary)."""
     conn = get_connection()
     try:
         rows = conn.execute(
-            "SELECT path FROM project_paths WHERE project_id = ? ORDER BY path",
+            "SELECT path FROM project_paths WHERE project_id = ? ORDER BY created_at ASC, id ASC",
             (project_id,),
         ).fetchall()
         return [r["path"] for r in rows]

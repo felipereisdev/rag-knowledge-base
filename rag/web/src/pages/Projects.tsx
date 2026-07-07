@@ -16,8 +16,8 @@ export default function Projects() {
   const [editProject, setEditProject] = useState<Project | null>(null);
   const [deleteProject, setDeleteProject] = useState<Project | null>(null);
 
-  const [form, setForm] = useState({ id: "", name: "", root_path: "", description: "", language: "en" });
-  const [additionalPaths, setAdditionalPaths] = useState<string[]>([]);
+  const [form, setForm] = useState({ id: "", name: "", description: "", language: "en" });
+  const [paths, setPaths] = useState<string[]>([]);
   const [newPath, setNewPath] = useState("");
 
   async function load() {
@@ -31,11 +31,19 @@ export default function Projects() {
   useEffect(() => { load(); }, []);
 
   async function handleCreate() {
-    await api.createProject(form);
+    if (paths.length === 0) {
+      alert("At least one path is required");
+      return;
+    }
+    await api.createProject({
+      id: form.id,
+      name: form.name,
+      paths,
+      description: form.description,
+      language: form.language,
+    });
+    resetForm();
     setShowCreate(false);
-    setForm({ id: "", name: "", root_path: "", description: "", language: "en" });
-    setAdditionalPaths([]);
-    setNewPath("");
     await load();
   }
 
@@ -57,25 +65,45 @@ export default function Projects() {
     await load();
   }
 
+  function resetForm() {
+    setForm({ id: "", name: "", description: "", language: "en" });
+    setPaths([]);
+    setNewPath("");
+  }
+
   function openEdit(p: Project) {
     setEditProject(p);
-    setForm({ id: p.id, name: p.name, root_path: p.root_path, description: p.description, language: p.language });
-    setAdditionalPaths(p.paths ?? []);
+    setForm({ id: p.id, name: p.name, description: p.description, language: p.language });
+    setPaths(p.paths ?? (p.root_path ? [p.root_path] : []));
     setNewPath("");
   }
 
   async function addPath() {
-    if (!newPath.trim() || !editProject) return;
-    await api.addProjectPath(editProject.id, newPath.trim());
-    setAdditionalPaths([...additionalPaths, newPath.trim()]);
+    if (!newPath.trim()) return;
+    const p = newPath.trim();
+    if (paths.includes(p)) return;
+    if (editProject) {
+      try {
+        await api.addProjectPath(editProject.id, p);
+        setPaths([...paths, p]);
+      } catch (e) { console.error(e); }
+    } else {
+      setPaths([...paths, p]);
+    }
     setNewPath("");
   }
 
   async function removePath(path: string) {
-    if (!editProject) return;
-    if (path === editProject.root_path) return;
-    await api.removeProjectPath(editProject.id, path);
-    setAdditionalPaths(additionalPaths.filter(p => p !== path));
+    if (editProject) {
+      // primary path (first) cannot be removed
+      if (path === paths[0]) return;
+      try {
+        await api.removeProjectPath(editProject.id, path);
+        setPaths(paths.filter((p) => p !== path));
+      } catch (e) { console.error(e); }
+    } else {
+      setPaths(paths.filter((p) => p !== path));
+    }
   }
 
   if (loading) return <div className="p-8 text-muted-foreground">Loading...</div>;
@@ -84,7 +112,7 @@ export default function Projects() {
     <div className="p-8 space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold">Projects</h1>
-        <Button onClick={() => { setForm({ id: "", name: "", root_path: "", description: "", language: "en" }); setAdditionalPaths([]); setNewPath(""); setShowCreate(true); }}>
+        <Button onClick={() => { resetForm(); setShowCreate(true); }}>
           New Project
         </Button>
       </div>
@@ -105,10 +133,14 @@ export default function Projects() {
             <TableRow key={p.id}>
               <TableCell className="font-medium">{p.name}</TableCell>
               <TableCell className="text-muted-foreground text-xs">
-                {p.root_path}
-                {(p.paths ?? []).length > 1 && (
-                  <Badge variant="secondary" className="ml-1">+{(p.paths ?? []).length - 1}</Badge>
-                )}
+                {(p.paths ?? []).length > 0 ? (
+                  <>
+                    {p.paths![0]}
+                    {(p.paths!.length > 1) && (
+                      <Badge variant="secondary" className="ml-1">+{p.paths!.length - 1}</Badge>
+                    )}
+                  </>
+                ) : p.root_path}
               </TableCell>
               <TableCell><Badge variant="outline">{p.language}</Badge></TableCell>
               <TableCell>{p.indexed_count}</TableCell>
@@ -138,12 +170,6 @@ export default function Projects() {
               <Label>Name</Label>
               <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required />
             </div>
-            {!editProject && (
-              <div className="space-y-2">
-                <Label>Root Path</Label>
-                <Input value={form.root_path} onChange={(e) => setForm({ ...form, root_path: e.target.value })} required />
-              </div>
-            )}
             <div className="space-y-2">
               <Label>Description</Label>
               <Input value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
@@ -157,28 +183,28 @@ export default function Projects() {
                 <option value="fr">Français</option>
               </Select>
             </div>
-            {editProject && (
-              <div className="space-y-2">
-                <Label>Additional Paths</Label>
-                {additionalPaths.map((path) => (
-                  <div key={path} className="flex items-center gap-2">
-                    <span className="text-sm text-muted-foreground flex-1">{path}</span>
-                    {editProject && path !== editProject.root_path && (
-                      <Button size="sm" variant="ghost" className="text-destructive" onClick={() => removePath(path)}>Remove</Button>
-                    )}
-                  </div>
-                ))}
-                <div className="flex gap-2">
-                  <Input
-                    value={newPath}
-                    onChange={(e) => setNewPath(e.target.value)}
-                    placeholder="/path/to/another/repo"
-                    onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addPath(); } }}
-                  />
-                  <Button type="button" size="sm" onClick={addPath}>Add</Button>
+            <div className="space-y-2">
+              <Label>Paths</Label>
+              {paths.map((path, idx) => (
+                <div key={path} className="flex items-center gap-2">
+                  <span className="text-sm text-muted-foreground flex-1">{path}</span>
+                  {idx === 0 ? (
+                    <Badge variant="outline">primary</Badge>
+                  ) : (
+                    <Button size="sm" variant="ghost" className="text-destructive" onClick={() => removePath(path)}>Remove</Button>
+                  )}
                 </div>
+              ))}
+              <div className="flex gap-2">
+                <Input
+                  value={newPath}
+                  onChange={(e) => setNewPath(e.target.value)}
+                  placeholder={paths.length === 0 ? "/path/to/project (required)" : "/path/to/another/repo"}
+                  onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addPath(); } }}
+                />
+                <Button type="button" size="sm" onClick={addPath}>Add</Button>
               </div>
-            )}
+            </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => { setShowCreate(false); setEditProject(null); }}>Cancel</Button>
