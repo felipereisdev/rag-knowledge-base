@@ -34,6 +34,27 @@ it becomes searchable.
 # 5. Ask questions: "what are the business rules?"
 ```
 
+## Configuration
+
+Environment variables (all optional):
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `RAG_EMBEDDING_MODEL` | `paraphrase-multilingual-mpnet-base-v2` | sentence-transformers model. Changing it triggers an automatic re-index on next server start. |
+| `RAG_EMBEDDING_DIM` | `768` | Embedding dimension (must match the model). |
+| `RAG_SEARCH_MIN_SCORE` | `0.30` | Minimum cosine similarity for a vector hit to count. Exact keyword (FTS) matches are not gated by this. |
+| `RAG_EMBED_URL` | `http://127.0.0.1:8000/api/embed` | Shared embedding endpoint; extra MCP sessions use it instead of loading their own model copy. |
+| `RAG_EMBED_REMOTE` | `1` | Set `0` to force in-process embedding. |
+
+### How search works
+
+`rag_search` runs hybrid retrieval: semantic KNN over per-chunk embeddings
+(long entries are chunked, so content beyond the model window is still
+found) fused with BM25 keyword search via Reciprocal Rank Fusion — exact
+identifiers match even when embeddings miss them. Results are scoped to the
+project at the index level and optionally expanded through the knowledge
+graph.
+
 ---
 
 ## Docker
@@ -225,7 +246,7 @@ to store, search, and import knowledge.
 | `convention` | Coding/style conventions |
 | `constraint` | Technical/business constraints |
 
-## Configuration
+## Database Management
 
 Database: `~/.rag/knowledge.db`. All data stays local.
 
