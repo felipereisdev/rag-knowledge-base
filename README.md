@@ -1,276 +1,58 @@
-# Knowledge Base RAG
+<p align="center"><a href="https://laravel.com" target="_blank"><img src="https://raw.githubusercontent.com/laravel/art/master/logo-lockup/5%20SVG/2%20CMYK/1%20Full%20Color/laravel-logolockup-cmyk-red.svg" width="400" alt="Laravel Logo"></a></p>
 
-A per-project knowledge base RAG (Retrieval-Augmented Generation) for AI coding
-assistants, with an **approval workflow** so you control what goes into the knowledge base.
+<p align="center">
+<a href="https://github.com/laravel/framework/actions"><img src="https://github.com/laravel/framework/workflows/tests/badge.svg" alt="Build Status"></a>
+<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/dt/laravel/framework" alt="Total Downloads"></a>
+<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/v/laravel/framework" alt="Latest Stable Version"></a>
+<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
+</p>
 
-**Supported assistants:**
-- [Codex](#codex) (OpenAI)
-- [Claude](#claude) (Claude Code, Anthropic)
-- [Cursor](#cursor)
-- [OpenCode](#opencode)
-- [Docker](#docker)
+## About Laravel
 
-## Why?
+Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:
 
-AI coding assistants forget context between conversations and don't learn from past
-discussions. This plugin lets you build a persistent, searchable knowledge base:
+- [Simple, fast routing engine](https://laravel.com/docs/routing).
+- [Powerful dependency injection container](https://laravel.com/docs/container).
+- Multiple back-ends for [session](https://laravel.com/docs/session) and [cache](https://laravel.com/docs/cache) storage.
+- Expressive, intuitive [database ORM](https://laravel.com/docs/eloquent).
+- Database agnostic [schema migrations](https://laravel.com/docs/migrations).
+- [Robust background job processing](https://laravel.com/docs/queues).
+- [Real-time event broadcasting](https://laravel.com/docs/broadcasting).
 
-- **Business rules** — "orders over €1000 need manager approval"
-- **Design decisions** — "we chose Postgres over MongoDB because..."
-- **Architecture** — "auth uses JWT with refresh tokens in Redis"
-- **Documentation** — imported from markdown/text files
-- **Conventions** — "we use camelCase for API fields"
+Laravel is accessible, powerful, and provides tools required for large, robust applications.
 
-Everything goes through an **approval workflow** — you review what gets indexed before
-it becomes searchable.
+## Learning Laravel
 
-## Quick start
+Laravel has the most extensive and thorough [documentation](https://laravel.com/docs) and video tutorial library of all modern web application frameworks, making it a breeze to get started with the framework.
 
-```bash
-# 1. Install the plugin for your assistant (see below)
-# 2. Open a new conversation in your project
-# 3. Say: "remember that orders over 1000 need manager approval"
-# 4. Approve the entry in the web UI
-# 5. Ask questions: "what are the business rules?"
-```
+In addition, [Laracasts](https://laracasts.com) contains thousands of video tutorials on a range of topics including Laravel, modern PHP, unit testing, and JavaScript. Boost your skills by digging into our comprehensive video library.
 
-## Configuration
+You can also watch bite-sized lessons with real-world projects on [Laravel Learn](https://laravel.com/learn), where you will be guided through building a Laravel application from scratch while learning PHP fundamentals.
 
-Environment variables (all optional):
+## Agentic Development
 
-| Variable | Default | Meaning |
-|---|---|---|
-| `RAG_EMBEDDING_MODEL` | `paraphrase-multilingual-mpnet-base-v2` | sentence-transformers model. Changing it triggers an automatic re-index on next server start. |
-| `RAG_EMBEDDING_DIM` | `768` | Embedding dimension (must match the model). |
-| `RAG_SEARCH_MIN_SCORE` | `0.30` | Minimum cosine similarity for a vector hit to count. Exact keyword (FTS) matches are not gated by this. |
-| `RAG_EMBED_URL` | `http://127.0.0.1:8000/api/embed` | Shared embedding endpoint; extra MCP sessions use it instead of loading their own model copy. |
-| `RAG_EMBED_REMOTE` | `1` | Set `0` to force in-process embedding. |
-
-### How search works
-
-`rag_search` runs hybrid retrieval: semantic KNN over per-chunk embeddings
-(long entries are chunked, so content beyond the model window is still
-found) fused with BM25 keyword search via Reciprocal Rank Fusion — exact
-identifiers match even when embeddings miss them. Results are scoped to the
-project at the index level and optionally expanded through the knowledge
-graph.
-
----
-
-## Docker
-
-Run the admin panel (React SPA + FastAPI API) in two containers.
-
-### Installation
+Laravel's predictable structure and conventions make it ideal for AI coding agents like Claude Code, Cursor, and GitHub Copilot. Install [Laravel Boost](https://laravel.com/docs/ai) to supercharge your AI workflow:
 
 ```bash
-git clone https://github.com/felipereisdev/rag-knowledge-base.git ~/rag-knowledge-base
-cd ~/rag-knowledge-base
-docker compose up -d
+composer require laravel/boost --dev
+
+php artisan boost:install
 ```
 
-- **Admin panel:** `http://127.0.0.1:8765`
-- **API:** `http://127.0.0.1:8000/api`
+Boost provides your agent 15+ tools and skills that help agents build Laravel applications while following best practices.
 
-The SQLite database is persisted via a volume mount at `~/.rag/knowledge.db`.
+## Contributing
 
-### Usage
+Thank you for considering contributing to the Laravel framework! The contribution guide can be found in the [Laravel documentation](https://laravel.com/docs/contributions).
 
-```bash
-docker compose up -d      # start in background
-docker compose logs -f     # view logs
-docker compose down        # stop
-```
+## Code of Conduct
 
-To use the MCP server from an assistant, configure it to run inside the API container:
+In order to ensure that the Laravel community is welcoming to all, please review and abide by the [Code of Conduct](https://laravel.com/docs/contributions#code-of-conduct).
 
-```json
-{
-  "mcpServers": {
-    "rag": {
-      "command": "docker",
-      "args": ["exec", "-i", "rag-api", "python3", "server/main.py"]
-    }
-  }
-}
-```
+## Security Vulnerabilities
 
----
-
-## Codex
-
-### Installation
-
-```bash
-git clone https://github.com/felipereisdev/rag-knowledge-base.git ~/rag-knowledge-base
-codex plugin add rag@personal
-```
-
-### Usage
-
-Open a **new thread** after installation:
-
-```
-rag_store_knowledge     → Store a knowledge entry (title, content, category, tags)
-rag_import_document     → Import a .md or .txt file
-rag_search              → Query the knowledge base
-rag_list_knowledge      → List entries with filters
-rag_remove_knowledge    → Remove an entry
-rag_open_approval_ui    → Review and approve pending entries
-rag_status              → Show knowledge base stats
-rag_list_projects       → List all projects
-```
-
----
-
-## Claude (Claude Code)
-
-### Installation
-
-```bash
-git clone https://github.com/felipereisdev/rag-knowledge-base.git ~/rag-knowledge-base
-pip3 install scikit-learn  # optional, for better search
-~/rag-knowledge-base/install.sh ~/projects/my-project
-```
-
-### Usage
-
-```bash
-# Store knowledge
-python3 ~/rag-knowledge-base/rag/scripts/store.py \
-  --project my-project \
-  --title "Order approval rule" \
-  --content "Orders over 1000 need manager approval" \
-  --category business-rule \
-  --tags orders approval
-
-# Import a document
-python3 ~/rag-knowledge-base/rag/scripts/import.py \
-  --file docs/rules.md \
-  --project my-project \
-  --init
-
-# Search
-python3 ~/rag-knowledge-base/rag/scripts/search.py \
-  --query "order approval" \
-  --project my-project
-
-# Start approval UI
-python3 ~/rag-knowledge-base/rag/server/main.py
-```
-
----
-
-## Cursor
-
-Add to `.cursorrules`:
-
-```markdown
-You have access to a knowledge base at ~/.rag/knowledge.db.
-Before answering questions about business rules or architecture, search:
-  python3 ~/rag-knowledge-base/rag/scripts/search.py --query "<question>" --project <project-id>
-
-To store knowledge:
-  python3 ~/rag-knowledge-base/rag/scripts/store.py --project <project-id> --title "<title>" --content "<content>" --category <category>
-
-To import a document:
-  python3 ~/rag-knowledge-base/rag/scripts/import.py --file <path> --project <project-id> --init
-
-Approval UI: http://127.0.0.1:8765
-```
-
----
-
-## OpenCode
-
-The install script adds instructions to `AGENTS.md`:
-
-```markdown
-## Knowledge Base RAG
-
-This project has a knowledge base. Use the tools in ~/rag-knowledge-base/rag/
-to store, search, and import knowledge.
-
-- Start server: `python3 ~/rag-knowledge-base/rag/server/main.py`
-- Search: `python3 ~/rag-knowledge-base/rag/scripts/search.py`
-- Store: `python3 ~/rag-knowledge-base/rag/scripts/store.py`
-- Import: `python3 ~/rag-knowledge-base/rag/scripts/import.py`
-- Approval UI: http://127.0.0.1:8765
-```
-
----
-
-## Architecture
-
-```
-~/.rag/knowledge.db          ← SQLite database (shared by all assistants)
-~/rag-knowledge-base/
-├── Dockerfile.api            ← FastAPI container (API + MCP server)
-├── Dockerfile.web            ← nginx + React build container
-├── nginx.conf                ← nginx config (SPA + API proxy)
-├── docker-compose.yml        ← Container orchestration
-├── rag/
-│   ├── requirements.txt      ← Python dependencies
-│   ├── .codex-plugin/
-│   │   └── plugin.json       ← Codex plugin manifest
-│   ├── .mcp.json             ← MCP server config
-│   ├── server/
-│   │   ├── main.py           ← MCP server (JSON-RPC over stdio)
-│   │   ├── api.py            ← FastAPI REST API for admin panel
-│   │   ├── db.py             ← SQLite layer (entries, tags, projects)
-│   │   ├── search_engine.py  ← TF-IDF search over knowledge entries
-│   │   └── doc_import.py     ← Markdown/text import parser
-│   ├── web/                   ← React admin panel
-│   │   ├── src/
-│   │   │   ├── pages/        ← Dashboard, Projects, Entries, Approvals, Search
-│   │   │   ├── components/   ← Layout, EntryForm, shadcn/ui components
-│   │   │   └── lib/api.ts    ← API client
-│   │   └── package.json
-│   ├── scripts/              ← CLI scripts for non-Codex assistants
-│   │   ├── store.py
-│   │   ├── import.py
-│   │   └── search.py
-│   ├── skills/SKILL.md       ← Codex skill instructions
-│   └── README.md
-```
-
-## Categories
-
-| Category | Use for |
-|---|---|
-| `business-rule` | Business logic rules and policies |
-| `design-decision` | Why something was built a certain way |
-| `architecture` | System architecture, components, data flow |
-| `documentation` | Imported documentation and notes |
-| `insight` | General useful knowledge |
-| `convention` | Coding/style conventions |
-| `constraint` | Technical/business constraints |
-
-## Database Management
-
-Database: `~/.rag/knowledge.db`. All data stays local.
-
-Reset a project:
-```bash
-sqlite3 ~/.rag/knowledge.db "DELETE FROM knowledge_entries WHERE project_id = 'my-project';"
-sqlite3 ~/.rag/knowledge.db "DELETE FROM tags WHERE project_id = 'my-project';"
-```
-
-Full reset:
-```bash
-rm -rf ~/.rag/
-```
-
-## Development
-
-```bash
-# Run tests
-cd ~/rag-knowledge-base/rag && python3 -m pytest tests/ -v
-
-# Test the MCP server
-cd ~/rag-knowledge-base/rag && python3 server/main.py
-```
+If you discover a security vulnerability within Laravel, please send an e-mail to Taylor Otwell via [taylor@laravel.com](mailto:taylor@laravel.com). All security vulnerabilities will be promptly addressed.
 
 ## License
 
-MIT
+The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
