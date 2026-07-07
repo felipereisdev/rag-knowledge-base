@@ -5,10 +5,8 @@ Implements the Model Context Protocol (JSON-RPC 2.0 over stdio) for Codex.
 Provides tools for storing and searching knowledge entries with approval workflow.
 """
 
-import json
 import os
 import sys
-import traceback
 import re
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -18,7 +16,9 @@ import embeddings
 import doc_import
 import api
 
-MCP_VERSION = "2024-11-05"
+from mcp.server.fastmcp import FastMCP
+from api import EntityIn, RelationIn
+
 SERVER_NAME = "rag"
 SERVER_VERSION = "0.3.0"
 
@@ -26,36 +26,6 @@ SERVER_VERSION = "0.3.0"
 def log(msg):
     sys.stderr.write(f"[rag] {msg}\n")
     sys.stderr.flush()
-
-
-# ---------------------------------------------------------------------------
-# MCP Protocol helpers
-# ---------------------------------------------------------------------------
-
-def send_message(msg):
-    sys.stdout.write(json.dumps(msg) + "\n")
-    sys.stdout.flush()
-
-
-def read_message():
-    line = sys.stdin.readline()
-    if not line:
-        return None
-    line = line.strip()
-    if not line:
-        return None
-    try:
-        return json.loads(line)
-    except json.JSONDecodeError:
-        return None
-
-
-def send_result(msg_id, result):
-    send_message({"jsonrpc": "2.0", "id": msg_id, "result": result})
-
-
-def send_error(msg_id, code, message):
-    send_message({"jsonrpc": "2.0", "id": msg_id, "error": {"code": code, "message": message}})
 
 
 # ---------------------------------------------------------------------------
@@ -133,367 +103,185 @@ def _valid_graph_items(items, required_keys):
 
 
 # ---------------------------------------------------------------------------
-# Tool definitions
+# MCP tool registration (FastMCP)
 # ---------------------------------------------------------------------------
 
-TOOLS = [
-    {
-        "name": "rag_store_knowledge",
-        "description": (
-            "Store a knowledge entry in the RAG knowledge base. Use this to save "
-            "business rules, design decisions, architecture notes, or any insight "
-            "that would be useful for future conversations about this project.\n\n"
-            "Examples of when to use this:\n"
-            "- The user explains a business rule: 'orders over 1000 require manager approval'\n"
-            "- You discover a design pattern: 'the auth system uses JWT with refresh tokens'\n"
-            "- The user makes a decision: 'we decided to use Postgres instead of MongoDB'\n"
-            "- You learn about a constraint: 'the API rate limit is 100 req/min per user'\n\n"
-            "IMPORTANT: Check the project language with rag_status first. "
-            "Store title and content in the project's configured language.\n\n"
-            "Format content as Markdown. Use headings (##), lists (-), code blocks (```), "
-            "bold/italic, and other Markdown syntax to structure the note. The content is "
-            "rendered as Markdown in the UI and search results.\n\n"
-            "ALSO extract entities and relations to feed the knowledge graph: identify 2-8 "
-            "salient entities (domain concepts, systems, roles, actors — not generic words) "
-            "mentioned in the content, and the relations between them as subject-predicate-object "
-            "triples (e.g. subject 'Order', predicate 'requires', object 'Manager Approval'). "
-            "Write entity names and predicates in the project's configured language. Reuse "
-            "entity names already seen in this project when they refer to the same thing, so "
-            "the graph links up instead of fragmenting into near-duplicates.\n\n"
-            "These entries go through an approval workflow before becoming searchable."
-        ),
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "title": {
-                    "type": "string",
-                    "description": "Short title for the knowledge entry."
-                },
-                "content": {
-                    "type": "string",
-                    "description": "The full content/body of the knowledge entry, formatted as Markdown (use ## headings, - lists, ``` code blocks, **bold**, etc.)."
-                },
-                "category": {
-                    "type": "string",
-                    "description": "Category: business-rule, design-decision, architecture, documentation, insight, convention, constraint",
-                    "default": "insight"
-                },
-                "tags": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": "Optional tags for organization."
-                },
-                "project_id": {
-                    "type": "string",
-                    "description": "Project ID. If omitted, auto-detected from current directory."
-                },
-                "entities": {
-                    "type": "array",
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "name": {"type": "string"},
-                            "type": {"type": "string"}
-                        },
-                        "required": ["name"]
-                    },
-                    "description": "Salient entities mentioned in the content, for the knowledge graph (2-8 typical). Each has a name and an optional free-text type (e.g. 'system', 'role', 'concept')."
-                },
-                "relations": {
-                    "type": "array",
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "subject": {"type": "string"},
-                            "predicate": {"type": "string"},
-                            "object": {"type": "string"}
-                        },
-                        "required": ["subject", "predicate", "object"]
-                    },
-                    "description": "Subject-predicate-object triples linking the entities above, for the knowledge graph."
-                }
-            },
-            "required": ["title", "content"]
-        }
-    },
-    {
-        "name": "rag_import_document",
-        "description": (
-            "Import a markdown (.md) or text (.txt) file into the knowledge base. "
-            "Markdown files are split by H1/H2 headers into separate entries. "
-            "Supports YAML frontmatter for category and tags.\n\n"
-            "Use this when the user has documentation, notes, or rules written in files."
-        ),
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "file_path": {
-                    "type": "string",
-                    "description": "Path to the .md or .txt file to import."
-                },
-                "project_id": {
-                    "type": "string",
-                    "description": "Project ID. If omitted, auto-detected from current directory."
-                },
-                "category": {
-                    "type": "string",
-                    "description": "Default category for imported entries (overridden by frontmatter)."
-                },
-                "tags": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": "Default tags for imported entries (overridden by frontmatter)."
-                }
-            },
-            "required": ["file_path"]
-        }
-    },
-    {
-        "name": "rag_search",
-        "description": (
-            "Search the knowledge base for relevant entries. Use this before answering "
-            "questions about business rules, architecture, design decisions, or any "
-            "project knowledge.\n\n"
-            "Returns matching entries with relevance scores. Also expands results through "
-            "the knowledge graph by default: entries connected to the vector-search hits via "
-            "shared entities/relations are surfaced too, even when their wording doesn't "
-            "overlap with the query."
-        ),
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "query": {
-                    "type": "string",
-                    "description": "Search query."
-                },
-                "project_id": {
-                    "type": "string",
-                    "description": "Project ID. If omitted, auto-detected from current directory."
-                },
-                "category": {
-                    "type": "string",
-                    "description": "Filter results by category."
-                },
-                "tags": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": "Filter results by tags (entry must have ALL specified tags)."
-                },
-                "top_k": {
-                    "type": "number",
-                    "description": "Maximum results to return (default: 5).",
-                    "default": 5
-                },
-                "expand_graph": {
-                    "type": "boolean",
-                    "description": "Expand results via the knowledge graph (related entities/entries). Default true.",
-                    "default": True
-                },
-                "graph_depth": {
-                    "type": "number",
-                    "description": "Number of hops to traverse in the knowledge graph when expanding (max 2). Default 1.",
-                    "default": 1
-                }
-            },
-            "required": ["query"]
-        }
-    },
-    {
-        "name": "rag_list_knowledge",
-        "description": (
-            "List knowledge entries in the knowledge base. Supports filtering by "
-            "category, tags, and status. Use this to browse what's stored."
-        ),
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "project_id": {
-                    "type": "string",
-                    "description": "Project ID. If omitted, auto-detected from current directory."
-                },
-                "category": {
-                    "type": "string",
-                    "description": "Filter by category."
-                },
-                "tags": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": "Filter by tags."
-                },
-                "status": {
-                    "type": "string",
-                    "description": "Filter by status: pending, indexed, rejected. Default: indexed."
-                }
-            }
-        }
-    },
-    {
-        "name": "rag_remove_knowledge",
-        "description": "Remove a knowledge entry from the knowledge base by its ID or title.",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "entry_id": {
-                    "type": "string",
-                    "description": "Entry ID to remove."
-                },
-                "title": {
-                    "type": "string",
-                    "description": "Entry title to remove (alternative to entry_id)."
-                },
-                "project_id": {
-                    "type": "string",
-                    "description": "Project ID (required when using title)."
-                }
-            }
-        }
-    },
-    {
-        "name": "rag_open_approval_ui",
-        "description": (
-            "Open the admin panel to review and approve/reject pending knowledge entries. "
-            "Call this after storing or importing knowledge so the user can review."
-        ),
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "port": {
-                    "type": "number",
-                    "description": "Port for the admin panel (default: 8000).",
-                    "default": 8000
-                }
-            }
-        }
-    },
-    {
-        "name": "rag_status",
-        "description": "Show the status of the knowledge base for a project: entry counts, tags, categories.",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "project_id": {
-                    "type": "string",
-                    "description": "Project ID. If omitted, auto-detected from current directory."
-                }
-            }
-        }
-    },
-    {
-        "name": "rag_list_projects",
-        "description": "List all projects in the knowledge base.",
-        "inputSchema": {
-            "type": "object",
-            "properties": {}
-        }
-    },
-    {
-        "name": "rag_set_language",
-        "description": (
-            "Set the language for a project. The AI should store all knowledge entries "
-            "(title and content) in this language. Use this to configure the language "
-            "for the knowledge base.\n\n"
-            "Examples: 'pt-BR', 'en', 'es', 'fr'."
-        ),
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "language": {
-                    "type": "string",
-                    "description": "Language code (e.g. 'pt-BR', 'en', 'es')."
-                },
-                "project_id": {
-                    "type": "string",
-                    "description": "Project ID. If omitted, auto-detected from current directory."
-                }
-            },
-            "required": ["language"]
-        }
-    },
-    {
-        "name": "rag_query_graph",
-        "description": (
-            "Query the knowledge graph for an entity: show what it's connected to and which "
-            "indexed knowledge entries mention it. Use this to explore relationships between "
-            "domain concepts, systems, or rules that vector search alone might not surface."
-        ),
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "entity": {
-                    "type": "string",
-                    "description": "Entity name to look up (e.g. 'Order', 'Manager Approval')."
-                },
-                "depth": {
-                    "type": "number",
-                    "description": "Number of hops to traverse from the entity (max 2). Default 1.",
-                    "default": 1
-                },
-                "project_id": {
-                    "type": "string",
-                    "description": "Project ID. If omitted, auto-detected from current directory."
-                }
-            },
-            "required": ["entity"]
-        }
-    },
-    {
-        "name": "rag_add_project_path",
-        "description": (
-            "Associate an additional filesystem path with an existing project. "
-            "Useful for multi-repo projects (e.g., separate frontend and backend repos)."
-        ),
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "project_id": {
-                    "type": "string",
-                    "description": "Project ID",
-                },
-                "path": {
-                    "type": "string",
-                    "description": "Filesystem path to associate",
-                },
-            },
-            "required": ["project_id", "path"],
-        },
-    }
-]
+mcp = FastMCP("rag")
+
+
+def _text(result):
+    """Extract the text payload from a legacy handler result."""
+    return result["content"][0]["text"]
+
+
+@mcp.tool(name="rag_store_knowledge", description=(
+    "Store a knowledge entry in the RAG knowledge base. Use this to save "
+    "business rules, design decisions, architecture notes, or any insight "
+    "that would be useful for future conversations about this project.\n\n"
+    "Examples of when to use this:\n"
+    "- The user explains a business rule: 'orders over 1000 require manager approval'\n"
+    "- You discover a design pattern: 'the auth system uses JWT with refresh tokens'\n"
+    "- The user makes a decision: 'we decided to use Postgres instead of MongoDB'\n"
+    "- You learn about a constraint: 'the API rate limit is 100 req/min per user'\n\n"
+    "IMPORTANT: Check the project language with rag_status first. "
+    "Store title and content in the project's configured language.\n\n"
+    "Format content as Markdown. Use headings (##), lists (-), code blocks (```), "
+    "bold/italic, and other Markdown syntax to structure the note. The content is "
+    "rendered as Markdown in the UI and search results.\n\n"
+    "ALSO extract entities and relations to feed the knowledge graph: identify 2-8 "
+    "salient entities (domain concepts, systems, roles, actors — not generic words) "
+    "mentioned in the content, and the relations between them as subject-predicate-object "
+    "triples (e.g. subject 'Order', predicate 'requires', object 'Manager Approval'). "
+    "Write entity names and predicates in the project's configured language. Reuse "
+    "entity names already seen in this project when they refer to the same thing, so "
+    "the graph links up instead of fragmenting into near-duplicates.\n\n"
+    "These entries go through an approval workflow before becoming searchable."
+))
+def store_knowledge(title: str, content: str, category: str = "insight",
+                    tags: list[str] | None = None, project_id: str | None = None,
+                    entities: list[EntityIn] | None = None,
+                    relations: list[RelationIn] | None = None) -> str:
+    args = {"title": title, "content": content, "category": category}
+    if tags is not None:
+        args["tags"] = tags
+    if project_id is not None:
+        args["project_id"] = project_id
+    if entities is not None:
+        args["entities"] = [e.model_dump() for e in entities]
+    if relations is not None:
+        args["relations"] = [r.model_dump() for r in relations]
+    return _text(_store_knowledge(args))
+
+
+@mcp.tool(name="rag_import_document", description=(
+    "Import a markdown (.md) or text (.txt) file into the knowledge base. "
+    "Markdown files are split by H1/H2 headers into separate entries. "
+    "Supports YAML frontmatter for category and tags.\n\n"
+    "Use this when the user has documentation, notes, or rules written in files."
+))
+def import_document(file_path: str, project_id: str | None = None,
+                    category: str | None = None, tags: list[str] | None = None) -> str:
+    args = {"file_path": file_path}
+    if project_id is not None:
+        args["project_id"] = project_id
+    if category is not None:
+        args["category"] = category
+    if tags is not None:
+        args["tags"] = tags
+    return _text(_import_document(args))
+
+
+@mcp.tool(name="rag_search", description=(
+    "Search the knowledge base for relevant entries. Use this before answering "
+    "questions about business rules, architecture, design decisions, or any "
+    "project knowledge.\n\n"
+    "Returns matching entries with relevance scores. Also expands results through "
+    "the knowledge graph by default: entries connected to the vector-search hits via "
+    "shared entities/relations are surfaced too, even when their wording doesn't "
+    "overlap with the query."
+))
+def search(query: str, project_id: str | None = None, category: str | None = None,
+           tags: list[str] | None = None, top_k: int = 5,
+           expand_graph: bool = True, graph_depth: int = 1) -> str:
+    args = {"query": query, "top_k": top_k, "expand_graph": expand_graph,
+            "graph_depth": graph_depth}
+    if project_id is not None:
+        args["project_id"] = project_id
+    if category is not None:
+        args["category"] = category
+    if tags is not None:
+        args["tags"] = tags
+    return _text(_search(args))
+
+
+@mcp.tool(name="rag_list_knowledge", description=(
+    "List knowledge entries in the knowledge base. Supports filtering by "
+    "category, tags, and status. Use this to browse what's stored."
+))
+def list_knowledge(project_id: str | None = None, category: str | None = None,
+                   tags: list[str] | None = None, status: str = "indexed") -> str:
+    args = {"status": status}
+    if project_id is not None:
+        args["project_id"] = project_id
+    if category is not None:
+        args["category"] = category
+    if tags is not None:
+        args["tags"] = tags
+    return _text(_list_knowledge(args))
+
+
+@mcp.tool(name="rag_remove_knowledge",
+          description="Remove a knowledge entry from the knowledge base by its ID or title.")
+def remove_knowledge(entry_id: str | None = None, title: str | None = None,
+                     project_id: str | None = None) -> str:
+    args = {}
+    if entry_id is not None:
+        args["entry_id"] = entry_id
+    if title is not None:
+        args["title"] = title
+    if project_id is not None:
+        args["project_id"] = project_id
+    return _text(_remove_knowledge(args))
+
+
+@mcp.tool(name="rag_open_approval_ui", description=(
+    "Open the admin panel to review and approve/reject pending knowledge entries. "
+    "Call this after storing or importing knowledge so the user can review."
+))
+def open_approval_ui(port: int = 8000) -> str:
+    return _text(_open_approval_ui({"port": port}))
+
+
+@mcp.tool(name="rag_status",
+          description="Show the status of the knowledge base for a project: entry counts, tags, categories.")
+def status(project_id: str | None = None) -> str:
+    args = {}
+    if project_id is not None:
+        args["project_id"] = project_id
+    return _text(_status(args))
+
+
+@mcp.tool(name="rag_list_projects", description="List all projects in the knowledge base.")
+def list_projects() -> str:
+    return _text(_list_projects({}))
+
+
+@mcp.tool(name="rag_set_language", description=(
+    "Set the language for a project. The AI should store all knowledge entries "
+    "(title and content) in this language. Use this to configure the language "
+    "for the knowledge base.\n\n"
+    "Examples: 'pt-BR', 'en', 'es', 'fr'."
+))
+def set_language(language: str, project_id: str | None = None) -> str:
+    args = {"language": language}
+    if project_id is not None:
+        args["project_id"] = project_id
+    return _text(_set_language(args))
+
+
+@mcp.tool(name="rag_query_graph", description=(
+    "Query the knowledge graph for an entity: show what it's connected to and which "
+    "indexed knowledge entries mention it. Use this to explore relationships between "
+    "domain concepts, systems, or rules that vector search alone might not surface."
+))
+def query_graph(entity: str, depth: int = 1, project_id: str | None = None) -> str:
+    args = {"entity": entity, "depth": depth}
+    if project_id is not None:
+        args["project_id"] = project_id
+    return _text(_query_graph(args))
+
+
+@mcp.tool(name="rag_add_project_path", description=(
+    "Associate an additional filesystem path with an existing project. "
+    "Useful for multi-repo projects (e.g., separate frontend and backend repos)."
+))
+def add_project_path(project_id: str, path: str) -> str:
+    return _text(_add_project_path({"project_id": project_id, "path": path}))
 
 
 # ---------------------------------------------------------------------------
 # Tool handlers
 # ---------------------------------------------------------------------------
-
-def handle_tool_call(name, args):
-    try:
-        if name == "rag_store_knowledge":
-            return _store_knowledge(args)
-        elif name == "rag_import_document":
-            return _import_document(args)
-        elif name == "rag_search":
-            return _search(args)
-        elif name == "rag_list_knowledge":
-            return _list_knowledge(args)
-        elif name == "rag_remove_knowledge":
-            return _remove_knowledge(args)
-        elif name == "rag_open_approval_ui":
-            return _open_approval_ui(args)
-        elif name == "rag_status":
-            return _status(args)
-        elif name == "rag_list_projects":
-            return _list_projects(args)
-        elif name == "rag_set_language":
-            return _set_language(args)
-        elif name == "rag_query_graph":
-            return _query_graph(args)
-        elif name == "rag_add_project_path":
-            return _add_project_path(args)
-        else:
-            return {"content": [{"type": "text", "text": f"Unknown tool: {name}"}], "isError": True}
-    except Exception as e:
-        log(f"Error in {name}: {traceback.format_exc()}")
-        return {"content": [{"type": "text", "text": f"Error: {e}"}], "isError": True}
-
 
 def _store_knowledge(args):
     pid = _ensure_project(args)
@@ -854,55 +642,13 @@ def main():
     import indexing
     indexing.ensure_index_current(log=log)
     log("Knowledge Base RAG MCP server starting...")
-
     try:
         api.start_api_server(8000)
         log("Admin panel API at http://127.0.0.1:8000")
         log("Admin panel UI at http://127.0.0.1:8765")
     except Exception as e:
         log(f"Could not start API server: {e}")
-
-    while True:
-        msg = read_message()
-        if msg is None:
-            break
-
-        method = msg.get("method")
-        msg_id = msg.get("id")
-        params = msg.get("params", {})
-
-        if method == "initialize":
-            send_result(msg_id, {
-                "protocolVersion": MCP_VERSION,
-                "capabilities": {"tools": {}},
-                "serverInfo": {"name": SERVER_NAME, "version": SERVER_VERSION},
-            })
-            continue
-
-        if method == "notifications/initialized":
-            continue
-
-        if method == "tools/list":
-            tools_info = [{
-                "name": t["name"],
-                "description": t["description"],
-                "inputSchema": t["inputSchema"],
-            } for t in TOOLS]
-            send_result(msg_id, {"tools": tools_info})
-            continue
-
-        if method == "tools/call":
-            tool_name = params.get("name", "")
-            tool_args = params.get("arguments", {})
-            result = handle_tool_call(tool_name, tool_args)
-            send_result(msg_id, result)
-            continue
-
-        if method == "ping":
-            send_result(msg_id, {})
-            continue
-
-        send_error(msg_id, -32601, f"Method not found: {method}")
+    mcp.run()  # stdio transport by default
 
 
 if __name__ == "__main__":
