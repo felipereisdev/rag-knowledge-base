@@ -103,3 +103,29 @@ class TestEmbeddingMeta:
         temp_db.rebuild_chunk_table()
         hits = temp_db.search_chunks(embeddings.embed_query("c"), project_id="p1", k=5)
         assert hits == []
+
+
+class TestRemoteEmbedding:
+    def test_embed_text_uses_remote_when_available(self, temp_db, monkeypatch):
+        import embeddings
+        monkeypatch.setattr(embeddings, "serving_locally", False)
+        monkeypatch.setenv("RAG_EMBED_REMOTE", "1")
+        fake_vec = [0.5] * embeddings.EMBEDDING_DIM
+        monkeypatch.setattr(embeddings, "_embed_remote", lambda texts: [fake_vec for _ in texts])
+        assert embeddings.embed_text("hello") == fake_vec
+
+    def test_embed_text_falls_back_to_local_on_remote_failure(self, temp_db, monkeypatch):
+        import embeddings
+        monkeypatch.setattr(embeddings, "serving_locally", False)
+        monkeypatch.setenv("RAG_EMBED_REMOTE", "1")
+        monkeypatch.setattr(embeddings, "_embed_remote", lambda texts: None)
+        vec = embeddings.embed_text("hello")
+        assert len(vec) == embeddings.EMBEDDING_DIM
+
+    def test_serving_locally_skips_remote(self, temp_db, monkeypatch):
+        import embeddings
+        monkeypatch.setattr(embeddings, "serving_locally", True)
+        calls = []
+        monkeypatch.setattr(embeddings, "_embed_remote", lambda texts: calls.append(1) or None)
+        embeddings.embed_text("hello")
+        assert calls == []

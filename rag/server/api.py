@@ -378,6 +378,21 @@ def list_tags(project_id: str = Query(...)):
     return db.get_all_tags(project_id)
 
 
+# ---- Shared embedding endpoint ----
+
+class EmbedRequest(BaseModel):
+    texts: list[str]
+
+
+@app.post("/api/embed")
+def embed_texts(req: EmbedRequest):
+    return {
+        "model": embeddings.MODEL_NAME,
+        "dim": embeddings.EMBEDDING_DIM,
+        "embeddings": [embeddings.embed_local(t) for t in req.texts],
+    }
+
+
 # ---- Server startup ----
 
 _server_thread = None
@@ -386,6 +401,7 @@ _server_port = None
 
 def start_api_server(port=8000):
     """Start uvicorn in a daemon thread. Returns the port."""
+    embeddings.serving_locally = True
     global _server_thread, _server_port
     if _server_thread is not None:
         return _server_port

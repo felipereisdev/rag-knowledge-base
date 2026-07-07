@@ -527,3 +527,15 @@ class TestProjectPaths:
         resp = client.get("/api/projects")
         assert resp.status_code == 200
         assert "paths" in resp.json()[0]
+
+
+class TestEmbedEndpoint:
+    def test_embed_endpoint_returns_vectors(self, client):
+        import embeddings
+        resp = client.post("/api/embed", json={"texts": ["hello", "world"]})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["model"] == embeddings.MODEL_NAME
+        assert data["dim"] == embeddings.EMBEDDING_DIM
+        assert len(data["embeddings"]) == 2
+        assert len(data["embeddings"][0]) == embeddings.EMBEDDING_DIM
