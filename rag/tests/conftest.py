@@ -10,11 +10,15 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "server"))
 
 @pytest.fixture(autouse=True)
 def clean_env():
-    """Force test model and dimension for all tests."""
+    """Force test model, dimension and search threshold for all tests."""
     old_model = os.environ.get("RAG_EMBEDDING_MODEL")
     old_dim = os.environ.get("RAG_EMBEDDING_DIM")
+    old_min_score = os.environ.get("RAG_SEARCH_MIN_SCORE")
     os.environ["RAG_EMBEDDING_MODEL"] = "all-MiniLM-L6-v2"
     os.environ["RAG_EMBEDDING_DIM"] = "384"
+    # Calibrated for all-MiniLM-L6-v2: unrelated queries score <= ~0.435,
+    # relevant matches >= ~0.457 (see search_min_score in server/api.py).
+    os.environ["RAG_SEARCH_MIN_SCORE"] = "0.44"
     yield
     if old_model:
         os.environ["RAG_EMBEDDING_MODEL"] = old_model
@@ -24,6 +28,10 @@ def clean_env():
         os.environ["RAG_EMBEDDING_DIM"] = old_dim
     else:
         os.environ.pop("RAG_EMBEDDING_DIM", None)
+    if old_min_score:
+        os.environ["RAG_SEARCH_MIN_SCORE"] = old_min_score
+    else:
+        os.environ.pop("RAG_SEARCH_MIN_SCORE", None)
 
 
 @pytest.fixture

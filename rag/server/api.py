@@ -1,5 +1,6 @@
 """FastAPI REST API for the RAG admin panel."""
 from __future__ import annotations
+import os
 import threading
 import uvicorn
 from fastapi import FastAPI, HTTPException, Query
@@ -10,6 +11,20 @@ import db
 import embeddings
 
 app = FastAPI(title="RAG Admin API", version="0.4.0")
+
+
+def search_min_score():
+    """Minimum relevance score (1 / (1 + L2 distance)) for a search hit to count
+    as a real match rather than nearest-neighbor noise. Score scales differ per
+    embedding model, so the cutoff is configurable via RAG_SEARCH_MIN_SCORE:
+    measured ~0.44 separates noise for all-MiniLM-L6-v2 (test model), while
+    paraphrase-multilingual-mpnet-base-v2 (production default) scores relevant
+    matches at 0.29-0.35 and unrelated queries below 0.24 — hence 0.25 default.
+    """
+    try:
+        return float(os.environ.get("RAG_SEARCH_MIN_SCORE", "0.25"))
+    except ValueError:
+        return 0.25
 
 app.add_middleware(
     CORSMiddleware,
@@ -358,6 +373,7 @@ def search(
         category=category,
         tags=tags,
     )
+    results = [r for r in results if r.get("score", 0) >= search_min_score()]
     if not expand:
         return results
     graph = {"triples": [], "related_entries": []}

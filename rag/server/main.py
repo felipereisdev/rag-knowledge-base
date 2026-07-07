@@ -599,8 +599,7 @@ def _search(args):
         query_vec, project_id=pid, k=top_k, category=category, tags=tags,
     )
 
-    MIN_SCORE = -10
-    results = [r for r in results if r.get("score", 0) > MIN_SCORE]
+    results = [r for r in results if r.get("score", 0) >= api.search_min_score()]
 
     if not results:
         return {"content": [{"type": "text", "text": f"No results for '{query}' in '{project['name']}'."}]}
