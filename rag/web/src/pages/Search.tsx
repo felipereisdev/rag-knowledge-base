@@ -5,9 +5,11 @@ import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
-import { api, type Project, type SearchResult } from "@/lib/api";
+import { api, type Project, type SearchResult, type SearchGraph } from "@/lib/api";
 
 const CATEGORIES = ["", "business-rule", "design-decision", "architecture", "documentation", "insight", "convention", "constraint"];
+
+const EMPTY_GRAPH: SearchGraph = { triples: [], related_entries: [] };
 
 export default function Search() {
   const [projects, setProjects] = useState<Project[]>([]);
@@ -15,6 +17,7 @@ export default function Search() {
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState("");
   const [results, setResults] = useState<SearchResult[]>([]);
+  const [graph, setGraph] = useState<SearchGraph>(EMPTY_GRAPH);
   const [searching, setSearching] = useState(false);
 
   useEffect(() => {
@@ -24,18 +27,30 @@ export default function Search() {
   useEffect(() => {
     if (!query.trim()) {
       setResults([]);
+      setGraph(EMPTY_GRAPH);
       return;
     }
+    let cancelled = false;
     const timer = setTimeout(async () => {
       setSearching(true);
       try {
-        const r = await api.search({ q: query, project_id: projectId === "all" ? undefined : projectId, category: category || undefined });
-        setResults(r);
+        const r = await api.search({
+          q: query,
+          project_id: projectId === "all" ? undefined : projectId,
+          category: category || undefined,
+          expand: true,
+        });
+        if (cancelled) return;
+        setResults(r.results);
+        setGraph(r.graph);
       } finally {
-        setSearching(false);
+        if (!cancelled) setSearching(false);
       }
     }, 300);
-    return () => clearTimeout(timer);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
   }, [query, projectId, category]);
 
   return (
@@ -89,6 +104,47 @@ export default function Search() {
 
       {!searching && query.trim() && results.length === 0 && projectId && (
         <p className="text-muted-foreground">No results found.</p>
+      )}
+
+      {!searching && (graph.triples.length > 0 || graph.related_entries.length > 0) && (
+        <div className="space-y-3">
+          <h2 className="text-lg font-semibold">Knowledge graph</h2>
+          {graph.triples.length > 0 && (
+            <div className="flex flex-wrap gap-2">
+              {graph.triples.map((t, i) => (
+                <div key={i} className="text-xs flex items-center gap-1 rounded-full border px-2.5 py-1">
+                  <Badge variant="secondary">{t.subject}</Badge>
+                  <span className="text-muted-foreground">— {t.predicate} →</span>
+                  <Badge variant="secondary">{t.object}</Badge>
+                </div>
+              ))}
+            </div>
+          )}
+          {graph.related_entries.length > 0 && (
+            <div className="space-y-3">
+              {graph.related_entries.map((e) => (
+                <Card key={e.id}>
+                  <CardContent className="pt-4">
+                    <Link to={`/entries/${e.id}`} className="block">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="font-medium hover:underline">{e.title}</span>
+                        <Badge variant="secondary">{e.category}</Badge>
+                      </div>
+                      <div className="prose prose-sm dark:prose-invert max-w-none text-muted-foreground">
+                        <ReactMarkdown>{e.content.slice(0, 200) + "..."}</ReactMarkdown>
+                      </div>
+                      {e.tags.length > 0 && (
+                        <div className="flex gap-1 mt-2">
+                          {e.tags.map((t) => <Badge key={t} variant="outline">{t}</Badge>)}
+                        </div>
+                      )}
+                    </Link>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          )}
+        </div>
       )}
     </div>
   );

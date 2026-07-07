@@ -354,3 +354,236 @@ class TestProjectPaths:
         temp_db.upsert_project("p1", "Proj1", "/tmp/p1")
         paths = temp_db.list_project_paths("p1")
         assert "/tmp/p1" in paths
+
+
+class TestGraph:
+    def test_upsert_entity_dedupes_by_normalized_name(self, temp_db):
+        temp_db.upsert_project("proj", "Proj", "/tmp/proj")
+        id1 = temp_db.upsert_entity("proj", "  Pedido ")
+        id2 = temp_db.upsert_entity("proj", "pedido")
+        assert id1 == id2
+
+    def test_upsert_entity_backfills_empty_type(self, temp_db):
+        temp_db.upsert_project("proj", "Proj", "/tmp/proj")
+        eid = temp_db.upsert_entity("proj", "Pedido")
+        temp_db.upsert_entity("proj", "pedido", type="concept")
+        conn = temp_db.get_connection()
+        row = conn.execute("SELECT type FROM entities WHERE id = ?", (eid,)).fetchone()
+        conn.close()
+        assert row["type"] == "concept"
+
+    def test_upsert_entity_does_not_overwrite_existing_type(self, temp_db):
+        temp_db.upsert_project("proj", "Proj", "/tmp/proj")
+        eid = temp_db.upsert_entity("proj", "Pedido", type="concept")
+        temp_db.upsert_entity("proj", "pedido", type="other")
+        conn = temp_db.get_connection()
+        row = conn.execute("SELECT type FROM entities WHERE id = ?", (eid,)).fetchone()
+        conn.close()
+        assert row["type"] == "concept"
+
+    def test_add_relation_creates_entities_on_the_fly(self, temp_db):
+        temp_db.upsert_project("proj", "Proj", "/tmp/proj")
+        rel_id = temp_db.add_relation("proj", "Pedido", "requer", "Aprovacao")
+        assert rel_id is not None
+        conn = temp_db.get_connection()
+        count = conn.execute(
+            "SELECT COUNT(*) as c FROM entities WHERE project_id = 'proj'"
+        ).fetchone()["c"]
+        conn.close()
+        assert count == 2
+
+    def test_add_relation_duplicate_not_duplicated(self, temp_db):
+        temp_db.upsert_project("proj", "Proj", "/tmp/proj")
+        temp_db.add_relation("proj", "Pedido", "requer", "Aprovacao")
+        temp_db.add_relation("proj", "Pedido", "requer", "Aprovacao")
+        conn = temp_db.get_connection()
+        count = conn.execute(
+            "SELECT COUNT(*) as c FROM relations WHERE project_id = 'proj'"
+        ).fetchone()["c"]
+        conn.close()
+        assert count == 1
+
+    def test_add_relation_with_entry_id_links_both_entities(self, temp_db):
+        temp_db.upsert_project("proj", "Proj", "/tmp/proj")
+        eid = temp_db.store_knowledge_entry("proj", "Rule", "content", "business-rule")
+        temp_db.add_relation("proj", "Pedido", "requer", "Aprovacao", entry_id=eid)
+        entities = temp_db.get_entities_for_entry(eid)
+        names = {e["name"].lower() for e in entities}
+        assert "pedido" in names
+        assert "aprovacao" in names
+
+    def test_get_relations_for_entry_returns_name_based_triples(self, temp_db):
+        temp_db.upsert_project("proj", "Proj", "/tmp/proj")
+        eid = temp_db.store_knowledge_entry("proj", "Rule", "content", "business-rule")
+        temp_db.add_relation("proj", "Pedido", "requer", "Aprovacao", entry_id=eid)
+        rels = temp_db.get_relations_for_entry(eid)
+        assert len(rels) == 1
+        assert rels[0]["subject"].lower() == "pedido"
+        assert rels[0]["predicate"] == "requer"
+        assert rels[0]["object"].lower() == "aprovacao"
+
+    def test_add_entry_link_idempotent_and_visible_from_both_sides(self, temp_db):
+        temp_db.upsert_project("proj", "Proj", "/tmp/proj")
+        e1 = temp_db.store_knowledge_entry("proj", "R1", "c1", "insight")
+        e2 = temp_db.store_knowledge_entry("proj", "R2", "c2", "insight")
+        temp_db.add_entry_link(e1, e2)
+        temp_db.add_entry_link(e1, e2)
+        links_from_e1 = temp_db.get_entry_links(e1)
+        links_from_e2 = temp_db.get_entry_links(e2)
+        assert len(links_from_e1) == 1
+        assert len(links_from_e2) == 1
+
+    def test_get_graph_returns_entities_and_relations_with_entry_count(self, temp_db):
+        temp_db.upsert_project("proj", "Proj", "/tmp/proj")
+        eid = temp_db.store_knowledge_entry("proj", "Rule", "content", "business-rule")
+        temp_db.add_relation("proj", "Pedido", "requer", "Aprovacao", entry_id=eid)
+        graph = temp_db.get_graph("proj")
+        assert len(graph["entities"]) == 2
+        assert len(graph["relations"]) == 1
+        pedido = next(e for e in graph["entities"] if e["name"].lower() == "pedido")
+        assert pedido["entry_count"] == 1
+
+    def test_query_entity_graph_depth1_direct_neighbors(self, temp_db):
+        temp_db.upsert_project("proj", "Proj", "/tmp/proj")
+        e1 = temp_db.store_knowledge_entry("proj", "R1", "c1", "insight")
+        temp_db.approve_entries([e1])
+        temp_db.add_relation("proj", "Pedido", "requer", "Aprovacao", entry_id=e1)
+        result = temp_db.query_entity_graph("proj", "pedido", depth=1)
+        assert result["entity"] is not None
+        assert len(result["triples"]) == 1
+        assert result["triples"][0]["object"].lower() == "aprovacao"
+        entry_ids = {e["id"] for e in result["entries"]}
+        assert e1 in entry_ids
+
+    def test_query_entity_graph_entries_only_indexed(self, temp_db):
+        temp_db.upsert_project("proj", "Proj", "/tmp/proj")
+        e1 = temp_db.store_knowledge_entry("proj", "R1", "c1", "insight")
+        e2 = temp_db.store_knowledge_entry("proj", "R2", "c2", "insight")
+        e3 = temp_db.store_knowledge_entry("proj", "R3", "c3", "insight")
+        temp_db.approve_entries([e1])
+        temp_db.reject_entries([e3])
+        aid = temp_db.upsert_entity("proj", "Pedido")
+        temp_db.link_entry_entity(e1, aid)
+        temp_db.link_entry_entity(e2, aid)  # pending
+        temp_db.link_entry_entity(e3, aid)  # rejected
+        result = temp_db.query_entity_graph("proj", "pedido", depth=1)
+        entry_ids = {e["id"] for e in result["entries"]}
+        assert e1 in entry_ids
+        assert e2 not in entry_ids
+        assert e3 not in entry_ids
+
+    def test_query_entity_graph_traverses_from_object_side(self, temp_db):
+        temp_db.upsert_project("proj", "Proj", "/tmp/proj")
+        temp_db.add_relation("proj", "Pedido", "requer", "Aprovacao")
+        result = temp_db.query_entity_graph("proj", "aprovacao", depth=1)
+        assert result["entity"] is not None
+        assert len(result["triples"]) == 1
+        assert result["triples"][0]["subject"].lower() == "pedido"
+
+    def test_query_entity_graph_unknown_entity(self, temp_db):
+        temp_db.upsert_project("proj", "Proj", "/tmp/proj")
+        result = temp_db.query_entity_graph("proj", "does-not-exist")
+        assert result["entity"] is None
+        assert result["triples"] == []
+        assert result["entries"] == []
+
+    def test_expand_entries_via_graph_finds_connected_indexed_entry(self, temp_db):
+        temp_db.upsert_project("proj", "Proj", "/tmp/proj")
+        e1 = temp_db.store_knowledge_entry("proj", "E1", "c1", "insight")
+        e2 = temp_db.store_knowledge_entry("proj", "E2", "c2", "insight")
+        e3 = temp_db.store_knowledge_entry("proj", "E3", "c3", "insight")
+        temp_db.approve_entries([e1, e2])
+        temp_db.reject_entries([e3])
+        temp_db.link_entry_entity(e1, temp_db.upsert_entity("proj", "A"))
+        temp_db.link_entry_entity(e2, temp_db.upsert_entity("proj", "B"))
+        temp_db.link_entry_entity(e3, temp_db.upsert_entity("proj", "B"))
+        temp_db.add_relation("proj", "A", "relates_to", "B")
+
+        result = temp_db.expand_entries_via_graph("proj", [e1], depth=1)
+        related_ids = {e["id"] for e in result["related_entries"]}
+        assert e2 in related_ids
+        assert e3 not in related_ids
+        assert e1 not in related_ids
+        assert len(result["triples"]) == 1
+
+    def test_expand_entries_via_graph_depth2_reaches_further_entry(self, temp_db):
+        temp_db.upsert_project("proj", "Proj", "/tmp/proj")
+        e1 = temp_db.store_knowledge_entry("proj", "E1", "c1", "insight")
+        e2 = temp_db.store_knowledge_entry("proj", "E2", "c2", "insight")
+        temp_db.approve_entries([e1, e2])
+        temp_db.link_entry_entity(e1, temp_db.upsert_entity("proj", "A"))
+        temp_db.link_entry_entity(e2, temp_db.upsert_entity("proj", "C"))
+        temp_db.add_relation("proj", "A", "rel", "B")
+        temp_db.add_relation("proj", "B", "rel", "C")
+
+        depth1 = temp_db.expand_entries_via_graph("proj", [e1], depth=1)
+        depth2 = temp_db.expand_entries_via_graph("proj", [e1], depth=2)
+        depth1_ids = {e["id"] for e in depth1["related_entries"]}
+        depth2_ids = {e["id"] for e in depth2["related_entries"]}
+        assert e2 not in depth1_ids
+        assert e2 in depth2_ids
+
+    def test_expand_entries_via_graph_traverses_from_object_side(self, temp_db):
+        temp_db.upsert_project("proj", "Proj", "/tmp/proj")
+        e1 = temp_db.store_knowledge_entry("proj", "E1", "c1", "insight")
+        e2 = temp_db.store_knowledge_entry("proj", "E2", "c2", "insight")
+        temp_db.approve_entries([e1, e2])
+        # Seed entity B sits on the OBJECT side of the relation A -> B
+        temp_db.link_entry_entity(e1, temp_db.upsert_entity("proj", "B"))
+        temp_db.link_entry_entity(e2, temp_db.upsert_entity("proj", "A"))
+        temp_db.add_relation("proj", "A", "rel", "B")
+
+        result = temp_db.expand_entries_via_graph("proj", [e1], depth=1)
+        related_ids = {e["id"] for e in result["related_entries"]}
+        assert e2 in related_ids
+        assert len(result["triples"]) == 1
+
+    def test_expand_entries_via_graph_includes_entry_links_neighbors(self, temp_db):
+        temp_db.upsert_project("proj", "Proj", "/tmp/proj")
+        e1 = temp_db.store_knowledge_entry("proj", "E1", "c1", "insight")
+        e2 = temp_db.store_knowledge_entry("proj", "E2", "c2", "insight")
+        e3 = temp_db.store_knowledge_entry("proj", "E3", "c3", "insight")
+        temp_db.approve_entries([e1, e2, e3])
+        # No entities/relations at all: only direct entry links, both directions
+        temp_db.add_entry_link(e1, e2)  # seed on the from side
+        temp_db.add_entry_link(e3, e1)  # seed on the to side
+
+        result = temp_db.expand_entries_via_graph("proj", [e1], depth=1)
+        related_ids = {e["id"] for e in result["related_entries"]}
+        assert e2 in related_ids
+        assert e3 in related_ids
+        assert e1 not in related_ids
+
+    def test_expand_entries_via_graph_includes_relation_provenance_entry(self, temp_db):
+        temp_db.upsert_project("proj", "Proj", "/tmp/proj")
+        e1 = temp_db.store_knowledge_entry("proj", "E1", "c1", "insight")
+        e2 = temp_db.store_knowledge_entry("proj", "E2", "c2", "insight")
+        temp_db.approve_entries([e1, e2])
+        temp_db.link_entry_entity(e1, temp_db.upsert_entity("proj", "A"))
+        # Relation carries e2 as provenance; strip e2's entry_entities rows so
+        # it is only discoverable via the relations.entry_id branch.
+        temp_db.add_relation("proj", "A", "rel", "B", entry_id=e2)
+        conn = temp_db.get_connection()
+        conn.execute("DELETE FROM entry_entities WHERE entry_id = ?", (e2,))
+        conn.commit()
+        conn.close()
+
+        result = temp_db.expand_entries_via_graph("proj", [e1], depth=1)
+        related_ids = {e["id"] for e in result["related_entries"]}
+        assert e2 in related_ids
+
+    def test_cascade_delete_entry_removes_relations_and_entry_entities(self, temp_db):
+        temp_db.upsert_project("proj", "Proj", "/tmp/proj")
+        eid = temp_db.store_knowledge_entry("proj", "Rule", "content", "business-rule")
+        temp_db.add_relation("proj", "Pedido", "requer", "Aprovacao", entry_id=eid)
+        temp_db.remove_entry(eid)
+        conn = temp_db.get_connection()
+        rel_count = conn.execute(
+            "SELECT COUNT(*) as c FROM relations WHERE entry_id = ?", (eid,)
+        ).fetchone()["c"]
+        ee_count = conn.execute(
+            "SELECT COUNT(*) as c FROM entry_entities WHERE entry_id = ?", (eid,)
+        ).fetchone()["c"]
+        conn.close()
+        assert rel_count == 0
+        assert ee_count == 0

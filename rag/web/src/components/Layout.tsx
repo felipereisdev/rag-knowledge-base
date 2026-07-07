@@ -1,6 +1,6 @@
 import { NavLink, Outlet } from "react-router-dom";
 import { cn } from "@/lib/utils";
-import { LayoutDashboard, FolderKanban, FileText, CheckCircle, Search } from "lucide-react";
+import { LayoutDashboard, FolderKanban, FileText, CheckCircle, Search, Share2 } from "lucide-react";
 
 const navItems = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard },
@@ -8,6 +8,7 @@ const navItems = [
   { to: "/entries", label: "Entries", icon: FileText },
   { to: "/approvals", label: "Approvals", icon: CheckCircle },
   { to: "/search", label: "Search", icon: Search },
+  { to: "/graph", label: "Graph", icon: Share2 },
 ];
 
 export default function Layout() {

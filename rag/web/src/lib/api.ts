@@ -62,6 +62,78 @@ export interface EntryUpdate {
   tags?: string[];
 }
 
+export interface Entity {
+  id: number;
+  name: string;
+  type: string;
+  entry_count: number;
+}
+
+export interface Relation {
+  id: number;
+  subject_id: number;
+  object_id: number;
+  predicate: string;
+  entry_id: string | null;
+}
+
+export interface GraphData {
+  entities: Entity[];
+  relations: Relation[];
+}
+
+export interface Triple {
+  subject: string;
+  predicate: string;
+  object: string;
+  entry_id: string | null;
+}
+
+export interface EntityDetail {
+  id: number;
+  project_id: string;
+  name: string;
+  norm_name: string;
+  type: string;
+  created_at: number;
+}
+
+export interface EntityGraph {
+  entity: EntityDetail | null;
+  triples: Triple[];
+  entries: Entry[];
+}
+
+export interface EntryEntity {
+  id: number;
+  name: string;
+  type: string;
+}
+
+export interface EntryRelation {
+  id: number;
+  subject: string;
+  predicate: string;
+  object: string;
+}
+
+export interface EntryLink {
+  from_entry: string;
+  to_entry: string;
+  relation: string;
+}
+
+export interface EntryGraph {
+  entities: EntryEntity[];
+  relations: EntryRelation[];
+  links: EntryLink[];
+}
+
+export interface SearchGraph {
+  triples: Triple[];
+  related_entries: Entry[];
+}
+
 async function fetchJSON<T>(url: string, options?: RequestInit): Promise<T> {
   const resp = await fetch(`${API_BASE}${url}`, {
     headers: { "Content-Type": "application/json" },
@@ -73,6 +145,30 @@ async function fetchJSON<T>(url: string, options?: RequestInit): Promise<T> {
   }
   if (resp.status === 204) return undefined as T;
   return resp.json();
+}
+
+interface SearchParams {
+  q: string;
+  project_id?: string;
+  category?: string;
+  tags?: string[];
+  top_k?: number;
+  depth?: number;
+}
+
+function search(params: SearchParams & { expand: true }): Promise<{ results: SearchResult[]; graph: SearchGraph }>;
+function search(params: SearchParams & { expand?: false }): Promise<SearchResult[]>;
+function search(
+  params: SearchParams & { expand?: boolean }
+): Promise<SearchResult[] | { results: SearchResult[]; graph: SearchGraph }> {
+  const qs = new URLSearchParams({ q: params.q });
+  if (params.project_id) qs.set("project_id", params.project_id);
+  if (params.category) qs.set("category", params.category);
+  if (params.tags) params.tags.forEach((t) => qs.append("tags", t));
+  if (params.top_k) qs.set("top_k", String(params.top_k));
+  if (params.expand) qs.set("expand", "true");
+  if (params.depth) qs.set("depth", String(params.depth));
+  return fetchJSON<SearchResult[] | { results: SearchResult[]; graph: SearchGraph }>(`/search?${qs}`);
 }
 
 export const api = {
@@ -114,14 +210,16 @@ export const api = {
   rejectEntry: (id: string) =>
     fetchJSON<{ ok: boolean }>(`/entries/${id}/reject`, { method: "POST" }),
 
-  search: (params: { q: string; project_id?: string; category?: string; tags?: string[]; top_k?: number }) => {
-    const search = new URLSearchParams({ q: params.q });
-    if (params.project_id) search.set("project_id", params.project_id);
-    if (params.category) search.set("category", params.category);
-    if (params.tags) params.tags.forEach((t) => search.append("tags", t));
-    if (params.top_k) search.set("top_k", String(params.top_k));
-    return fetchJSON<SearchResult[]>(`/search?${search}`);
-  },
+  search,
   listTags: (projectId: string) =>
     fetchJSON<string[]>(`/tags?project_id=${projectId}`),
+
+  getGraph: (projectId: string) =>
+    fetchJSON<GraphData>(`/graph?project_id=${encodeURIComponent(projectId)}`),
+  getEntityGraph: (projectId: string, name: string, depth = 1) =>
+    fetchJSON<EntityGraph>(
+      `/graph/entity?project_id=${encodeURIComponent(projectId)}&name=${encodeURIComponent(name)}&depth=${depth}`
+    ),
+  getEntryGraph: (entryId: string) =>
+    fetchJSON<EntryGraph>(`/entries/${entryId}/graph`),
 };

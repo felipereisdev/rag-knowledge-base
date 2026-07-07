@@ -97,6 +97,41 @@ def _ensure_project(args):
     return pid
 
 
+def _coerce_depth(value, default=1, max_depth=2):
+    """Coerce a graph depth argument to an int clamped to [1, max_depth]."""
+    try:
+        depth = int(float(value))
+    except (TypeError, ValueError):
+        depth = default
+    if depth < 1:
+        return 1
+    if depth > max_depth:
+        return max_depth
+    return depth
+
+
+def _valid_graph_items(items, required_keys):
+    """Split graph payload items into (valid, skipped_count).
+
+    An item is valid when it is a dict with a non-empty string for every
+    required key. Malformed items are skipped, never raised on.
+    """
+    if items is None:
+        return [], 0
+    if not isinstance(items, list):
+        return [], 1
+    valid = []
+    skipped = 0
+    for item in items:
+        if isinstance(item, dict) and all(
+            isinstance(item.get(k), str) and item[k].strip() for k in required_keys
+        ):
+            valid.append(item)
+        else:
+            skipped += 1
+    return valid, skipped
+
+
 # ---------------------------------------------------------------------------
 # Tool definitions
 # ---------------------------------------------------------------------------
@@ -115,6 +150,16 @@ TOOLS = [
             "- You learn about a constraint: 'the API rate limit is 100 req/min per user'\n\n"
             "IMPORTANT: Check the project language with rag_status first. "
             "Store title and content in the project's configured language.\n\n"
+            "Format content as Markdown. Use headings (##), lists (-), code blocks (```), "
+            "bold/italic, and other Markdown syntax to structure the note. The content is "
+            "rendered as Markdown in the UI and search results.\n\n"
+            "ALSO extract entities and relations to feed the knowledge graph: identify 2-8 "
+            "salient entities (domain concepts, systems, roles, actors — not generic words) "
+            "mentioned in the content, and the relations between them as subject-predicate-object "
+            "triples (e.g. subject 'Order', predicate 'requires', object 'Manager Approval'). "
+            "Write entity names and predicates in the project's configured language. Reuse "
+            "entity names already seen in this project when they refer to the same thing, so "
+            "the graph links up instead of fragmenting into near-duplicates.\n\n"
             "These entries go through an approval workflow before becoming searchable."
         ),
         "inputSchema": {
@@ -141,6 +186,31 @@ TOOLS = [
                 "project_id": {
                     "type": "string",
                     "description": "Project ID. If omitted, auto-detected from current directory."
+                },
+                "entities": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "name": {"type": "string"},
+                            "type": {"type": "string"}
+                        },
+                        "required": ["name"]
+                    },
+                    "description": "Salient entities mentioned in the content, for the knowledge graph (2-8 typical). Each has a name and an optional free-text type (e.g. 'system', 'role', 'concept')."
+                },
+                "relations": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "subject": {"type": "string"},
+                            "predicate": {"type": "string"},
+                            "object": {"type": "string"}
+                        },
+                        "required": ["subject", "predicate", "object"]
+                    },
+                    "description": "Subject-predicate-object triples linking the entities above, for the knowledge graph."
                 }
             },
             "required": ["title", "content"]
@@ -184,7 +254,10 @@ TOOLS = [
             "Search the knowledge base for relevant entries. Use this before answering "
             "questions about business rules, architecture, design decisions, or any "
             "project knowledge.\n\n"
-            "Returns matching entries with relevance scores."
+            "Returns matching entries with relevance scores. Also expands results through "
+            "the knowledge graph by default: entries connected to the vector-search hits via "
+            "shared entities/relations are surfaced too, even when their wording doesn't "
+            "overlap with the query."
         ),
         "inputSchema": {
             "type": "object",
@@ -210,6 +283,16 @@ TOOLS = [
                     "type": "number",
                     "description": "Maximum results to return (default: 5).",
                     "default": 5
+                },
+                "expand_graph": {
+                    "type": "boolean",
+                    "description": "Expand results via the knowledge graph (related entities/entries). Default true.",
+                    "default": True
+                },
+                "graph_depth": {
+                    "type": "number",
+                    "description": "Number of hops to traverse in the knowledge graph when expanding (max 2). Default 1.",
+                    "default": 1
                 }
             },
             "required": ["query"]
@@ -327,6 +410,33 @@ TOOLS = [
         }
     },
     {
+        "name": "rag_query_graph",
+        "description": (
+            "Query the knowledge graph for an entity: show what it's connected to and which "
+            "indexed knowledge entries mention it. Use this to explore relationships between "
+            "domain concepts, systems, or rules that vector search alone might not surface."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "entity": {
+                    "type": "string",
+                    "description": "Entity name to look up (e.g. 'Order', 'Manager Approval')."
+                },
+                "depth": {
+                    "type": "number",
+                    "description": "Number of hops to traverse from the entity (max 2). Default 1.",
+                    "default": 1
+                },
+                "project_id": {
+                    "type": "string",
+                    "description": "Project ID. If omitted, auto-detected from current directory."
+                }
+            },
+            "required": ["entity"]
+        }
+    },
+    {
         "name": "rag_add_project_path",
         "description": (
             "Associate an additional filesystem path with an existing project. "
@@ -374,6 +484,8 @@ def handle_tool_call(name, args):
             return _list_projects(args)
         elif name == "rag_set_language":
             return _set_language(args)
+        elif name == "rag_query_graph":
+            return _query_graph(args)
         elif name == "rag_add_project_path":
             return _add_project_path(args)
         else:
@@ -389,6 +501,11 @@ def _store_knowledge(args):
     content = args["content"]
     category = args.get("category", "insight")
     tags = args.get("tags", [])
+    entities, skipped_entities = _valid_graph_items(args.get("entities"), ["name"])
+    relations, skipped_relations = _valid_graph_items(
+        args.get("relations"), ["subject", "predicate", "object"]
+    )
+    skipped = skipped_entities + skipped_relations
 
     entry_id = db.store_knowledge_entry(
         project_id=pid,
@@ -399,10 +516,27 @@ def _store_knowledge(args):
         tags=tags,
     )
 
+    for entity in entities:
+        entity_type = entity.get("type", "")
+        if not isinstance(entity_type, str):
+            entity_type = ""
+        entity_id = db.upsert_entity(pid, entity["name"], entity_type)
+        db.link_entry_entity(entry_id, entity_id)
+
+    for relation in relations:
+        db.add_relation(
+            pid, relation["subject"], relation["predicate"], relation["object"],
+            entry_id=entry_id,
+        )
+
     project = db.get_project(pid)
     lang = project.get("language", "en") if project else "en"
 
     stats = db.get_project_stats(pid)
+    graph_line = ""
+    if entities or relations or skipped:
+        skipped_str = f" ({skipped} malformed items skipped)" if skipped else ""
+        graph_line = f"  Graph: {len(entities)} entities, {len(relations)} relations{skipped_str}\n"
 
     return {
         "content": [{
@@ -413,6 +547,7 @@ def _store_knowledge(args):
                 f"  Category: {category}\n"
                 f"  Tags: {', '.join(tags) if tags else '(none)'}\n"
                 f"  Language: {lang}\n"
+                f"{graph_line}"
                 f"  ID: {entry_id}\n\n"
                 f"Project: {pid} — {stats['pending']} pending, {stats['indexed']} indexed\n"
                 f"Approve at http://127.0.0.1:8000/api"
@@ -448,6 +583,8 @@ def _search(args):
     category = args.get("category")
     tags = args.get("tags")
     top_k = args.get("top_k", 5)
+    expand_graph = args.get("expand_graph", True)
+    graph_depth = _coerce_depth(args.get("graph_depth", 1))
 
     project = db.get_project(pid)
     if not project:
@@ -476,6 +613,25 @@ def _search(args):
             preview += "..."
         lines.append(f"  [{i}] {r['title']} ({r['category']}){tags_str} (score: {r['score']})")
         lines.append(f"      {preview}\n")
+
+    if expand_graph:
+        seed_ids = [r["entry_id"] for r in results]
+        expansion = db.expand_entries_via_graph(pid, seed_ids, depth=graph_depth, limit=5)
+        triples = expansion.get("triples") or []
+        related_entries = expansion.get("related_entries") or []
+        if triples or related_entries:
+            lines.append("Related via knowledge graph:\n")
+            for t in triples:
+                lines.append(f"  {t['subject']} —{t['predicate']}→ {t['object']}")
+            if triples and related_entries:
+                lines.append("")
+            for e in related_entries:
+                tags_str = f" [{', '.join(e['tags'])}]" if e.get("tags") else ""
+                preview = e["content"][:200].replace("\n", " ")
+                if len(e["content"]) > 200:
+                    preview += "..."
+                lines.append(f"  {e['title']} ({e['category']}){tags_str}")
+                lines.append(f"    {preview}\n")
 
     return {"content": [{"type": "text", "text": "\n".join(lines)}]}
 
@@ -614,6 +770,65 @@ def _set_language(args):
             )
         }]
     }
+
+
+def _query_graph(args):
+    pid = _resolve_project_id(args)
+    entity_name = args["entity"]
+    depth = _coerce_depth(args.get("depth", 1))
+
+    project = db.get_project(pid)
+    if not project:
+        return {"content": [{"type": "text", "text": f"Project '{pid}' not found."}]}
+
+    result = db.query_entity_graph(pid, entity_name, depth=depth)
+
+    if not result.get("entity"):
+        graph = db.get_graph(pid)
+        top = sorted(graph["entities"], key=lambda e: e["entry_count"], reverse=True)[:10]
+        if top:
+            names = ", ".join(e["name"] for e in top)
+            text = (
+                f"No entity named '{entity_name}' in '{project['name']}'.\n"
+                f"Known entities: {names}"
+            )
+        else:
+            text = (
+                f"No entity named '{entity_name}' in '{project['name']}'.\n"
+                f"This project's knowledge graph is empty — store entries with entities/relations first."
+            )
+        return {"content": [{"type": "text", "text": text}]}
+
+    entity = result["entity"]
+    triples = result.get("triples") or []
+    entries = result.get("entries") or []
+
+    lines = [f"Entity: {entity['name']}" + (f" ({entity['type']})" if entity.get("type") else "")]
+    lines.append(f"Project: {project['name']}\n")
+
+    if triples:
+        by_predicate = {}
+        for t in triples:
+            by_predicate.setdefault(t["predicate"], []).append(t)
+        lines.append("Relations:")
+        for predicate, group in by_predicate.items():
+            lines.append(f"  {predicate}:")
+            for t in group:
+                lines.append(f"    {t['subject']} —{t['predicate']}→ {t['object']}")
+        lines.append("")
+    else:
+        lines.append("No relations found for this entity.\n")
+
+    if entries:
+        lines.append("Entries mentioning this entity:")
+        for e in entries:
+            tags_str = f" [{', '.join(e['tags'])}]" if e.get("tags") else ""
+            lines.append(f"  {e['title']} ({e['category']}){tags_str}")
+            lines.append(f"    ID: {e['id']}")
+    else:
+        lines.append("No indexed entries mention this entity.")
+
+    return {"content": [{"type": "text", "text": "\n".join(lines)}]}
 
 
 def _add_project_path(args):

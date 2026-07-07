@@ -2,6 +2,7 @@
 
 import json
 import os
+import re
 import time
 import uuid
 import embeddings
@@ -143,6 +144,50 @@ def init_db():
                 "INSERT OR IGNORE INTO project_paths (project_id, path, created_at) VALUES (?, ?, ?)",
                 (p["id"], p["root_path"], 0),
             )
+        conn.commit()
+
+        conn.executescript("""
+            CREATE TABLE IF NOT EXISTS entities (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                name TEXT NOT NULL,
+                norm_name TEXT NOT NULL,
+                type TEXT NOT NULL DEFAULT '',
+                created_at REAL NOT NULL,
+                UNIQUE(project_id, norm_name)
+            );
+
+            CREATE TABLE IF NOT EXISTS relations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                subject_id INTEGER NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+                predicate TEXT NOT NULL,
+                object_id INTEGER NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+                entry_id TEXT REFERENCES knowledge_entries(id) ON DELETE CASCADE,
+                created_at REAL NOT NULL
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_relations_unique
+                ON relations(project_id, subject_id, predicate, object_id, IFNULL(entry_id, ''));
+
+            CREATE TABLE IF NOT EXISTS entry_entities (
+                entry_id TEXT NOT NULL REFERENCES knowledge_entries(id) ON DELETE CASCADE,
+                entity_id INTEGER NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+                PRIMARY KEY(entry_id, entity_id)
+            );
+
+            CREATE TABLE IF NOT EXISTS entry_links (
+                from_entry TEXT NOT NULL REFERENCES knowledge_entries(id) ON DELETE CASCADE,
+                to_entry TEXT NOT NULL REFERENCES knowledge_entries(id) ON DELETE CASCADE,
+                relation TEXT NOT NULL DEFAULT 'related',
+                PRIMARY KEY(from_entry, to_entry, relation)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_entities_project ON entities(project_id);
+            CREATE INDEX IF NOT EXISTS idx_relations_subject ON relations(subject_id);
+            CREATE INDEX IF NOT EXISTS idx_relations_object ON relations(object_id);
+            CREATE INDEX IF NOT EXISTS idx_relations_entry ON relations(entry_id);
+            CREATE INDEX IF NOT EXISTS idx_entry_entities_entity ON entry_entities(entity_id);
+        """)
         conn.commit()
     finally:
         conn.close()
@@ -685,5 +730,319 @@ def search_entries_by_embedding(query_embedding, project_id=None, k=10, category
             entry["score"] = score_map.get(entry["entry_id"], 0)
             results.append(entry)
         return results
+    finally:
+        conn.close()
+
+
+# ---- Knowledge graph operations ----
+
+
+def _normalize_entity_name(name):
+    """Strip, lowercase, and collapse internal whitespace for entity dedup."""
+    return re.sub(r"\s+", " ", name.strip().lower())
+
+
+def upsert_entity(project_id, name, type=""):
+    """Insert or get an entity by (project_id, normalized name). Returns entity id.
+
+    Keeps the first-seen display name; updates `type` only if the existing
+    row currently has no type and a non-empty one is given.
+    """
+    norm = _normalize_entity_name(name)
+    conn = get_connection()
+    try:
+        now = time.time()
+        conn.execute("""
+            INSERT OR IGNORE INTO entities (project_id, name, norm_name, type, created_at)
+            VALUES (?, ?, ?, ?, ?)
+        """, (project_id, name.strip(), norm, type, now))
+        row = conn.execute(
+            "SELECT id, type FROM entities WHERE project_id = ? AND norm_name = ?",
+            (project_id, norm),
+        ).fetchone()
+        if type and not row["type"]:
+            conn.execute("UPDATE entities SET type = ? WHERE id = ?", (type, row["id"]))
+        conn.commit()
+        return row["id"]
+    finally:
+        conn.close()
+
+
+def link_entry_entity(entry_id, entity_id):
+    """Link an entry to an entity. Idempotent."""
+    conn = get_connection()
+    try:
+        conn.execute(
+            "INSERT OR IGNORE INTO entry_entities (entry_id, entity_id) VALUES (?, ?)",
+            (entry_id, entity_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def add_relation(project_id, subject, predicate, obj, entry_id=None):
+    """Add a subject-predicate-object relation. `subject`/`obj` are entity names.
+
+    Upserts both entities, inserts the relation (idempotent via the unique
+    index), and when `entry_id` is given also links both entities to the
+    entry via entry_entities. Returns the relation id.
+    """
+    subject_id = upsert_entity(project_id, subject)
+    object_id = upsert_entity(project_id, obj)
+    conn = get_connection()
+    try:
+        now = time.time()
+        conn.execute("""
+            INSERT OR IGNORE INTO relations
+                (project_id, subject_id, predicate, object_id, entry_id, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (project_id, subject_id, predicate, object_id, entry_id, now))
+        conn.commit()
+        row = conn.execute("""
+            SELECT id FROM relations
+            WHERE project_id = ? AND subject_id = ? AND predicate = ? AND object_id = ?
+                AND IFNULL(entry_id, '') = IFNULL(?, '')
+        """, (project_id, subject_id, predicate, object_id, entry_id)).fetchone()
+        relation_id = row["id"] if row else None
+    finally:
+        conn.close()
+
+    if entry_id:
+        link_entry_entity(entry_id, subject_id)
+        link_entry_entity(entry_id, object_id)
+
+    return relation_id
+
+
+def get_entities_for_entry(entry_id):
+    """List entities linked to an entry. Returns [{id, name, type}]."""
+    conn = get_connection()
+    try:
+        rows = conn.execute("""
+            SELECT e.id, e.name, e.type FROM entities e
+            JOIN entry_entities ee ON ee.entity_id = e.id
+            WHERE ee.entry_id = ?
+            ORDER BY e.name
+        """, (entry_id,)).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+def get_relations_for_entry(entry_id):
+    """List relations recorded for an entry. Returns [{id, subject, predicate, object}]."""
+    conn = get_connection()
+    try:
+        rows = conn.execute("""
+            SELECT r.id, s.name as subject, r.predicate, o.name as object
+            FROM relations r
+            JOIN entities s ON s.id = r.subject_id
+            JOIN entities o ON o.id = r.object_id
+            WHERE r.entry_id = ?
+        """, (entry_id,)).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+def add_entry_link(from_entry, to_entry, relation="related"):
+    """Link two entries directly. Idempotent."""
+    conn = get_connection()
+    try:
+        conn.execute("""
+            INSERT OR IGNORE INTO entry_links (from_entry, to_entry, relation)
+            VALUES (?, ?, ?)
+        """, (from_entry, to_entry, relation))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_entry_links(entry_id):
+    """List entry_links where the entry is either side."""
+    conn = get_connection()
+    try:
+        rows = conn.execute("""
+            SELECT from_entry, to_entry, relation FROM entry_links
+            WHERE from_entry = ? OR to_entry = ?
+        """, (entry_id, entry_id)).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+def get_graph(project_id):
+    """Get the whole project's graph.
+
+    Returns {"entities": [{id, name, type, entry_count}],
+             "relations": [{id, subject_id, object_id, predicate, entry_id}]}.
+    """
+    conn = get_connection()
+    try:
+        entity_rows = conn.execute("""
+            SELECT e.id, e.name, e.type,
+                   COUNT(DISTINCT ee.entry_id) as entry_count
+            FROM entities e
+            LEFT JOIN entry_entities ee ON ee.entity_id = e.id
+            WHERE e.project_id = ?
+            GROUP BY e.id
+            ORDER BY e.name
+        """, (project_id,)).fetchall()
+        relation_rows = conn.execute("""
+            SELECT id, subject_id, object_id, predicate, entry_id
+            FROM relations WHERE project_id = ?
+        """, (project_id,)).fetchall()
+        return {
+            "entities": [dict(r) for r in entity_rows],
+            "relations": [dict(r) for r in relation_rows],
+        }
+    finally:
+        conn.close()
+
+
+def _bfs_relations(conn, project_id, start_ids, depth):
+    """BFS over relations (undirected) from start_ids up to depth hops.
+
+    Returns (visited_entity_ids, triples, relation_entry_ids) where triples is
+    a list of {subject, predicate, object, entry_id} in traversal order and
+    relation_entry_ids is the set of non-null entry_id values seen on traversed
+    relations.
+    """
+    frontier = list(start_ids)
+    visited = set(frontier)
+    triples = []
+    seen_relation_ids = set()
+    relation_entry_ids = set()
+    for _ in range(max(depth, 0)):
+        if not frontier:
+            break
+        placeholders = ",".join("?" for _ in frontier)
+        rows = conn.execute(f"""
+            SELECT r.id, s.name as subject, r.predicate, o.name as object,
+                   r.subject_id, r.object_id, r.entry_id
+            FROM relations r
+            JOIN entities s ON s.id = r.subject_id
+            JOIN entities o ON o.id = r.object_id
+            WHERE r.project_id = ? AND (r.subject_id IN ({placeholders}) OR r.object_id IN ({placeholders}))
+        """, [project_id] + frontier + frontier).fetchall()
+        next_frontier = set()
+        for row in rows:
+            if row["id"] not in seen_relation_ids:
+                seen_relation_ids.add(row["id"])
+                triples.append({
+                    "subject": row["subject"],
+                    "predicate": row["predicate"],
+                    "object": row["object"],
+                    "entry_id": row["entry_id"],
+                })
+                if row["entry_id"]:
+                    relation_entry_ids.add(row["entry_id"])
+            for eid in (row["subject_id"], row["object_id"]):
+                if eid not in visited:
+                    next_frontier.add(eid)
+        visited |= next_frontier
+        frontier = list(next_frontier)
+    return visited, triples, relation_entry_ids
+
+
+def query_entity_graph(project_id, entity_name, depth=1):
+    """Resolve an entity by normalized name and BFS over relations up to `depth` hops.
+
+    Returns {"entity": {...} | None, "triples": [{subject, predicate, object, entry_id}],
+             "entries": [indexed entry dicts linked to any reached entity]}.
+    """
+    norm = _normalize_entity_name(entity_name)
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            "SELECT * FROM entities WHERE project_id = ? AND norm_name = ?",
+            (project_id, norm),
+        ).fetchone()
+        if not row:
+            return {"entity": None, "triples": [], "entries": []}
+        entity = dict(row)
+
+        visited, triples, _ = _bfs_relations(conn, project_id, [entity["id"]], depth)
+
+        entries = []
+        if visited:
+            placeholders = ",".join("?" for _ in visited)
+            entry_rows = conn.execute(f"""
+                SELECT DISTINCT ke.* FROM knowledge_entries ke
+                JOIN entry_entities ee ON ee.entry_id = ke.id
+                WHERE ee.entity_id IN ({placeholders}) AND ke.status = 'indexed'
+                ORDER BY ke.created_at DESC
+            """, list(visited)).fetchall()
+            for r in entry_rows:
+                e = dict(r)
+                e["tags"] = get_tags_for_entry(e["id"])
+                entries.append(e)
+
+        return {"entity": entity, "triples": triples, "entries": entries}
+    finally:
+        conn.close()
+
+
+def expand_entries_via_graph(project_id, seed_entry_ids, depth=1, limit=10):
+    """Expand vector-search seed entries via the knowledge graph.
+
+    Algorithm: seed entities = union of entry_entities for seeds; BFS `depth`
+    hops over relations (undirected); related entries = entries linked to any
+    reached entity (via entry_entities or relations.entry_id) plus entry_links
+    neighbors of seeds (both directions); filter to status='indexed', exclude
+    seeds, dedupe, cap at `limit`.
+
+    Returns {"triples": [{subject, predicate, object, entry_id}],
+             "related_entries": [entry dicts with "tags"]}.
+    """
+    if not seed_entry_ids:
+        return {"triples": [], "related_entries": []}
+
+    conn = get_connection()
+    try:
+        seed_placeholders = ",".join("?" for _ in seed_entry_ids)
+        seed_rows = conn.execute(
+            f"SELECT DISTINCT entity_id FROM entry_entities WHERE entry_id IN ({seed_placeholders})",
+            seed_entry_ids,
+        ).fetchall()
+        seed_entities = [r["entity_id"] for r in seed_rows]
+
+        visited, triples, relation_entry_ids = _bfs_relations(conn, project_id, seed_entities, depth)
+
+        related_ids = set(relation_entry_ids)
+        if visited:
+            placeholders = ",".join("?" for _ in visited)
+            entity_entry_rows = conn.execute(
+                f"SELECT DISTINCT entry_id FROM entry_entities WHERE entity_id IN ({placeholders})",
+                list(visited),
+            ).fetchall()
+            related_ids |= {r["entry_id"] for r in entity_entry_rows}
+
+        link_rows = conn.execute(f"""
+            SELECT from_entry, to_entry FROM entry_links
+            WHERE from_entry IN ({seed_placeholders}) OR to_entry IN ({seed_placeholders})
+        """, list(seed_entry_ids) + list(seed_entry_ids)).fetchall()
+        for r in link_rows:
+            related_ids.add(r["from_entry"])
+            related_ids.add(r["to_entry"])
+
+        related_ids -= set(seed_entry_ids)
+
+        related_entries = []
+        if related_ids:
+            placeholders = ",".join("?" for _ in related_ids)
+            entry_rows = conn.execute(f"""
+                SELECT * FROM knowledge_entries
+                WHERE id IN ({placeholders}) AND status = 'indexed'
+                ORDER BY created_at DESC
+                LIMIT ?
+            """, list(related_ids) + [limit]).fetchall()
+            for r in entry_rows:
+                e = dict(r)
+                e["tags"] = get_tags_for_entry(e["id"])
+                related_entries.append(e)
+
+        return {"triples": triples, "related_entries": related_entries}
     finally:
         conn.close()

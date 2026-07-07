@@ -6,13 +6,14 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Dialog, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import EntryForm from "@/components/EntryForm";
-import { api, type Entry, type Project } from "@/lib/api";
+import { api, type Entry, type Project, type EntryGraph } from "@/lib/api";
 
 export default function EntryDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const [entry, setEntry] = useState<Entry | null>(null);
   const [projects, setProjects] = useState<Project[]>([]);
+  const [entryGraph, setEntryGraph] = useState<EntryGraph | null>(null);
   const [editing, setEditing] = useState(false);
   const [showDelete, setShowDelete] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -29,6 +30,10 @@ export default function EntryDetail() {
       }
     }
     load();
+    if (id) {
+      // Fetched separately: a graph endpoint failure must not break the entry page.
+      api.getEntryGraph(id).then(setEntryGraph).catch(() => setEntryGraph(null));
+    }
   }, [id]);
 
   async function handleApprove() {
@@ -91,6 +96,35 @@ export default function EntryDetail() {
           </div>
         </CardContent>
       </Card>
+
+      {entryGraph && (entryGraph.entities.length > 0 || entryGraph.relations.length > 0) && (
+        <Card>
+          <CardContent className="pt-4 space-y-3">
+            <h2 className="text-sm font-semibold">Knowledge graph</h2>
+            {entryGraph.entities.length > 0 && (
+              <div className="flex gap-2 flex-wrap">
+                {entryGraph.entities.map((e) => (
+                  <Badge key={e.id} variant="secondary">
+                    {e.name}
+                    {e.type && <span className="ml-1 opacity-70">({e.type})</span>}
+                  </Badge>
+                ))}
+              </div>
+            )}
+            {entryGraph.relations.length > 0 && (
+              <div className="flex flex-col gap-1.5">
+                {entryGraph.relations.map((r) => (
+                  <div key={r.id} className="text-xs flex flex-wrap items-center gap-1">
+                    <Badge variant="outline">{r.subject}</Badge>
+                    <span className="text-muted-foreground">— {r.predicate} →</span>
+                    <Badge variant="outline">{r.object}</Badge>
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       {entry.status === "pending" && (
         <div className="flex gap-2">

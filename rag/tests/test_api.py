@@ -184,6 +184,137 @@ class TestEntries:
         assert results[0]["title"] == "R1"
 
 
+class TestGraph:
+    def _setup_project(self, client, pid="test-proj"):
+        client.post("/api/projects", json={
+            "id": pid, "name": "Test", "root_path": "/tmp/test",
+        })
+
+    def test_get_graph_not_found(self, client):
+        resp = client.get("/api/graph?project_id=nonexistent")
+        assert resp.status_code == 404
+
+    def test_get_graph_empty(self, client):
+        self._setup_project(client)
+        resp = client.get("/api/graph?project_id=test-proj")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["entities"] == []
+        assert data["relations"] == []
+
+    def test_get_graph_with_data(self, client):
+        self._setup_project(client)
+        client.post("/api/entries", json={
+            "project_id": "test-proj", "title": "Rule", "content": "content",
+            "entities": [{"name": "Order", "type": "concept"}, {"name": "Manager", "type": "role"}],
+            "relations": [{"subject": "Order", "predicate": "requires", "object": "Manager"}],
+        })
+        resp = client.get("/api/graph?project_id=test-proj")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data["entities"]) == 2
+        assert len(data["relations"]) == 1
+
+    def test_get_entity_graph_project_not_found(self, client):
+        resp = client.get("/api/graph/entity?project_id=nonexistent&name=Order")
+        assert resp.status_code == 404
+
+    def test_get_entity_graph_unknown_entity(self, client):
+        self._setup_project(client)
+        resp = client.get("/api/graph/entity?project_id=test-proj&name=Ghost")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["entity"] is None
+        assert data["triples"] == []
+        assert data["entries"] == []
+
+    def test_get_entity_graph_found(self, client):
+        self._setup_project(client)
+        client.post("/api/entries", json={
+            "project_id": "test-proj", "title": "Rule", "content": "content",
+            "entities": [{"name": "Order"}, {"name": "Manager"}],
+            "relations": [{"subject": "Order", "predicate": "requires", "object": "Manager"}],
+        })
+        resp = client.get("/api/graph/entity?project_id=test-proj&name=order&depth=1")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["entity"]["name"] == "Order"
+        assert len(data["triples"]) == 1
+
+    def test_get_entry_graph_not_found(self, client):
+        resp = client.get("/api/entries/nonexistent-id/graph")
+        assert resp.status_code == 404
+
+    def test_get_entry_graph(self, client):
+        self._setup_project(client)
+        create = client.post("/api/entries", json={
+            "project_id": "test-proj", "title": "Rule", "content": "content",
+            "entities": [{"name": "Order"}, {"name": "Manager"}],
+            "relations": [{"subject": "Order", "predicate": "requires", "object": "Manager"}],
+        }).json()
+        eid = create["id"]
+        resp = client.get(f"/api/entries/{eid}/graph")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data["entities"]) == 2
+        assert len(data["relations"]) == 1
+        assert data["relations"][0]["subject"] == "Order"
+        assert data["relations"][0]["object"] == "Manager"
+        assert "links" in data
+
+    def test_entry_update_replaces_relations(self, client):
+        self._setup_project(client)
+        create = client.post("/api/entries", json={
+            "project_id": "test-proj", "title": "Rule", "content": "content",
+            "entities": [{"name": "Order"}, {"name": "Manager"}],
+            "relations": [{"subject": "Order", "predicate": "requires", "object": "Manager"}],
+        }).json()
+        eid = create["id"]
+        resp = client.put(f"/api/entries/{eid}", json={
+            "entities": [{"name": "Order"}, {"name": "Director"}],
+            "relations": [{"subject": "Order", "predicate": "requires", "object": "Director"}],
+        })
+        assert resp.status_code == 200
+        graph = client.get(f"/api/entries/{eid}/graph").json()
+        assert len(graph["relations"]) == 1
+        assert graph["relations"][0]["object"] == "Director"
+        entity_names = {e["name"] for e in graph["entities"]}
+        assert entity_names == {"Order", "Director"}
+
+    def test_entry_update_empty_relations_wipes_graph(self, client):
+        self._setup_project(client)
+        create = client.post("/api/entries", json={
+            "project_id": "test-proj", "title": "Rule", "content": "content",
+            "entities": [{"name": "Order"}, {"name": "Manager"}],
+            "relations": [{"subject": "Order", "predicate": "requires", "object": "Manager"}],
+        }).json()
+        eid = create["id"]
+        resp = client.put(f"/api/entries/{eid}", json={"relations": []})
+        assert resp.status_code == 200
+        graph = client.get(f"/api/entries/{eid}/graph").json()
+        assert graph["relations"] == []
+        assert graph["entities"] == []
+
+    def test_entry_update_entities_only_is_additive(self, client):
+        self._setup_project(client)
+        create = client.post("/api/entries", json={
+            "project_id": "test-proj", "title": "Rule", "content": "content",
+            "entities": [{"name": "Order"}, {"name": "Manager"}],
+            "relations": [{"subject": "Order", "predicate": "requires", "object": "Manager"}],
+        }).json()
+        eid = create["id"]
+        resp = client.put(f"/api/entries/{eid}", json={
+            "entities": [{"name": "Invoice"}],
+        })
+        assert resp.status_code == 200
+        graph = client.get(f"/api/entries/{eid}/graph").json()
+        assert len(graph["relations"]) == 1
+        assert graph["relations"][0]["subject"] == "Order"
+        assert graph["relations"][0]["object"] == "Manager"
+        entity_names = {e["name"] for e in graph["entities"]}
+        assert entity_names == {"Order", "Manager", "Invoice"}
+
+
 class TestSearch:
     def _setup_with_data(self, client):
         client.post("/api/projects", json={
@@ -209,6 +340,40 @@ class TestSearch:
         data = resp.json()
         assert len(data) >= 1
         assert data[0]["title"] == "Order approval rule"
+
+    def test_search_without_expand_returns_bare_list(self, client):
+        self._setup_with_data(client)
+        resp = client.get("/api/search?q=order+approval&project_id=test-proj")
+        assert resp.status_code == 200
+        assert isinstance(resp.json(), list)
+
+    def test_search_with_expand_returns_graph(self, client):
+        client.post("/api/projects", json={
+            "id": "test-proj", "name": "Test", "root_path": "/tmp/test",
+        })
+        e1 = client.post("/api/entries", json={
+            "project_id": "test-proj", "title": "Discount rule",
+            "content": "Discounts need manager approval before applying",
+            "category": "business-rule",
+            "entities": [{"name": "Discount"}],
+            "relations": [{"subject": "Discount", "predicate": "requires", "object": "Approval"}],
+        }).json()["id"]
+        e2 = client.post("/api/entries", json={
+            "project_id": "test-proj", "title": "Approval process",
+            "content": "Manager approval workflow for purchases",
+            "category": "documentation",
+            "entities": [{"name": "Approval"}],
+        }).json()["id"]
+        client.post(f"/api/entries/{e1}/approve")
+        client.post(f"/api/entries/{e2}/approve")
+        resp = client.get("/api/search?q=discount&project_id=test-proj&expand=true&top_k=1")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "results" in data
+        assert "graph" in data
+        assert any(t["subject"] == "Discount" for t in data["graph"]["triples"])
+        related_titles = [e["title"] for e in data["graph"]["related_entries"]]
+        assert "Approval process" in related_titles
 
     def test_search_no_results(self, client):
         self._setup_with_data(client)

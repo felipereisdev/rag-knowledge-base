@@ -7,6 +7,7 @@ import EntryDetail from "@/pages/EntryDetail";
 import NewEntry from "@/pages/NewEntry";
 import Approvals from "@/pages/Approvals";
 import Search from "@/pages/Search";
+import Graph from "@/pages/Graph";
 
 export default function App() {
   return (
@@ -19,6 +20,7 @@ export default function App() {
         <Route path="entries/:id" element={<EntryDetail />} />
         <Route path="approvals" element={<Approvals />} />
         <Route path="search" element={<Search />} />
+        <Route path="graph" element={<Graph />} />
       </Route>
     </Routes>
   );

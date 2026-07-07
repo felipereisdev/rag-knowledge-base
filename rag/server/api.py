@@ -37,12 +37,25 @@ class ProjectUpdate(BaseModel):
     language: str | None = None
 
 
+class EntityIn(BaseModel):
+    name: str
+    type: str = ""
+
+
+class RelationIn(BaseModel):
+    subject: str
+    predicate: str
+    object: str
+
+
 class EntryCreate(BaseModel):
     project_id: str
     title: str
     content: str
     category: str = "insight"
     tags: list[str] = []
+    entities: list[EntityIn] = []
+    relations: list[RelationIn] = []
 
 
 class EntryUpdate(BaseModel):
@@ -50,6 +63,8 @@ class EntryUpdate(BaseModel):
     content: str | None = None
     category: str | None = None
     tags: list[str] | None = None
+    entities: list[EntityIn] | None = None
+    relations: list[RelationIn] | None = None
 
 
 class PathCreate(BaseModel):
@@ -184,6 +199,15 @@ def remove_project_path(project_id: str, path: str = Query(...)):
 
 # ---- Entry endpoints ----
 
+def _persist_graph_data(project_id, entry_id, entities, relations):
+    """Upsert entities/relations for an entry (same shape as the MCP tool)."""
+    for ent in entities or []:
+        entity_id = db.upsert_entity(project_id, ent.name, ent.type)
+        db.link_entry_entity(entry_id, entity_id)
+    for rel in relations or []:
+        db.add_relation(project_id, rel.subject, rel.predicate, rel.object, entry_id=entry_id)
+
+
 @app.get("/api/entries")
 def list_entries(
     project_id: str | None = Query(default=None),
@@ -205,6 +229,7 @@ def create_entry(entry: EntryCreate):
         source="manual",
         tags=entry.tags,
     )
+    _persist_graph_data(entry.project_id, entry_id, entry.entities, entry.relations)
     return db.get_entry(entry_id)
 
 
@@ -228,6 +253,16 @@ def update_entry(entry_id: str, update: EntryUpdate):
         category=update.category,
         tags=update.tags,
     )
+    if update.relations is not None:
+        conn = db.get_connection()
+        try:
+            conn.execute("DELETE FROM relations WHERE entry_id = ?", (entry_id,))
+            conn.execute("DELETE FROM entry_entities WHERE entry_id = ?", (entry_id,))
+            conn.commit()
+        finally:
+            conn.close()
+    if update.entities is not None or update.relations is not None:
+        _persist_graph_data(entry["project_id"], entry_id, update.entities, update.relations)
     entry_new = db.get_entry(entry_id)
     if entry_new["status"] == "indexed":
         vec = embeddings.embed_text(entry_new["title"] + " " + entry_new["content"])
@@ -265,6 +300,40 @@ def reject_entry(entry_id: str):
     return {"ok": True}
 
 
+@app.get("/api/entries/{entry_id}/graph")
+def get_entry_graph(entry_id: str):
+    entry = db.get_entry(entry_id)
+    if not entry:
+        raise HTTPException(404, "Entry not found")
+    return {
+        "entities": db.get_entities_for_entry(entry_id),
+        "relations": db.get_relations_for_entry(entry_id),
+        "links": db.get_entry_links(entry_id),
+    }
+
+
+# ---- Knowledge graph ----
+
+@app.get("/api/graph")
+def get_graph(project_id: str = Query(...)):
+    proj = db.get_project(project_id)
+    if not proj:
+        raise HTTPException(404, "Project not found")
+    return db.get_graph(project_id)
+
+
+@app.get("/api/graph/entity")
+def get_entity_graph(
+    project_id: str = Query(...),
+    name: str = Query(...),
+    depth: int = 1,
+):
+    proj = db.get_project(project_id)
+    if not proj:
+        raise HTTPException(404, "Project not found")
+    return db.query_entity_graph(project_id, name, depth=depth)
+
+
 # ---- Search and tags ----
 
 @app.get("/api/search")
@@ -274,8 +343,12 @@ def search(
     category: str | None = None,
     tags: list[str] | None = Query(None),
     top_k: int = 5,
+    expand: bool = False,
+    depth: int = 1,
 ):
     if not q.strip():
+        if expand:
+            return {"results": [], "graph": {"triples": [], "related_entries": []}}
         return []
     query_vec = embeddings.embed_query(q)
     results = db.search_entries_by_embedding(
@@ -285,7 +358,13 @@ def search(
         category=category,
         tags=tags,
     )
-    return results
+    if not expand:
+        return results
+    graph = {"triples": [], "related_entries": []}
+    if project_id and results:
+        seed_ids = [r["entry_id"] for r in results]
+        graph = db.expand_entries_via_graph(project_id, seed_ids, depth=depth, limit=5)
+    return {"results": results, "graph": graph}
 
 
 @app.get("/api/tags")
