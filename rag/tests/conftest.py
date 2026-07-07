@@ -16,9 +16,9 @@ def clean_env():
     old_min_score = os.environ.get("RAG_SEARCH_MIN_SCORE")
     os.environ["RAG_EMBEDDING_MODEL"] = "all-MiniLM-L6-v2"
     os.environ["RAG_EMBEDDING_DIM"] = "384"
-    # Calibrated for all-MiniLM-L6-v2: unrelated queries score <= ~0.435,
-    # relevant matches >= ~0.457 (see search_min_score in server/api.py).
-    os.environ["RAG_SEARCH_MIN_SCORE"] = "0.44"
+    # Calibrated for all-MiniLM-L6-v2 under cosine similarity (see Task 5 of
+    # docs/superpowers/plans/2026-07-07-rag-retrieval-overhaul.md, Step 6).
+    os.environ["RAG_SEARCH_MIN_SCORE"] = "0.30"
     yield
     if old_model:
         os.environ["RAG_EMBEDDING_MODEL"] = old_model

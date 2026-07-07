@@ -14,17 +14,17 @@ app = FastAPI(title="RAG Admin API", version="0.4.0")
 
 
 def search_min_score():
-    """Minimum relevance score (1 / (1 + L2 distance)) for a search hit to count
-    as a real match rather than nearest-neighbor noise. Score scales differ per
-    embedding model, so the cutoff is configurable via RAG_SEARCH_MIN_SCORE:
-    measured ~0.44 separates noise for all-MiniLM-L6-v2 (test model), while
-    paraphrase-multilingual-mpnet-base-v2 (production default) scores relevant
-    matches at 0.29-0.35 and unrelated queries below 0.24 — hence 0.25 default.
+    """Minimum cosine similarity (1 - cosine distance) for a search hit to count
+    as a real match rather than nearest-neighbor noise. Configurable via
+    RAG_SEARCH_MIN_SCORE. Calibrated defaults: relevant matches score well above
+    0.30 for both all-MiniLM-L6-v2 (test model) and
+    paraphrase-multilingual-mpnet-base-v2 (production default), while unrelated
+    queries land below it.
     """
     try:
-        return float(os.environ.get("RAG_SEARCH_MIN_SCORE", "0.25"))
+        return float(os.environ.get("RAG_SEARCH_MIN_SCORE", "0.30"))
     except ValueError:
-        return 0.25
+        return 0.30
 
 app.add_middleware(
     CORSMiddleware,

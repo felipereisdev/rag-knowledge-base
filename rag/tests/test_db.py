@@ -694,15 +694,31 @@ class TestEmbeddingCleanup:
         assert temp_db.get_entry(eid) is None
         assert temp_db.get_embedding(eid) is None
 
-    def test_migration_purges_orphan_embeddings(self, temp_db):
-        import embeddings
-        # Orphan: embedding with no matching knowledge_entries row
-        temp_db.store_embedding("ghost", embeddings.embed_text("ghost"))
+    def test_migration_purges_orphan_embeddings_legacy_table(self, temp_db):
         conn = temp_db.get_connection()
         try:
+            dim = 384
+            conn.execute(f"""
+                CREATE VIRTUAL TABLE IF NOT EXISTS entry_embeddings USING vec0(
+                    entry_id TEXT PRIMARY KEY,
+                    embedding FLOAT[{dim}]
+                )
+            """)
+            import struct
+            conn.execute(
+                "INSERT INTO entry_embeddings (entry_id, embedding) VALUES (?, ?)",
+                ("ghost", struct.pack(f"{dim}f", *([0.1] * dim))),
+            )
             conn.execute("PRAGMA user_version = 3")
             conn.commit()
         finally:
             conn.close()
         temp_db.init_db()
-        assert temp_db.get_embedding("ghost") is None
+        conn = temp_db.get_connection()
+        try:
+            tables = {r[0] for r in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'entry_embeddings'"
+            ).fetchall()}
+        finally:
+            conn.close()
+        assert tables == set()  # migration 0005 dropped the legacy table
