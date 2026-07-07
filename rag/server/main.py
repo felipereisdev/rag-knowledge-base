@@ -295,14 +295,24 @@ def _store_knowledge(args):
     )
     skipped = skipped_entities + skipped_relations
 
-    entry_id = db.store_knowledge_entry(
-        project_id=pid,
-        title=title,
-        content=content,
-        category=category,
-        source="assistant",
-        tags=tags,
-    )
+    try:
+        entry_id = db.store_knowledge_entry(
+            project_id=pid,
+            title=title,
+            content=content,
+            category=category,
+            source="assistant",
+            tags=tags,
+        )
+    except db.sqlite3.IntegrityError:
+        return {
+            "content": [{
+                "type": "text",
+                "text": (f"An entry titled '{title}' already exists in project '{pid}'. "
+                         f"Use a different title, or remove/update the existing entry."),
+            }],
+            "isError": True,
+        }
 
     for entity in entities:
         entity_type = entity.get("type", "")

@@ -231,14 +231,17 @@ def list_entries(
 
 @app.post("/api/entries", status_code=201)
 def create_entry(entry: EntryCreate):
-    entry_id = db.store_knowledge_entry(
-        project_id=entry.project_id,
-        title=entry.title,
-        content=entry.content,
-        category=entry.category,
-        source="manual",
-        tags=entry.tags,
-    )
+    try:
+        entry_id = db.store_knowledge_entry(
+            project_id=entry.project_id,
+            title=entry.title,
+            content=entry.content,
+            category=entry.category,
+            source="manual",
+            tags=entry.tags,
+        )
+    except db.sqlite3.IntegrityError:
+        raise HTTPException(409, "An entry with this title already exists in this project")
     _persist_graph_data(entry.project_id, entry_id, entry.entities, entry.relations)
     return db.get_entry(entry_id)
 
@@ -256,13 +259,16 @@ def update_entry(entry_id: str, update: EntryUpdate):
     entry = db.get_entry(entry_id)
     if not entry:
         raise HTTPException(404, "Entry not found")
-    db.update_entry(
-        entry_id,
-        title=update.title,
-        content=update.content,
-        category=update.category,
-        tags=update.tags,
-    )
+    try:
+        db.update_entry(
+            entry_id,
+            title=update.title,
+            content=update.content,
+            category=update.category,
+            tags=update.tags,
+        )
+    except db.sqlite3.IntegrityError:
+        raise HTTPException(409, "An entry with this title already exists in this project")
     if update.relations is not None:
         conn = db.get_connection()
         try:

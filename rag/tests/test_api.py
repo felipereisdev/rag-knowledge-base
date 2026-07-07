@@ -539,3 +539,24 @@ class TestEmbedEndpoint:
         assert data["dim"] == embeddings.EMBEDDING_DIM
         assert len(data["embeddings"]) == 2
         assert len(data["embeddings"][0]) == embeddings.EMBEDDING_DIM
+
+
+class TestDuplicateTitleConflict:
+    def _project(self, client):
+        client.post("/api/projects", json={"id": "p1", "name": "P1", "root_path": "/tmp/p1"})
+
+    def test_create_duplicate_title_returns_409(self, client):
+        self._project(client)
+        body = {"project_id": "p1", "title": "Same", "content": "a"}
+        assert client.post("/api/entries", json=body).status_code == 201
+        resp = client.post("/api/entries", json={**body, "content": "b"})
+        assert resp.status_code == 409
+        assert "title" in resp.json()["detail"].lower()
+
+    def test_update_to_duplicate_title_returns_409(self, client):
+        self._project(client)
+        client.post("/api/entries", json={"project_id": "p1", "title": "First", "content": "a"})
+        r2 = client.post("/api/entries", json={"project_id": "p1", "title": "Second", "content": "b"})
+        eid2 = r2.json()["id"]
+        resp = client.put(f"/api/entries/{eid2}", json={"title": "First"})
+        assert resp.status_code == 409
