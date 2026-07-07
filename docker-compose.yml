@@ -1,23 +1,21 @@
 services:
-  api:
-    build:
-      context: .
-      dockerfile: Dockerfile.api
-    container_name: rag-api
-    ports:
-      - "8000:8000"
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: rag-postgres
+    environment:
+      - POSTGRES_DB=rag
+      - POSTGRES_USER=rag
+      - POSTGRES_PASSWORD=secret
     volumes:
-      - ~/.rag:/root/.rag
-      - ~/.cache/huggingface:/root/.cache/huggingface
+      - rag_pgdata:/var/lib/postgresql/data
+    ports:
+      - "5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rag -d rag"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
     restart: unless-stopped
 
-  web:
-    build:
-      context: .
-      dockerfile: Dockerfile.web
-    container_name: rag-web
-    ports:
-      - "8765:80"
-    depends_on:
-      - api
-    restart: unless-stopped
+volumes:
+  rag_pgdata:
