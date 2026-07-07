@@ -587,3 +587,66 @@ class TestGraph:
         conn.close()
         assert rel_count == 0
         assert ee_count == 0
+
+
+class TestMigrationFramework:
+    def test_fresh_db_is_stamped_with_latest_version(self, temp_db):
+        conn = temp_db.get_connection()
+        try:
+            version = conn.execute("PRAGMA user_version").fetchone()[0]
+        finally:
+            conn.close()
+        assert version == len(temp_db.MIGRATIONS)
+        assert version >= 3
+
+    def test_init_db_is_idempotent(self, temp_db):
+        temp_db.init_db()
+        temp_db.init_db()
+        conn = temp_db.get_connection()
+        try:
+            version = conn.execute("PRAGMA user_version").fetchone()[0]
+        finally:
+            conn.close()
+        assert version == len(temp_db.MIGRATIONS)
+
+    def test_legacy_db_without_language_column_is_migrated(self, monkeypatch, tmp_path):
+        import importlib
+        import db as db_mod
+        db_path = str(tmp_path / "legacy.db")
+        monkeypatch.setattr(db_mod, "DB_PATH", db_path)
+        monkeypatch.setattr(db_mod, "DATA_DIR", str(tmp_path))
+        # Simulate a pre-language, pre-project_paths database at user_version 0
+        conn = db_mod.get_connection()
+        try:
+            conn.executescript("""
+                CREATE TABLE projects (
+                    id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    root_path TEXT NOT NULL,
+                    description TEXT DEFAULT '',
+                    project_type TEXT DEFAULT '',
+                    created_at REAL NOT NULL,
+                    updated_at REAL NOT NULL
+                );
+            """)
+            conn.execute(
+                "INSERT INTO projects (id, name, root_path, created_at, updated_at) VALUES ('p1', 'P1', '/tmp/p1', 1, 1)"
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        db_mod.init_db()
+
+        conn = db_mod.get_connection()
+        try:
+            cols = [r[1] for r in conn.execute("PRAGMA table_info(projects)").fetchall()]
+            assert "language" in cols
+            paths = conn.execute(
+                "SELECT path FROM project_paths WHERE project_id = 'p1'"
+            ).fetchall()
+            assert [r["path"] for r in paths] == ["/tmp/p1"]
+            version = conn.execute("PRAGMA user_version").fetchone()[0]
+            assert version == len(db_mod.MIGRATIONS)
+        finally:
+            conn.close()

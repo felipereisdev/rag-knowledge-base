@@ -39,156 +39,161 @@ def get_connection():
     return conn
 
 
+BASE_SCHEMA = """
+    CREATE TABLE IF NOT EXISTS projects (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        root_path TEXT NOT NULL,
+        description TEXT DEFAULT '',
+        project_type TEXT DEFAULT '',
+        language TEXT DEFAULT 'en',
+        created_at REAL NOT NULL,
+        updated_at REAL NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS knowledge_entries (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+        title TEXT NOT NULL,
+        content TEXT NOT NULL DEFAULT '',
+        category TEXT NOT NULL DEFAULT 'insight',
+        source TEXT NOT NULL DEFAULT 'manual',
+        author TEXT NOT NULL DEFAULT '',
+        status TEXT NOT NULL DEFAULT 'pending',
+        metadata TEXT NOT NULL DEFAULT '{}',
+        created_at REAL NOT NULL,
+        updated_at REAL NOT NULL,
+        UNIQUE(project_id, title)
+    );
+
+    CREATE TABLE IF NOT EXISTS tags (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+        name TEXT NOT NULL,
+        UNIQUE(project_id, name)
+    );
+
+    CREATE TABLE IF NOT EXISTS entry_tags (
+        entry_id TEXT NOT NULL REFERENCES knowledge_entries(id) ON DELETE CASCADE,
+        tag_id INTEGER NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
+        PRIMARY KEY(entry_id, tag_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS project_paths (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+        path TEXT NOT NULL,
+        created_at REAL NOT NULL DEFAULT 0,
+        UNIQUE(project_id, path)
+    );
+
+    CREATE TABLE IF NOT EXISTS entities (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+        name TEXT NOT NULL,
+        norm_name TEXT NOT NULL,
+        type TEXT NOT NULL DEFAULT '',
+        created_at REAL NOT NULL,
+        UNIQUE(project_id, norm_name)
+    );
+
+    CREATE TABLE IF NOT EXISTS relations (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+        subject_id INTEGER NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+        predicate TEXT NOT NULL,
+        object_id INTEGER NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+        entry_id TEXT REFERENCES knowledge_entries(id) ON DELETE CASCADE,
+        created_at REAL NOT NULL
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_relations_unique
+        ON relations(project_id, subject_id, predicate, object_id, IFNULL(entry_id, ''));
+
+    CREATE TABLE IF NOT EXISTS entry_entities (
+        entry_id TEXT NOT NULL REFERENCES knowledge_entries(id) ON DELETE CASCADE,
+        entity_id INTEGER NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+        PRIMARY KEY(entry_id, entity_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS entry_links (
+        from_entry TEXT NOT NULL REFERENCES knowledge_entries(id) ON DELETE CASCADE,
+        to_entry TEXT NOT NULL REFERENCES knowledge_entries(id) ON DELETE CASCADE,
+        relation TEXT NOT NULL DEFAULT 'related',
+        PRIMARY KEY(from_entry, to_entry, relation)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_knowledge_entries_project ON knowledge_entries(project_id);
+    CREATE INDEX IF NOT EXISTS idx_knowledge_entries_status ON knowledge_entries(status);
+    CREATE INDEX IF NOT EXISTS idx_knowledge_entries_category ON knowledge_entries(category);
+    CREATE INDEX IF NOT EXISTS idx_tags_project ON tags(project_id);
+    CREATE INDEX IF NOT EXISTS idx_entry_tags_entry ON entry_tags(entry_id);
+    CREATE INDEX IF NOT EXISTS idx_entities_project ON entities(project_id);
+    CREATE INDEX IF NOT EXISTS idx_relations_subject ON relations(subject_id);
+    CREATE INDEX IF NOT EXISTS idx_relations_object ON relations(object_id);
+    CREATE INDEX IF NOT EXISTS idx_relations_entry ON relations(entry_id);
+    CREATE INDEX IF NOT EXISTS idx_entry_entities_entity ON entry_entities(entity_id);
+"""
+
+
+def _create_vector_table(conn):
+    dim = embeddings.EMBEDDING_DIM
+    conn.execute(f"""
+        CREATE VIRTUAL TABLE IF NOT EXISTS entry_embeddings USING vec0(
+            entry_id TEXT PRIMARY KEY,
+            embedding FLOAT[{dim}]
+        )
+    """)
+
+
+def _migration_0001_add_language_column(conn):
+    cols = [r[1] for r in conn.execute("PRAGMA table_info(projects)").fetchall()]
+    if "language" not in cols:
+        conn.execute("ALTER TABLE projects ADD COLUMN language TEXT DEFAULT 'en'")
+
+
+def _migration_0002_project_paths_created_at(conn):
+    pp_cols = [r[1] for r in conn.execute("PRAGMA table_info(project_paths)").fetchall()]
+    if "created_at" not in pp_cols:
+        conn.execute("ALTER TABLE project_paths ADD COLUMN created_at REAL NOT NULL DEFAULT 0")
+        conn.execute("""
+            UPDATE project_paths SET created_at = (
+                SELECT COALESCE(MIN(pp2.id), 0) FROM project_paths pp2
+                WHERE pp2.project_id = project_paths.project_id
+            ) * 0.001 + id * 0.001
+        """)
+        for p in conn.execute("SELECT id, root_path FROM projects").fetchall():
+            conn.execute("""
+                UPDATE project_paths SET created_at = -1
+                WHERE project_id = ? AND path = ?
+            """, (p["id"], p["root_path"]))
+
+
+def _migration_0003_backfill_root_paths(conn):
+    for p in conn.execute("SELECT id, root_path FROM projects").fetchall():
+        conn.execute(
+            "INSERT OR IGNORE INTO project_paths (project_id, path, created_at) VALUES (?, ?, ?)",
+            (p["id"], p["root_path"], 0),
+        )
+
+
+MIGRATIONS = [
+    _migration_0001_add_language_column,
+    _migration_0002_project_paths_created_at,
+    _migration_0003_backfill_root_paths,
+]
+
+
 def init_db():
     conn = get_connection()
     try:
-        conn.executescript("""
-            CREATE TABLE IF NOT EXISTS projects (
-                id TEXT PRIMARY KEY,
-                name TEXT NOT NULL,
-                root_path TEXT NOT NULL,
-                description TEXT DEFAULT '',
-                project_type TEXT DEFAULT '',
-                language TEXT DEFAULT 'en',
-                created_at REAL NOT NULL,
-                updated_at REAL NOT NULL
-            );
-
-            CREATE TABLE IF NOT EXISTS knowledge_entries (
-                id TEXT PRIMARY KEY,
-                project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-                title TEXT NOT NULL,
-                content TEXT NOT NULL DEFAULT '',
-                category TEXT NOT NULL DEFAULT 'insight',
-                source TEXT NOT NULL DEFAULT 'manual',
-                author TEXT NOT NULL DEFAULT '',
-                status TEXT NOT NULL DEFAULT 'pending',
-                metadata TEXT NOT NULL DEFAULT '{}',
-                created_at REAL NOT NULL,
-                updated_at REAL NOT NULL,
-                UNIQUE(project_id, title)
-            );
-
-            CREATE TABLE IF NOT EXISTS tags (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-                name TEXT NOT NULL,
-                UNIQUE(project_id, name)
-            );
-
-            CREATE TABLE IF NOT EXISTS entry_tags (
-                entry_id TEXT NOT NULL REFERENCES knowledge_entries(id) ON DELETE CASCADE,
-                tag_id INTEGER NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
-                PRIMARY KEY(entry_id, tag_id)
-            );
-
-            CREATE INDEX IF NOT EXISTS idx_knowledge_entries_project
-                ON knowledge_entries(project_id);
-            CREATE INDEX IF NOT EXISTS idx_knowledge_entries_status
-                ON knowledge_entries(status);
-            CREATE INDEX IF NOT EXISTS idx_knowledge_entries_category
-                ON knowledge_entries(category);
-            CREATE INDEX IF NOT EXISTS idx_tags_project
-                ON tags(project_id);
-            CREATE INDEX IF NOT EXISTS idx_entry_tags_entry
-                ON entry_tags(entry_id);
-        """)
-        dim = embeddings.EMBEDDING_DIM
-        conn.execute(f"""
-            CREATE VIRTUAL TABLE IF NOT EXISTS entry_embeddings USING vec0(
-                entry_id TEXT PRIMARY KEY,
-                embedding FLOAT[{dim}]
-            )
-        """)
+        conn.executescript(BASE_SCHEMA)
+        _create_vector_table(conn)
         conn.commit()
-
-        # Migration: add language column if missing (for existing DBs)
-        cols = [r[1] for r in conn.execute("PRAGMA table_info(projects)").fetchall()]
-        if "language" not in cols:
-            conn.execute("ALTER TABLE projects ADD COLUMN language TEXT DEFAULT 'en'")
+        version = conn.execute("PRAGMA user_version").fetchone()[0]
+        for i, migration in enumerate(MIGRATIONS[version:], start=version + 1):
+            migration(conn)
+            conn.execute(f"PRAGMA user_version = {i}")
             conn.commit()
-
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS project_paths (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-                path TEXT NOT NULL,
-                created_at REAL NOT NULL DEFAULT 0,
-                UNIQUE(project_id, path)
-            )
-        """)
-
-        # Migration: add created_at column if missing (for existing DBs)
-        pp_cols = [r[1] for r in conn.execute("PRAGMA table_info(project_paths)").fetchall()]
-        if "created_at" not in pp_cols:
-            conn.execute("ALTER TABLE project_paths ADD COLUMN created_at REAL NOT NULL DEFAULT 0")
-            # Backfill: order existing rows by id so root_path (migrated earlier) stays first
-            conn.execute("""
-                UPDATE project_paths SET created_at = (
-                    SELECT COALESCE(MIN(pp2.id), 0) FROM project_paths pp2
-                    WHERE pp2.project_id = project_paths.project_id
-                ) * 0.001 + id * 0.001
-            """)
-            # Ensure the row matching projects.root_path gets the smallest created_at
-            for p in conn.execute("SELECT id, root_path FROM projects").fetchall():
-                conn.execute("""
-                    UPDATE project_paths SET created_at = -1
-                    WHERE project_id = ? AND path = ?
-                """, (p["id"], p["root_path"]))
-            conn.commit()
-
-        # Migrate existing root_path values to project_paths (first by created_at)
-        projects = conn.execute("SELECT id, root_path FROM projects").fetchall()
-        for p in projects:
-            conn.execute(
-                "INSERT OR IGNORE INTO project_paths (project_id, path, created_at) VALUES (?, ?, ?)",
-                (p["id"], p["root_path"], 0),
-            )
-        conn.commit()
-
-        conn.executescript("""
-            CREATE TABLE IF NOT EXISTS entities (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-                name TEXT NOT NULL,
-                norm_name TEXT NOT NULL,
-                type TEXT NOT NULL DEFAULT '',
-                created_at REAL NOT NULL,
-                UNIQUE(project_id, norm_name)
-            );
-
-            CREATE TABLE IF NOT EXISTS relations (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-                subject_id INTEGER NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
-                predicate TEXT NOT NULL,
-                object_id INTEGER NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
-                entry_id TEXT REFERENCES knowledge_entries(id) ON DELETE CASCADE,
-                created_at REAL NOT NULL
-            );
-            CREATE UNIQUE INDEX IF NOT EXISTS idx_relations_unique
-                ON relations(project_id, subject_id, predicate, object_id, IFNULL(entry_id, ''));
-
-            CREATE TABLE IF NOT EXISTS entry_entities (
-                entry_id TEXT NOT NULL REFERENCES knowledge_entries(id) ON DELETE CASCADE,
-                entity_id INTEGER NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
-                PRIMARY KEY(entry_id, entity_id)
-            );
-
-            CREATE TABLE IF NOT EXISTS entry_links (
-                from_entry TEXT NOT NULL REFERENCES knowledge_entries(id) ON DELETE CASCADE,
-                to_entry TEXT NOT NULL REFERENCES knowledge_entries(id) ON DELETE CASCADE,
-                relation TEXT NOT NULL DEFAULT 'related',
-                PRIMARY KEY(from_entry, to_entry, relation)
-            );
-
-            CREATE INDEX IF NOT EXISTS idx_entities_project ON entities(project_id);
-            CREATE INDEX IF NOT EXISTS idx_relations_subject ON relations(subject_id);
-            CREATE INDEX IF NOT EXISTS idx_relations_object ON relations(object_id);
-            CREATE INDEX IF NOT EXISTS idx_relations_entry ON relations(entry_id);
-            CREATE INDEX IF NOT EXISTS idx_entry_entities_entity ON entry_entities(entity_id);
-        """)
-        conn.commit()
     finally:
         conn.close()
 
