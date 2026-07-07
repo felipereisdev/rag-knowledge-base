@@ -39,8 +39,9 @@ def main():
         sys.exit(0)
 
     query_vec = embeddings.embed_query(args.query)
-    results = db.search_entries_by_embedding(
-        query_vec, project_id=args.project, k=args.top_k, category=args.category, tags=args.tags,
+    results = db.hybrid_search(
+        args.query, query_vec,
+        project_id=args.project, k=args.top_k, category=args.category, tags=args.tags,
     )
 
     if not results:

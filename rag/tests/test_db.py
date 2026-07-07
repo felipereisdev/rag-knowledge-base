@@ -778,3 +778,57 @@ class TestFtsSearch:
         temp_db.init_db()
         hits = temp_db.search_fts("backfill token", project_id="p1", k=5)
         assert [h["entry_id"] for h in hits] == [eid]
+
+
+class TestHybridSearch:
+    def _index(self, temp_db, title, content, project="p1", tags=None):
+        import indexing
+        temp_db.upsert_project(project, project, f"/tmp/{project}")
+        eid = temp_db.store_knowledge_entry(project, title, content, tags=tags or [])
+        temp_db.approve_entries([eid])
+        indexing.index_entry(temp_db.get_entry(eid))
+        return eid
+
+    def test_semantic_match_found_without_keyword_overlap(self, temp_db):
+        import embeddings
+        eid = self._index(temp_db, "Order rule", "Purchases above 1000 euros need a supervisor sign-off")
+        results = temp_db.hybrid_search(
+            "order approval", embeddings.embed_query("order approval"),
+            project_id="p1", k=5,
+        )
+        assert eid in [r["id"] for r in results]
+
+    def test_exact_identifier_found_despite_semantic_miss(self, temp_db):
+        import embeddings
+        eid = self._index(temp_db, "Config", "PIX_TIMEOUT_MS=5000 is the payment gateway timeout")
+        self._index(temp_db, "Unrelated", "Team lunch happens on Fridays")
+        results = temp_db.hybrid_search(
+            "PIX_TIMEOUT_MS", embeddings.embed_query("PIX_TIMEOUT_MS"),
+            project_id="p1", k=5, min_score=0.99,  # force the vector list to contribute nothing
+        )
+        assert [r["id"] for r in results] == [eid]
+        assert results[0]["score"] == 0.0  # FTS-only hit
+
+    def test_entry_in_both_lists_ranks_first(self, temp_db):
+        import embeddings
+        both = self._index(temp_db, "Stripe payments", "All payments go through Stripe")
+        self._index(temp_db, "Refund policy", "Refunds are allowed within 30 days")
+        results = temp_db.hybrid_search(
+            "stripe payments", embeddings.embed_query("stripe payments"),
+            project_id="p1", k=5,
+        )
+        assert results and results[0]["id"] == both
+        assert results[0]["rrf"] >= results[-1]["rrf"]
+
+    def test_category_filter(self, temp_db):
+        import embeddings
+        temp_db.upsert_project("p1", "p1", "/tmp/p1")
+        import indexing
+        e1 = temp_db.store_knowledge_entry("p1", "Rule", "orders need approval", category="business-rule")
+        temp_db.approve_entries([e1])
+        indexing.index_entry(temp_db.get_entry(e1))
+        results = temp_db.hybrid_search(
+            "orders", embeddings.embed_query("orders"),
+            project_id="p1", k=5, category="architecture",
+        )
+        assert results == []

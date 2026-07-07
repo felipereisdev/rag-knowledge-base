@@ -791,10 +791,41 @@ def search_entries_by_embedding(query_embedding, project_id=None, k=10, category
     entries = _fetch_entries_in_order(entry_ids, project_id=project_id, category=category, tags=tags)
     for entry in entries:
         entry["score"] = score_map.get(entry["id"], 0.0)
-        # Back-compat: api.py and main.py read r["entry_id"] as graph-expansion
-        # seeds until the hybrid-search task rewires them to r["id"].
-        entry["entry_id"] = entry["id"]
     return entries
+
+
+RRF_K = 60
+
+
+def hybrid_search(query, query_embedding, project_id=None, k=10,
+                  category=None, tags=None, min_score=0.0):
+    """Vector + BM25 search fused with Reciprocal Rank Fusion.
+
+    min_score gates the vector list only: FTS hits are exact keyword matches
+    and always pass. Results carry `score` (cosine sim of best chunk, 0.0 for
+    FTS-only hits) and `rrf`, ordered by rrf desc.
+    """
+    vec_hits = search_chunks(query_embedding, project_id=project_id, k=k)
+    vec_hits = [h for h in vec_hits if 1.0 - h["distance"] >= min_score]
+    fts_hits = search_fts(query, project_id=project_id, k=k)
+
+    rrf = {}
+    sim = {}
+    for rank, h in enumerate(vec_hits, start=1):
+        rrf[h["entry_id"]] = rrf.get(h["entry_id"], 0.0) + 1.0 / (RRF_K + rank)
+        sim[h["entry_id"]] = round(1.0 - h["distance"], 4)
+    for rank, h in enumerate(fts_hits, start=1):
+        rrf[h["entry_id"]] = rrf.get(h["entry_id"], 0.0) + 1.0 / (RRF_K + rank)
+
+    if not rrf:
+        return []
+    ordered_ids = sorted(rrf, key=rrf.get, reverse=True)
+    entries = _fetch_entries_in_order(ordered_ids, project_id=project_id,
+                                      category=category, tags=tags)
+    for e in entries:
+        e["score"] = sim.get(e["id"], 0.0)
+        e["rrf"] = round(rrf[e["id"]], 6)
+    return entries[:k]
 
 
 def _fetch_entries_in_order(entry_ids, project_id=None, category=None, tags=None):

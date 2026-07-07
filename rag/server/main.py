@@ -595,11 +595,11 @@ def _search(args):
         return {"content": [{"type": "text", "text": f"No indexed knowledge in '{project['name']}'. Use rag_store_knowledge and approve entries first."}]}
 
     query_vec = embeddings.embed_query(query)
-    results = db.search_entries_by_embedding(
-        query_vec, project_id=pid, k=top_k, category=category, tags=tags,
+    results = db.hybrid_search(
+        query, query_vec,
+        project_id=pid, k=top_k, category=category, tags=tags,
+        min_score=api.search_min_score(),
     )
-
-    results = [r for r in results if r.get("score", 0) >= api.search_min_score()]
 
     if not results:
         return {"content": [{"type": "text", "text": f"No results for '{query}' in '{project['name']}'."}]}
@@ -614,7 +614,7 @@ def _search(args):
         lines.append(f"      {preview}\n")
 
     if expand_graph:
-        seed_ids = [r["entry_id"] for r in results]
+        seed_ids = [r["id"] for r in results]
         expansion = db.expand_entries_via_graph(pid, seed_ids, depth=graph_depth, limit=5)
         triples = expansion.get("triples") or []
         related_entries = expansion.get("related_entries") or []

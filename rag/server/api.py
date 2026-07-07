@@ -359,19 +359,16 @@ def search(
             return {"results": [], "graph": {"triples": [], "related_entries": []}}
         return []
     query_vec = embeddings.embed_query(q)
-    results = db.search_entries_by_embedding(
-        query_vec,
-        project_id=project_id,
-        k=top_k,
-        category=category,
-        tags=tags,
+    results = db.hybrid_search(
+        q, query_vec,
+        project_id=project_id, k=top_k, category=category, tags=tags,
+        min_score=search_min_score(),
     )
-    results = [r for r in results if r.get("score", 0) >= search_min_score()]
     if not expand:
         return results
     graph = {"triples": [], "related_entries": []}
     if project_id and results:
-        seed_ids = [r["entry_id"] for r in results]
+        seed_ids = [r["id"] for r in results]
         graph = db.expand_entries_via_graph(project_id, seed_ids, depth=depth, limit=5)
     return {"results": results, "graph": graph}
 
