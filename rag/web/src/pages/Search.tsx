@@ -11,28 +11,25 @@ const CATEGORIES = ["", "business-rule", "design-decision", "architecture", "doc
 
 export default function Search() {
   const [projects, setProjects] = useState<Project[]>([]);
-  const [projectId, setProjectId] = useState("");
+  const [projectId, setProjectId] = useState("all");
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState("");
   const [results, setResults] = useState<SearchResult[]>([]);
   const [searching, setSearching] = useState(false);
 
   useEffect(() => {
-    api.listProjects().then((projs) => {
-      setProjects(projs);
-      if (projs.length > 0) setProjectId(projs[0].id);
-    });
+    api.listProjects().then(setProjects);
   }, []);
 
   useEffect(() => {
-    if (!query.trim() || !projectId) {
+    if (!query.trim()) {
       setResults([]);
       return;
     }
     const timer = setTimeout(async () => {
       setSearching(true);
       try {
-        const r = await api.search({ q: query, project_id: projectId, category: category || undefined });
+        const r = await api.search({ q: query, project_id: projectId === "all" ? undefined : projectId, category: category || undefined });
         setResults(r);
       } finally {
         setSearching(false);
@@ -52,6 +49,7 @@ export default function Search() {
       />
       <div className="flex gap-4">
         <Select value={projectId} onChange={(e) => setProjectId(e.target.value)} className="w-48">
+          <option value="all">All projects</option>
           {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
         </Select>
         <Select value={category} onChange={(e) => setCategory(e.target.value)} className="w-48">

@@ -314,14 +314,16 @@ def get_entry(entry_id):
         conn.close()
 
 
-def list_entries(project_id, category=None, tags=None, status=None, limit=500):
+def list_entries(project_id=None, category=None, tags=None, status=None, limit=500):
     """List knowledge entries with optional filters."""
     conn = get_connection()
     try:
         query = "SELECT e.* FROM knowledge_entries e"
         params = []
-        conditions = ["e.project_id = ?"]
-        params.append(project_id)
+        conditions = []
+        if project_id:
+            conditions.append("e.project_id = ?")
+            params.append(project_id)
 
         if category:
             conditions.append("e.category = ?")
@@ -340,7 +342,8 @@ def list_entries(project_id, category=None, tags=None, status=None, limit=500):
             if len(tags) > 1:
                 having = f"COUNT(DISTINCT t.name) = {len(tags)}"
 
-        query += " WHERE " + " AND ".join(conditions)
+        if conditions:
+            query += " WHERE " + " AND ".join(conditions)
         if tags:
             query += " GROUP BY e.id"
             if having:
@@ -587,7 +590,7 @@ def search_embeddings(query_embedding, k=10):
         conn.close()
 
 
-def search_entries_by_embedding(query_embedding, project_id, k=10, category=None, tags=None):
+def search_entries_by_embedding(query_embedding, project_id=None, k=10, category=None, tags=None):
     """Search entries by embedding similarity with project/category/tag filtering."""
     neighbors = search_embeddings(query_embedding, k=k)
     if not neighbors:
@@ -596,21 +599,28 @@ def search_entries_by_embedding(query_embedding, project_id, k=10, category=None
     placeholders = ",".join("?" for _ in entry_ids)
     conn = get_connection()
     try:
+        conditions = [f"e.entry_id IN ({placeholders})"]
+        params = list(entry_ids)
+        if project_id:
+            conditions.append("ke.project_id = ?")
+            params.append(project_id)
         sql = f"""
             SELECT ke.*, e.entry_id
             FROM entry_embeddings e
             JOIN knowledge_entries ke ON ke.id = e.entry_id
-            WHERE e.entry_id IN ({placeholders})
-            AND ke.project_id = ?
+            WHERE {" AND ".join(conditions)}
         """
-        params = entry_ids + [project_id]
         if category:
             sql += " AND ke.category = ?"
             params.append(category)
         if tags:
             for tag in tags:
-                sql += " AND e.entry_id IN (SELECT et.entry_id FROM entry_tags et JOIN tags t ON t.id = et.tag_id WHERE t.name = ? AND t.project_id = ?)"
-                params.extend([tag.lower(), project_id])
+                if project_id:
+                    sql += " AND e.entry_id IN (SELECT et.entry_id FROM entry_tags et JOIN tags t ON t.id = et.tag_id WHERE t.name = ? AND t.project_id = ?)"
+                    params.extend([tag.lower(), project_id])
+                else:
+                    sql += " AND e.entry_id IN (SELECT et.entry_id FROM entry_tags et JOIN tags t ON t.id = et.tag_id WHERE t.name = ?)"
+                    params.append(tag.lower())
         sql += " ORDER BY CASE e.entry_id"
         for i, eid in enumerate(entry_ids):
             sql += f" WHEN ? THEN {i}"

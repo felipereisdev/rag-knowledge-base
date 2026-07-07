@@ -181,7 +181,7 @@ def remove_project_path(project_id: str, path: str = Query(...)):
 
 @app.get("/api/entries")
 def list_entries(
-    project_id: str = Query(...),
+    project_id: str | None = Query(default=None),
     category: str | None = None,
     tags: list[str] | None = Query(default=None),
     status: str | None = None,
@@ -265,7 +265,7 @@ def reject_entry(entry_id: str):
 @app.get("/api/search")
 def search(
     q: str = Query(...),
-    project_id: str = Query(...),
+    project_id: str | None = Query(default=None),
     category: str | None = None,
     tags: list[str] | None = Query(None),
     top_k: int = 5,

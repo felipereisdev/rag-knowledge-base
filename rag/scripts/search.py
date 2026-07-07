@@ -14,7 +14,7 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "server"))
 
 import db
-import search_engine
+import embeddings
 
 
 def main():
@@ -38,8 +38,10 @@ def main():
         print(f"No indexed knowledge for '{project['name']}'. Store and approve entries first.")
         sys.exit(0)
 
-    index = search_engine.build_index_from_entries(entries)
-    results = index.search(args.query, top_k=args.top_k, category=args.category, tags=args.tags)
+    query_vec = embeddings.embed_query(args.query)
+    results = db.search_entries_by_embedding(
+        query_vec, project_id=args.project, k=args.top_k, category=args.category, tags=args.tags,
+    )
 
     if not results:
         print(f"No results for '{args.query}' in '{project['name']}'.")

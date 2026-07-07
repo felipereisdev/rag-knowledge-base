@@ -13,7 +13,7 @@ export default function Entries() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [entries, setEntries] = useState<Entry[]>([]);
   const [loading, setLoading] = useState(true);
-  const [projectId, setProjectId] = useState("");
+  const [projectId, setProjectId] = useState("all");
   const [category, setCategory] = useState("");
   const [status, setStatus] = useState("indexed");
 
@@ -21,17 +21,13 @@ export default function Entries() {
     async function load() {
       const projs = await api.listProjects();
       setProjects(projs);
-      if (projs.length > 0) {
-        setProjectId(projs[0].id);
-      }
     }
     load();
   }, []);
 
   useEffect(() => {
-    if (!projectId) return;
     setLoading(true);
-    api.listEntries({ project_id: projectId, category: category || undefined, status: status === "all" ? undefined : status })
+    api.listEntries({ project_id: projectId === "all" ? undefined : projectId, category: category || undefined, status: status === "all" ? undefined : status })
       .then(setEntries)
       .finally(() => setLoading(false));
   }, [projectId, category, status]);
@@ -45,6 +41,7 @@ export default function Entries() {
 
       <div className="flex gap-4 items-center">
         <Select value={projectId} onChange={(e) => setProjectId(e.target.value)} className="w-48">
+          <option value="all">All projects</option>
           {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
         </Select>
         <Select value={category} onChange={(e) => setCategory(e.target.value)} className="w-48">
@@ -69,6 +66,7 @@ export default function Entries() {
           <TableHeader>
             <TableRow>
               <TableHead>Title</TableHead>
+              <TableHead>Project</TableHead>
               <TableHead>Category</TableHead>
               <TableHead>Tags</TableHead>
               <TableHead>Status</TableHead>
@@ -79,6 +77,9 @@ export default function Entries() {
               <TableRow key={e.id}>
                 <TableCell>
                   <Link to={`/entries/${e.id}`} className="font-medium hover:underline">{e.title}</Link>
+                </TableCell>
+                <TableCell className="text-xs text-muted-foreground">
+                  {projects.find((p) => p.id === e.project_id)?.name ?? e.project_id}
                 </TableCell>
                 <TableCell><Badge variant="secondary">{e.category}</Badge></TableCell>
                 <TableCell className="text-xs text-muted-foreground">{e.tags.join(", ")}</TableCell>

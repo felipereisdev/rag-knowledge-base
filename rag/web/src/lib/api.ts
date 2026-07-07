@@ -94,8 +94,9 @@ export const api = {
   removeProjectPath: (projectId: string, path: string) =>
     fetchJSON<void>(`/projects/${projectId}/paths?path=${encodeURIComponent(path)}`, { method: "DELETE" }),
 
-  listEntries: (params: { project_id: string; category?: string; status?: string; tags?: string[] }) => {
-    const search = new URLSearchParams({ project_id: params.project_id });
+  listEntries: (params: { project_id?: string; category?: string; status?: string; tags?: string[] }) => {
+    const search = new URLSearchParams();
+    if (params.project_id) search.set("project_id", params.project_id);
     if (params.category) search.set("category", params.category);
     if (params.status) search.set("status", params.status);
     if (params.tags) params.tags.forEach((t) => search.append("tags", t));
@@ -112,8 +113,9 @@ export const api = {
   rejectEntry: (id: string) =>
     fetchJSON<{ ok: boolean }>(`/entries/${id}/reject`, { method: "POST" }),
 
-  search: (params: { q: string; project_id: string; category?: string; tags?: string[]; top_k?: number }) => {
-    const search = new URLSearchParams({ q: params.q, project_id: params.project_id });
+  search: (params: { q: string; project_id?: string; category?: string; tags?: string[]; top_k?: number }) => {
+    const search = new URLSearchParams({ q: params.q });
+    if (params.project_id) search.set("project_id", params.project_id);
     if (params.category) search.set("category", params.category);
     if (params.tags) params.tags.forEach((t) => search.append("tags", t));
     if (params.top_k) search.set("top_k", String(params.top_k));

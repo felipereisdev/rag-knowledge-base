@@ -60,7 +60,7 @@ export default function Projects() {
   function openEdit(p: Project) {
     setEditProject(p);
     setForm({ id: p.id, name: p.name, root_path: p.root_path, description: p.description, language: p.language });
-    setAdditionalPaths((p.paths ?? []).filter(path => path !== p.root_path));
+    setAdditionalPaths(p.paths ?? []);
     setNewPath("");
   }
 
@@ -73,6 +73,7 @@ export default function Projects() {
 
   async function removePath(path: string) {
     if (!editProject) return;
+    if (path === editProject.root_path) return;
     await api.removeProjectPath(editProject.id, path);
     setAdditionalPaths(additionalPaths.filter(p => p !== path));
   }
@@ -162,7 +163,9 @@ export default function Projects() {
                 {additionalPaths.map((path) => (
                   <div key={path} className="flex items-center gap-2">
                     <span className="text-sm text-muted-foreground flex-1">{path}</span>
-                    <Button size="sm" variant="ghost" className="text-destructive" onClick={() => removePath(path)}>Remove</Button>
+                    {editProject && path !== editProject.root_path && (
+                      <Button size="sm" variant="ghost" className="text-destructive" onClick={() => removePath(path)}>Remove</Button>
+                    )}
                   </div>
                 ))}
                 <div className="flex gap-2">
