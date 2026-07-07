@@ -851,6 +851,8 @@ def _add_project_path(args):
 
 def main():
     db.init_db()
+    import indexing
+    indexing.ensure_index_current(log=log)
     log("Knowledge Base RAG MCP server starting...")
 
     try:

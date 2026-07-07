@@ -680,19 +680,19 @@ class TestEmbeddingCleanup:
         import embeddings
         temp_db.upsert_project("p1", "P1", "/tmp/p1")
         eid = temp_db.store_knowledge_entry("p1", "T1", "content")
-        temp_db.store_embedding(eid, embeddings.embed_text("content"))
+        temp_db.store_entry_embeddings(eid, "p1", [embeddings.embed_text("content")])
         temp_db.remove_entry(eid)
-        assert temp_db.get_embedding(eid) is None
+        assert temp_db.search_chunks(embeddings.embed_query("content"), project_id="p1", k=5) == []
 
     def test_remove_project_deletes_entry_embeddings(self, temp_db):
         import embeddings
         temp_db.upsert_project("p1", "P1", "/tmp/p1")
         eid = temp_db.store_knowledge_entry("p1", "T1", "content")
-        temp_db.store_embedding(eid, embeddings.embed_text("content"))
+        temp_db.store_entry_embeddings(eid, "p1", [embeddings.embed_text("content")])
         temp_db.remove_project("p1")
         assert temp_db.get_project("p1") is None
         assert temp_db.get_entry(eid) is None
-        assert temp_db.get_embedding(eid) is None
+        assert temp_db.search_chunks(embeddings.embed_query("content"), project_id="p1", k=5) == []
 
     def test_migration_purges_orphan_embeddings_legacy_table(self, temp_db):
         conn = temp_db.get_connection()

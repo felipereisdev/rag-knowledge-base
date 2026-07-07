@@ -429,9 +429,9 @@ class TestEmbeddingLifecycle:
         }).json()
         eid = create["id"]
         client.post(f"/api/entries/{eid}/approve")
-        import db
-        emb = db.get_embedding(eid)
-        assert emb is not None
+        import db, embeddings
+        hits = db.search_chunks(embeddings.embed_query("content"), project_id="test-proj", k=5)
+        assert any(h["entry_id"] == eid for h in hits)
 
     def test_update_regenerates_embedding(self, client):
         client.post("/api/projects", json={
@@ -443,11 +443,22 @@ class TestEmbeddingLifecycle:
         eid = create["id"]
         client.post(f"/api/entries/{eid}/approve")
         import db
-        emb_before = db.get_embedding(eid)
+        conn = db.get_connection()
+        try:
+            before = conn.execute(
+                "SELECT embedding FROM chunk_embeddings WHERE entry_id = ?", (eid,)
+            ).fetchone()["embedding"]
+        finally:
+            conn.close()
         client.put(f"/api/entries/{eid}", json={"title": "New Title", "content": "new content"})
-        emb_after = db.get_embedding(eid)
-        assert emb_after is not None
-        assert emb_after["embedding"] != emb_before["embedding"]
+        conn = db.get_connection()
+        try:
+            after = conn.execute(
+                "SELECT embedding FROM chunk_embeddings WHERE entry_id = ?", (eid,)
+            ).fetchone()["embedding"]
+        finally:
+            conn.close()
+        assert after != before
 
     def test_delete_removes_embedding(self, client):
         client.post("/api/projects", json={
@@ -459,8 +470,9 @@ class TestEmbeddingLifecycle:
         eid = create["id"]
         client.post(f"/api/entries/{eid}/approve")
         client.delete(f"/api/entries/{eid}")
-        import db
-        assert db.get_embedding(eid) is None
+        import db, embeddings
+        hits = db.search_chunks(embeddings.embed_query("content"), project_id="test-proj", k=5)
+        assert hits == []
 
 
 class TestProjectPaths:

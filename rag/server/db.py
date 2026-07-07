@@ -834,39 +834,6 @@ def rebuild_chunk_table():
         conn.close()
 
 
-# ---- Deprecated single-embedding shims (callers migrate in the indexing-pipeline task) ----
-
-def store_embedding(entry_id, embedding):
-    conn = get_connection()
-    try:
-        row = conn.execute(
-            "SELECT project_id FROM knowledge_entries WHERE id = ?", (entry_id,)
-        ).fetchone()
-    finally:
-        conn.close()
-    project_id = row["project_id"] if row else ""
-    store_entry_embeddings(entry_id, project_id, [embedding])
-
-
-def get_embedding(entry_id):
-    conn = get_connection()
-    try:
-        row = conn.execute(
-            "SELECT entry_id, embedding FROM chunk_embeddings WHERE entry_id = ? AND chunk_index = 0",
-            (entry_id,),
-        ).fetchone()
-    finally:
-        conn.close()
-    if not row:
-        return None
-    blob = row["embedding"]
-    dim = len(blob) // 4
-    return {"entry_id": row["entry_id"], "embedding": list(struct.unpack(f"{dim}f", blob))}
-
-
-delete_embedding = delete_entry_embeddings
-
-
 # ---- Knowledge graph operations ----
 
 
