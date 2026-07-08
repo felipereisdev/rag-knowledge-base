@@ -1,10 +1,8 @@
 <?php
 
-use App\Models\Project;
 use App\Models\KnowledgeEntry;
+use App\Models\Project;
 use App\Models\ProjectPath;
-use App\Models\Tag;
-use App\Models\Entity;
 
 describe('Project model', function () {
     it('can be created with required fields', function () {

@@ -8,6 +8,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 class Project extends Model
 {
     public $incrementing = false;
+
     protected $keyType = 'string';
 
     protected $fillable = [
@@ -20,21 +21,25 @@ class Project extends Model
         'language' => 'en',
     ];
 
+    /** @return HasMany<KnowledgeEntry, $this> */
     public function entries(): HasMany
     {
         return $this->hasMany(KnowledgeEntry::class, 'project_id');
     }
 
+    /** @return HasMany<ProjectPath, $this> */
     public function paths(): HasMany
     {
         return $this->hasMany(ProjectPath::class, 'project_id');
     }
 
+    /** @return HasMany<Tag, $this> */
     public function tags(): HasMany
     {
         return $this->hasMany(Tag::class, 'project_id');
     }
 
+    /** @return HasMany<Entity, $this> */
     public function entities(): HasMany
     {
         return $this->hasMany(Entity::class, 'project_id');

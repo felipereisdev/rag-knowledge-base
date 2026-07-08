@@ -13,21 +13,25 @@ class Entity extends Model
 
     protected $fillable = ['project_id', 'name', 'type'];
 
+    /** @return BelongsTo<Project, $this> */
     public function project(): BelongsTo
     {
         return $this->belongsTo(Project::class, 'project_id');
     }
 
+    /** @return BelongsToMany<KnowledgeEntry, $this> */
     public function entries(): BelongsToMany
     {
         return $this->belongsToMany(KnowledgeEntry::class, 'entry_entities', 'entity_id', 'entry_id');
     }
 
+    /** @return HasMany<Relation, $this> */
     public function relationsAsSubject(): HasMany
     {
         return $this->hasMany(Relation::class, 'subject_id');
     }
 
+    /** @return HasMany<Relation, $this> */
     public function relationsAsObject(): HasMany
     {
         return $this->hasMany(Relation::class, 'object_id');

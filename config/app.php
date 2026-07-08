@@ -123,4 +123,16 @@ return [
         'store' => env('APP_MAINTENANCE_STORE', 'database'),
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | RAG Configuration
+    |--------------------------------------------------------------------------
+    |
+    | Settings for the local RAG knowledge base.
+    |
+    */
+
+    'rag_embedding_model' => env('RAG_EMBEDDING_MODEL', 'paraphrase-multilingual-mpnet-base-v2'),
+    'rag_embedding_dim' => (int) env('RAG_EMBEDDING_DIM', 768),
+
 ];

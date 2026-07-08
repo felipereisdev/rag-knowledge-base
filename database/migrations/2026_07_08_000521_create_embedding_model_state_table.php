@@ -2,8 +2,8 @@
 
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
-use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 
 return new class extends Migration
 {
@@ -16,7 +16,7 @@ return new class extends Migration
             $table->timestampTz('embedded_at')->useCurrent();
         });
 
-        DB::statement("ALTER TABLE embedding_model_state ADD CONSTRAINT chk_singleton CHECK (id = 1)");
+        DB::statement('ALTER TABLE embedding_model_state ADD CONSTRAINT chk_singleton CHECK (id = 1)');
     }
 
     public function down(): void

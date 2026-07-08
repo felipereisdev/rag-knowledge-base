@@ -4,15 +4,14 @@ namespace App\Martis\Resources;
 
 use App\Models\KnowledgeEntry;
 use Illuminate\Http\Request;
-use Martis\Fields\Badge;
 use Martis\Fields\BelongsTo;
 use Martis\Fields\BelongsToMany;
+use Martis\Fields\DateTime;
 use Martis\Fields\Id;
 use Martis\Fields\KeyValue;
 use Martis\Fields\Select;
 use Martis\Fields\Text;
 use Martis\Fields\Textarea;
-use Martis\Fields\DateTime;
 use Martis\Resource;
 
 class KnowledgeEntryResource extends Resource

@@ -1,10 +1,9 @@
 <?php
 
-use App\Models\Project;
-use App\Models\KnowledgeEntry;
-use App\Models\Tag;
-use App\Models\Entity;
 use App\Models\ChunkEmbedding;
+use App\Models\KnowledgeEntry;
+use App\Models\Project;
+use App\Models\Tag;
 use Illuminate\Support\Facades\DB;
 
 describe('KnowledgeEntry model', function () {
@@ -59,7 +58,7 @@ describe('KnowledgeEntry model', function () {
             'project_id' => $project->id,
             'chunk_index' => 0,
             'content' => 'chunk text',
-            'embedding' => '[' . implode(',', array_fill(0, 768, '0.1')) . ']',
+            'embedding' => '['.implode(',', array_fill(0, 768, '0.1')).']',
         ]);
 
         expect($entry->chunks)->toHaveCount(1);

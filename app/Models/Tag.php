@@ -12,11 +12,13 @@ class Tag extends Model
 
     protected $fillable = ['project_id', 'name'];
 
+    /** @return BelongsTo<Project, $this> */
     public function project(): BelongsTo
     {
         return $this->belongsTo(Project::class, 'project_id');
     }
 
+    /** @return BelongsToMany<KnowledgeEntry, $this> */
     public function entries(): BelongsToMany
     {
         return $this->belongsToMany(KnowledgeEntry::class, 'entry_tags', 'tag_id', 'entry_id');

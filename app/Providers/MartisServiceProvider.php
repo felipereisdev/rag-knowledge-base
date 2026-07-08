@@ -2,6 +2,14 @@
 
 namespace App\Providers;
 
+use App\Martis\Dashboards\MainDashboard;
+use App\Martis\Resources\ChunkEmbeddingResource;
+use App\Martis\Resources\EntityResource;
+use App\Martis\Resources\KnowledgeEntryResource;
+use App\Martis\Resources\ProjectPathResource;
+use App\Martis\Resources\ProjectResource;
+use App\Martis\Resources\RelationResource;
+use App\Martis\Resources\TagResource;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\ServiceProvider;
 use Martis\Cache\MartisCache;
@@ -62,19 +70,19 @@ class MartisServiceProvider extends ServiceProvider
         Martis::mainMenu(function ($request, $menu) {
             return $menu->sections([
                 MenuSection::make('Knowledge', [
-                    MenuItem::resource(\App\Martis\Resources\KnowledgeEntryResource::class),
-                    MenuItem::resource(\App\Martis\Resources\TagResource::class),
-                    MenuItem::resource(\App\Martis\Resources\EntityResource::class),
-                    MenuItem::resource(\App\Martis\Resources\RelationResource::class),
+                    MenuItem::resource(KnowledgeEntryResource::class),
+                    MenuItem::resource(TagResource::class),
+                    MenuItem::resource(EntityResource::class),
+                    MenuItem::resource(RelationResource::class),
                 ])->icon('book'),
 
                 MenuSection::make('Projects', [
-                    MenuItem::resource(\App\Martis\Resources\ProjectResource::class),
-                    MenuItem::resource(\App\Martis\Resources\ProjectPathResource::class),
+                    MenuItem::resource(ProjectResource::class),
+                    MenuItem::resource(ProjectPathResource::class),
                 ])->icon('folder'),
 
                 MenuSection::make('System', [
-                    MenuItem::resource(\App\Martis\Resources\ChunkEmbeddingResource::class),
+                    MenuItem::resource(ChunkEmbeddingResource::class),
                 ])->icon('gear'),
             ]);
         });
@@ -89,7 +97,7 @@ class MartisServiceProvider extends ServiceProvider
     protected function registerDashboards(): void
     {
         Martis::dashboards([
-            \App\Martis\Dashboards\MainDashboard::class,
+            MainDashboard::class,
         ]);
     }
 

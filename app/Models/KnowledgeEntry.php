@@ -13,6 +13,7 @@ class KnowledgeEntry extends Model
     use HasUuids;
 
     protected $keyType = 'string';
+
     public $incrementing = false;
 
     protected $fillable = [
@@ -36,21 +37,25 @@ class KnowledgeEntry extends Model
         ];
     }
 
+    /** @return BelongsTo<Project, $this> */
     public function project(): BelongsTo
     {
         return $this->belongsTo(Project::class, 'project_id');
     }
 
+    /** @return BelongsToMany<Tag, $this> */
     public function tags(): BelongsToMany
     {
         return $this->belongsToMany(Tag::class, 'entry_tags', 'entry_id', 'tag_id');
     }
 
+    /** @return BelongsToMany<Entity, $this> */
     public function entities(): BelongsToMany
     {
         return $this->belongsToMany(Entity::class, 'entry_entities', 'entry_id', 'entity_id');
     }
 
+    /** @return HasMany<ChunkEmbedding, $this> */
     public function chunks(): HasMany
     {
         return $this->hasMany(ChunkEmbedding::class, 'entry_id');

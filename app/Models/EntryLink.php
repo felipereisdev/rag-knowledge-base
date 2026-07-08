@@ -11,11 +11,13 @@ class EntryLink extends Model
 
     protected $fillable = ['from_entry', 'to_entry', 'relation'];
 
+    /** @return BelongsTo<KnowledgeEntry, $this> */
     public function fromEntry(): BelongsTo
     {
         return $this->belongsTo(KnowledgeEntry::class, 'from_entry');
     }
 
+    /** @return BelongsTo<KnowledgeEntry, $this> */
     public function toEntry(): BelongsTo
     {
         return $this->belongsTo(KnowledgeEntry::class, 'to_entry');
