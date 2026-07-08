@@ -14,6 +14,12 @@ trait ResolvesProjectId
      * Mirrors the Python _resolve_project_id: if $projectId is null,
      * search project_paths for an ancestor of $cwd; if none found,
      * slugify the basename of $cwd.
+     *
+     * Enhancement over Python: matches ancestor paths (cwd starting with
+     * path + '/'), not just exact path equality. The longest ancestor wins.
+     * Ancestor matching uses strpos + substring rather than LIKE so that
+     * underscores and percent signs in stored paths are treated literally
+     * (LIKE treats '_' and '%' as wildcards).
      */
     public function resolveProjectId(?string $projectId, ?string $cwd = null): string
     {
@@ -24,11 +30,16 @@ trait ResolvesProjectId
         $cwd = $cwd ?? getcwd();
 
         // Search project_paths for an ancestor of $cwd (or an exact match).
-        // A stored path is an ancestor of $cwd when $cwd starts with path + '/'.
+        // A stored path is an ancestor of $cwd when $cwd starts with path
+        // and the next character is '/'. Use strpos + substring instead of
+        // LIKE so '_' and '%' in stored paths are literal, not wildcards.
         // Order by longest path so the most specific ancestor wins.
         $match = ProjectPath::query()
             ->where('path', $cwd)
-            ->orWhereRaw('?::text LIKE path || ?::text', [$cwd, '/%'])
+            ->orWhereRaw(
+                'strpos(?, path) = 1 AND substring(? FROM length(path) + 1 FOR 1) = ?',
+                [$cwd, $cwd, '/']
+            )
             ->orderByRaw('LENGTH(path) DESC')
             ->first();
 
@@ -46,10 +57,11 @@ trait ResolvesProjectId
      */
     public function ensureProject(?string $projectId, ?string $cwd = null): string
     {
+        // Compute cwd once so resolveProjectId and the create branch agree.
+        $cwd = $cwd ?? getcwd();
         $pid = $this->resolveProjectId($projectId, $cwd);
 
         if (! Project::where('id', $pid)->exists()) {
-            $cwd = $cwd ?? getcwd();
             Project::create([
                 'id' => $pid,
                 'name' => basename($cwd) ?: $pid,

@@ -41,6 +41,50 @@ it('resolves by cwd via project_paths', function () {
     expect($resolved)->toBe('web-app');
 });
 
+it('resolves to the longest matching ancestor when multiple project_paths match', function () {
+    $parent = Project::create([
+        'id' => 'parent',
+        'name' => 'Parent',
+        'root_path' => '/home/user/parent',
+    ]);
+    $child = Project::create([
+        'id' => 'child',
+        'name' => 'Child',
+        'root_path' => '/home/user/parent/child',
+    ]);
+    ProjectPath::create([
+        'project_id' => $parent->id,
+        'path' => '/home/user/parent',
+    ]);
+    ProjectPath::create([
+        'project_id' => $child->id,
+        'path' => '/home/user/parent/child',
+    ]);
+
+    // cwd sits under both registered paths; the longer (more specific) one wins.
+    $resolved = $this->resolver->resolveProjectId(null, '/home/user/parent/child/src');
+
+    expect($resolved)->toBe('child');
+});
+
+it('does not treat underscores in stored paths as LIKE wildcards', function () {
+    $project = Project::create([
+        'id' => 'under-score',
+        'name' => 'Under Score',
+        'root_path' => '/home/user/my_project',
+    ]);
+    ProjectPath::create([
+        'project_id' => $project->id,
+        'path' => '/home/user/my_project',
+    ]);
+
+    // cwd has 'X' where the stored path has '_'. A LIKE query would match
+    // (underscore is a single-char wildcard); strpos treats it literally.
+    $resolved = $this->resolver->resolveProjectId(null, '/home/user/myXproject/src');
+
+    expect($resolved)->toBe('src'); // falls through to slugified basename
+});
+
 it('slugifies basename of cwd when no project found', function () {
     $resolved = $this->resolver->resolveProjectId(null, '/home/user/My Cool Project');
 
