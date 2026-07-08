@@ -132,6 +132,17 @@ return [
             'key' => env('OPENAI_COMPATIBLE_API_KEY'),
         ],
 
+        'local-embedder' => [
+            'driver' => 'openai-compatible',
+            'url' => env('RAG_EMBED_URL', 'http://localhost:8001/v1'),
+            'key' => env('RAG_EMBED_KEY', 'rag-local'),
+            'models' => [
+                'embeddings' => [
+                    'default' => env('RAG_EMBEDDING_MODEL', 'paraphrase-multilingual-mpnet-base-v2'),
+                ],
+            ],
+        ],
+
         'openrouter' => [
             'driver' => 'openrouter',
             'key' => env('OPENROUTER_API_KEY'),
