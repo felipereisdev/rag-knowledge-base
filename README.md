@@ -1,276 +1,196 @@
-# Knowledge Base RAG
+# RAG Knowledge Base
 
-A per-project knowledge base RAG (Retrieval-Augmented Generation) for AI coding
-assistants, with an **approval workflow** so you control what goes into the knowledge base.
+A per-project knowledge base RAG (Retrieval-Augmented Generation) for AI coding assistants, with an **approval workflow** so you control what goes into the knowledge base.
 
-**Supported assistants:**
-- [Codex](#codex) (OpenAI)
-- [Claude](#claude) (Claude Code, Anthropic)
-- [Cursor](#cursor)
-- [OpenCode](#opencode)
-- [Docker](#docker)
+**Phase 4 (current):** MCP server (7 tools via `laravel/mcp`), 3 Artisan commands (`rag:store`, `rag:import`, `rag:search`), a graph explorer page at `/martis/graph`, full Docker stack, and a GitHub Actions CI/CD pipeline.
 
-## Why?
+## Requirements
 
-AI coding assistants forget context between conversations and don't learn from past
-discussions. This plugin lets you build a persistent, searchable knowledge base:
-
-- **Business rules** — "orders over €1000 need manager approval"
-- **Design decisions** — "we chose Postgres over MongoDB because..."
-- **Architecture** — "auth uses JWT with refresh tokens in Redis"
-- **Documentation** — imported from markdown/text files
-- **Conventions** — "we use camelCase for API fields"
-
-Everything goes through an **approval workflow** — you review what gets indexed before
-it becomes searchable.
+- PHP 8.3+
+- Composer 2.x
+- Docker (for the full stack, or just Postgres+pgvector if running on host)
 
 ## Quick start
 
 ```bash
-# 1. Install the plugin for your assistant (see below)
-# 2. Open a new conversation in your project
-# 3. Say: "remember that orders over 1000 need manager approval"
-# 4. Approve the entry in the web UI
-# 5. Ask questions: "what are the business rules?"
+# 1. Clone and enter the project
+git clone <repo-url> rag
+cd rag
+
+# 2. Copy environment file
+cp .env.example .env
+
+# 3. Start all services (app, web, worker, postgres, embedder)
+docker compose up -d --build
+
+# 4. Run migrations
+docker compose exec app php artisan migrate
+
+# 5. Open the admin panel
+open http://localhost:8080/martis
 ```
 
-## Configuration
+### Running without Docker
 
-Environment variables (all optional):
+If you prefer to run the app on your host:
 
-| Variable | Default | Meaning |
-|---|---|---|
-| `RAG_EMBEDDING_MODEL` | `paraphrase-multilingual-mpnet-base-v2` | sentence-transformers model. Changing it triggers an automatic re-index on next server start. |
-| `RAG_EMBEDDING_DIM` | `768` | Embedding dimension (must match the model). |
-| `RAG_SEARCH_MIN_SCORE` | `0.30` | Minimum cosine similarity for a vector hit to count. Exact keyword (FTS) matches are not gated by this. |
-| `RAG_EMBED_URL` | `http://127.0.0.1:8000/api/embed` | Shared embedding endpoint; extra MCP sessions use it instead of loading their own model copy. |
-| `RAG_EMBED_REMOTE` | `1` | Set `0` to force in-process embedding. |
+```bash
+# 1. Start Postgres+pgvector only
+docker compose up -d postgres
 
-### How search works
+# 2. Install dependencies
+composer install
 
-`rag_search` runs hybrid retrieval: semantic KNN over per-chunk embeddings
-(long entries are chunked, so content beyond the model window is still
-found) fused with BM25 keyword search via Reciprocal Rank Fusion — exact
-identifiers match even when embeddings miss them. Results are scoped to the
-project at the index level and optionally expanded through the knowledge
-graph.
+# 3. Run migrations and seed
+php artisan migrate
+php artisan db:seed
 
----
+# 4. Start the dev server
+php artisan serve
+
+# 5. Open the admin panel
+open http://localhost:8000/martis
+```
 
 ## Docker
 
-Run the admin panel (React SPA + FastAPI API) in two containers.
+The `docker-compose.yml` orchestrates 5 services:
 
-### Installation
+| Service | Image | Port | Purpose |
+|---|---|---|---|
+| `app` | `Dockerfile.app` (PHP-FPM 8.3) | — | Laravel application |
+| `web` | `nginx:alpine` | `8080:80` | nginx reverse proxy |
+| `worker` | `Dockerfile.app` | — | Queue worker (`queue:work`) |
+| `postgres` | `pgvector/pgvector:pg16` | `5433:5432` | Postgres + pgvector |
+| `embedder` | `services/embedder/` (FastAPI) | `8001:8000` | Embedding sidecar |
 
-```bash
-git clone https://github.com/felipereisdev/rag-knowledge-base.git ~/rag-knowledge-base
-cd ~/rag-knowledge-base
-docker compose up -d
-```
-
-- **Admin panel:** `http://127.0.0.1:8765`
-- **API:** `http://127.0.0.1:8000/api`
-
-The SQLite database is persisted via a volume mount at `~/.rag/knowledge.db`.
-
-### Usage
+### Common commands
 
 ```bash
-docker compose up -d      # start in background
-docker compose logs -f     # view logs
-docker compose down        # stop
+# Start all services
+docker compose up -d --build
+
+# Run migrations
+docker compose exec app php artisan migrate
+
+# Run tests (uses the dev profile with test dependencies)
+docker compose --profile dev up -d --build app-dev
+docker compose --profile dev exec app-dev vendor/bin/pest
+
+# Run static analysis
+docker compose --profile dev exec app-dev vendor/bin/phpstan analyse --level=6 --memory-limit=2G
+
+# Check formatting
+docker compose --profile dev exec app-dev vendor/bin/pint --test
+
+# View logs
+docker compose logs -f app
+docker compose logs -f worker
+
+# Stop everything
+docker compose down
+
+# Stop and remove volumes (fresh start)
+docker compose down -v
 ```
 
-To use the MCP server from an assistant, configure it to run inside the API container:
+## CI/CD
+
+GitHub Actions runs on every push and PR:
+
+| Job | When | What |
+|---|---|---|
+| `test` | All pushes + PRs | `docker compose up` + Pest (full integration) |
+| `lint` | All pushes + PRs | PHPStan level 6 + Pint check |
+| `build-and-push` | Push to `main` only | Build `Dockerfile.app` + push to `ghcr.io` |
+
+The Docker image is published to `ghcr.io/<owner>/rag-app:latest` on every merge to main.
+
+## MCP Integration
+
+This project exposes a Model Context Protocol (MCP) server so that AI assistants
+(Claude Code, Cursor, Codex) can store and search knowledge programmatically.
+
+The `.mcp.json` at the repo root registers the `rag` server:
 
 ```json
 {
   "mcpServers": {
     "rag": {
-      "command": "docker",
-      "args": ["exec", "-i", "rag-api", "python3", "server/main.py"]
+      "command": "php",
+      "args": ["artisan", "mcp:start", "rag"],
+      "cwd": "."
     }
   }
 }
 ```
 
----
+### Available MCP tools
 
-## Codex
+- `rag_status` — project status (counts, language, tags)
+- `rag_store_knowledge` — store a pending entry with tags/entities/relations
+- `rag_search` — hybrid vector + FTS + KAG search
+- `rag_query_graph` — explore entity relationships
+- `rag_import_document` — import a .md/.txt file (split by H1/H2)
+- `rag_open_approval_ui` — get the approval URL
+- `rag_list_projects` — list all projects with stats
 
-### Installation
-
-```bash
-git clone https://github.com/felipereisdev/rag-knowledge-base.git ~/rag-knowledge-base
-codex plugin add rag@personal
-```
-
-### Usage
-
-Open a **new thread** after installation:
-
-```
-rag_store_knowledge     → Store a knowledge entry (title, content, category, tags)
-rag_import_document     → Import a .md or .txt file
-rag_search              → Query the knowledge base
-rag_list_knowledge      → List entries with filters
-rag_remove_knowledge    → Remove an entry
-rag_open_approval_ui    → Review and approve pending entries
-rag_status              → Show knowledge base stats
-rag_list_projects       → List all projects
-```
-
----
-
-## Claude (Claude Code)
-
-### Installation
+### Artisan commands (CLI equivalents)
 
 ```bash
-git clone https://github.com/felipereisdev/rag-knowledge-base.git ~/rag-knowledge-base
-pip3 install scikit-learn  # optional, for better search
-~/rag-knowledge-base/install.sh ~/projects/my-project
+php artisan rag:store "Title" --content="..." --category=business-rule --tags=a,b
+php artisan rag:import path/to/file.md --project=my-project
+php artisan rag:search "query" --project=my-project --limit=5
+php artisan rag:reindex --project=my-project
 ```
 
-### Usage
+### Graph explorer
 
-```bash
-# Store knowledge
-python3 ~/rag-knowledge-base/rag/scripts/store.py \
-  --project my-project \
-  --title "Order approval rule" \
-  --content "Orders over 1000 need manager approval" \
-  --category business-rule \
-  --tags orders approval
+Open `http://localhost:8080/martis/graph` in a browser to visualize entities and
+relations as an interactive network graph (powered by vis-network). When running
+on host with `php artisan serve`, use port `8000` instead.
 
-# Import a document
-python3 ~/rag-knowledge-base/rag/scripts/import.py \
-  --file docs/rules.md \
-  --project my-project \
-  --init
+## Configuration
 
-# Search
-python3 ~/rag-knowledge-base/rag/scripts/search.py \
-  --query "order approval" \
-  --project my-project
+Environment variables (in `.env`):
 
-# Start approval UI
-python3 ~/rag-knowledge-base/rag/server/main.py
-```
-
----
-
-## Cursor
-
-Add to `.cursorrules`:
-
-```markdown
-You have access to a knowledge base at ~/.rag/knowledge.db.
-Before answering questions about business rules or architecture, search:
-  python3 ~/rag-knowledge-base/rag/scripts/search.py --query "<question>" --project <project-id>
-
-To store knowledge:
-  python3 ~/rag-knowledge-base/rag/scripts/store.py --project <project-id> --title "<title>" --content "<content>" --category <category>
-
-To import a document:
-  python3 ~/rag-knowledge-base/rag/scripts/import.py --file <path> --project <project-id> --init
-
-Approval UI: http://127.0.0.1:8765
-```
-
----
-
-## OpenCode
-
-The install script adds instructions to `AGENTS.md`:
-
-```markdown
-## Knowledge Base RAG
-
-This project has a knowledge base. Use the tools in ~/rag-knowledge-base/rag/
-to store, search, and import knowledge.
-
-- Start server: `python3 ~/rag-knowledge-base/rag/server/main.py`
-- Search: `python3 ~/rag-knowledge-base/rag/scripts/search.py`
-- Store: `python3 ~/rag-knowledge-base/rag/scripts/store.py`
-- Import: `python3 ~/rag-knowledge-base/rag/scripts/import.py`
-- Approval UI: http://127.0.0.1:8765
-```
-
----
-
-## Architecture
-
-```
-~/.rag/knowledge.db          ← SQLite database (shared by all assistants)
-~/rag-knowledge-base/
-├── Dockerfile.api            ← FastAPI container (API + MCP server)
-├── Dockerfile.web            ← nginx + React build container
-├── nginx.conf                ← nginx config (SPA + API proxy)
-├── docker-compose.yml        ← Container orchestration
-├── rag/
-│   ├── requirements.txt      ← Python dependencies
-│   ├── .codex-plugin/
-│   │   └── plugin.json       ← Codex plugin manifest
-│   ├── .mcp.json             ← MCP server config
-│   ├── server/
-│   │   ├── main.py           ← MCP server (JSON-RPC over stdio)
-│   │   ├── api.py            ← FastAPI REST API for admin panel
-│   │   ├── db.py             ← SQLite layer (entries, tags, projects)
-│   │   ├── search_engine.py  ← TF-IDF search over knowledge entries
-│   │   └── doc_import.py     ← Markdown/text import parser
-│   ├── web/                   ← React admin panel
-│   │   ├── src/
-│   │   │   ├── pages/        ← Dashboard, Projects, Entries, Approvals, Search
-│   │   │   ├── components/   ← Layout, EntryForm, shadcn/ui components
-│   │   │   └── lib/api.ts    ← API client
-│   │   └── package.json
-│   ├── scripts/              ← CLI scripts for non-Codex assistants
-│   │   ├── store.py
-│   │   ├── import.py
-│   │   └── search.py
-│   ├── skills/SKILL.md       ← Codex skill instructions
-│   └── README.md
-```
-
-## Categories
-
-| Category | Use for |
-|---|---|
-| `business-rule` | Business logic rules and policies |
-| `design-decision` | Why something was built a certain way |
-| `architecture` | System architecture, components, data flow |
-| `documentation` | Imported documentation and notes |
-| `insight` | General useful knowledge |
-| `convention` | Coding/style conventions |
-| `constraint` | Technical/business constraints |
-
-## Database Management
-
-Database: `~/.rag/knowledge.db`. All data stays local.
-
-Reset a project:
-```bash
-sqlite3 ~/.rag/knowledge.db "DELETE FROM knowledge_entries WHERE project_id = 'my-project';"
-sqlite3 ~/.rag/knowledge.db "DELETE FROM tags WHERE project_id = 'my-project';"
-```
-
-Full reset:
-```bash
-rm -rf ~/.rag/
-```
+| Variable | Default | Meaning |
+|---|---|---|
+| `DB_CONNECTION` | `pgsql` | Database driver |
+| `DB_HOST` | `127.0.0.1` | Postgres host |
+| `DB_PORT` | `5433` | Postgres port (host side) |
+| `DB_DATABASE` | `rag` | Database name |
+| `DB_USERNAME` | `rag` | Database user |
+| `DB_PASSWORD` | `secret` | Database password |
+| `RAG_EMBEDDING_MODEL` | `paraphrase-multilingual-mpnet-base-v2` | Embedding model |
+| `RAG_EMBEDDING_DIM` | `768` | Embedding dimension |
+| `MARTIS_AUTH_MIDDLEWARE` | (empty) | Auth middleware for Martis routes (empty = no auth, local only) |
 
 ## Development
 
 ```bash
 # Run tests
-cd ~/rag-knowledge-base/rag && python3 -m pytest tests/ -v
+./vendor/bin/pest
 
-# Test the MCP server
-cd ~/rag-knowledge-base/rag && python3 server/main.py
+# Static analysis
+./vendor/bin/phpstan analyse --memory-limit=2G
+
+# Format
+./vendor/bin/pint
 ```
 
-## License
+## Project structure
 
-MIT
+- `app/Models/` — Eloquent models (Project, KnowledgeEntry, Tag, Entity, Relation, ProjectPath, ChunkEmbedding, etc.)
+- `app/Martis/Resources/` — Martis resources (CRUD UI definitions)
+- `app/Martis/Dashboards/` — Martis custom dashboards
+- `app/Mcp/Servers/` — MCP server registration (`RagServer`)
+- `app/Mcp/Tools/` — MCP tool classes (7 tools)
+- `app/Console/Commands/` — Artisan commands (`rag:store`, `rag:import`, `rag:search`, `rag:reindex`)
+- `app/Services/Search/` — Hybrid search engine (vector + FTS + RRF + KAG)
+- `app/Services/Graph/` — Knowledge graph explorer service
+- `app/Services/Importing/` — Document importer service (.md/.txt splitting)
+- `database/migrations/` — Postgres schema with pgvector and tsvector
+- `tests/` — Pest PHP tests
+- `docs/superpowers/specs/` — Design specs
+- `docs/superpowers/plans/` — Implementation plans

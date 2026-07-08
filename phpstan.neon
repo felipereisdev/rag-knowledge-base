@@ -1,0 +1,13 @@
+includes:
+    - vendor/larastan/larastan/extension.neon
+
+parameters:
+    level: 6
+    paths:
+        - app/
+        - database/
+
+    # Pest test calls are not understood by PHPStan without a dedicated plugin.
+    # Tests run via Pest itself; static analysis covers application and database code.
+    excludePaths:
+        - tests/

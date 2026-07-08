@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "rag": {
+      "command": "php",
+      "args": ["artisan", "mcp:start", "rag"],
+      "cwd": "."
+    }
+  }
+}
