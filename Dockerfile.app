@@ -19,8 +19,8 @@ RUN composer install --no-dev --optimize-autoloader --no-interaction --no-script
 COPY . .
 RUN composer dump-autoload --no-dev --optimize --no-scripts
 
-# Stage 2: Final
-FROM php:8.3-fpm-alpine
+# Stage 2: Final (production)
+FROM php:8.3-fpm-alpine AS production
 
 RUN apk add --no-cache \
     postgresql-libs \
