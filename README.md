@@ -1,58 +1,70 @@
-<p align="center"><a href="https://laravel.com" target="_blank"><img src="https://raw.githubusercontent.com/laravel/art/master/logo-lockup/5%20SVG/2%20CMYK/1%20Full%20Color/laravel-logolockup-cmyk-red.svg" width="400" alt="Laravel Logo"></a></p>
+# RAG Knowledge Base
 
-<p align="center">
-<a href="https://github.com/laravel/framework/actions"><img src="https://github.com/laravel/framework/workflows/tests/badge.svg" alt="Build Status"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/dt/laravel/framework" alt="Total Downloads"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/v/laravel/framework" alt="Latest Stable Version"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
-</p>
+A per-project knowledge base RAG (Retrieval-Augmented Generation) for AI coding assistants, with an **approval workflow** so you control what goes into the knowledge base.
 
-## About Laravel
+**Phase 1 (current):** Laravel 13 + Martis admin panel with CRUD for projects, entries, tags, entities, relations, project paths, and chunk embeddings. Search engine, MCP server, and embedder sidecar come in Phases 2-4.
 
-Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:
+## Requirements
 
-- [Simple, fast routing engine](https://laravel.com/docs/routing).
-- [Powerful dependency injection container](https://laravel.com/docs/container).
-- Multiple back-ends for [session](https://laravel.com/docs/session) and [cache](https://laravel.com/docs/cache) storage.
-- Expressive, intuitive [database ORM](https://laravel.com/docs/eloquent).
-- Database agnostic [schema migrations](https://laravel.com/docs/migrations).
-- [Robust background job processing](https://laravel.com/docs/queues).
-- [Real-time event broadcasting](https://laravel.com/docs/broadcasting).
+- PHP 8.3+
+- Composer 2.x
+- Docker (for Postgres+pgvector)
 
-Laravel is accessible, powerful, and provides tools required for large, robust applications.
-
-## Learning Laravel
-
-Laravel has the most extensive and thorough [documentation](https://laravel.com/docs) and video tutorial library of all modern web application frameworks, making it a breeze to get started with the framework.
-
-In addition, [Laracasts](https://laracasts.com) contains thousands of video tutorials on a range of topics including Laravel, modern PHP, unit testing, and JavaScript. Boost your skills by digging into our comprehensive video library.
-
-You can also watch bite-sized lessons with real-world projects on [Laravel Learn](https://laravel.com/learn), where you will be guided through building a Laravel application from scratch while learning PHP fundamentals.
-
-## Agentic Development
-
-Laravel's predictable structure and conventions make it ideal for AI coding agents like Claude Code, Cursor, and GitHub Copilot. Install [Laravel Boost](https://laravel.com/docs/ai) to supercharge your AI workflow:
+## Quick start
 
 ```bash
-composer require laravel/boost --dev
+# 1. Start Postgres+pgvector
+docker compose up -d postgres
 
-php artisan boost:install
+# 2. Install dependencies
+composer install
+
+# 3. Run migrations and seed
+php artisan migrate
+php artisan db:seed
+
+# 4. Start the dev server
+php artisan serve
+
+# 5. Open the admin panel
+open http://localhost:8000/martis
 ```
 
-Boost provides your agent 15+ tools and skills that help agents build Laravel applications while following best practices.
+## Configuration
 
-## Contributing
+Environment variables (in `.env`):
 
-Thank you for considering contributing to the Laravel framework! The contribution guide can be found in the [Laravel documentation](https://laravel.com/docs/contributions).
+| Variable | Default | Meaning |
+|---|---|---|
+| `DB_CONNECTION` | `pgsql` | Database driver |
+| `DB_HOST` | `127.0.0.1` | Postgres host |
+| `DB_PORT` | `5433` | Postgres port (host side) |
+| `DB_DATABASE` | `rag` | Database name |
+| `DB_USERNAME` | `rag` | Database user |
+| `DB_PASSWORD` | `secret` | Database password |
+| `RAG_EMBEDDING_MODEL` | `paraphrase-multilingual-mpnet-base-v2` | Embedding model (used in Phase 2) |
+| `RAG_EMBEDDING_DIM` | `768` | Embedding dimension |
+| `MARTIS_AUTH_MIDDLEWARE` | (empty) | Auth middleware for Martis routes (empty = no auth, local only) |
 
-## Code of Conduct
+## Development
 
-In order to ensure that the Laravel community is welcoming to all, please review and abide by the [Code of Conduct](https://laravel.com/docs/contributions#code-of-conduct).
+```bash
+# Run tests
+./vendor/bin/pest
 
-## Security Vulnerabilities
+# Static analysis
+./vendor/bin/phpstan analyse --memory-limit=2G
 
-If you discover a security vulnerability within Laravel, please send an e-mail to Taylor Otwell via [taylor@laravel.com](mailto:taylor@laravel.com). All security vulnerabilities will be promptly addressed.
+# Format
+./vendor/bin/pint
+```
 
-## License
+## Project structure
 
-The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
+- `app/Models/` — Eloquent models (Project, KnowledgeEntry, Tag, Entity, Relation, ProjectPath, ChunkEmbedding, etc.)
+- `app/Martis/Resources/` — Martis resources (CRUD UI definitions)
+- `app/Martis/Dashboards/` — Martis custom dashboards
+- `database/migrations/` — Postgres schema with pgvector and tsvector
+- `tests/` — Pest PHP tests
+- `docs/superpowers/specs/` — Design specs
+- `docs/superpowers/plans/` — Implementation plans
