@@ -3,6 +3,7 @@
 namespace App\Mcp\Servers;
 
 use App\Mcp\Tools\RagStatusTool;
+use App\Mcp\Tools\RagStoreKnowledgeTool;
 use Laravel\Mcp\Server;
 use Laravel\Mcp\Server\Attributes\Instructions;
 use Laravel\Mcp\Server\Attributes\Name;
@@ -19,6 +20,7 @@ class RagServer extends Server
     // that are present. Re-add each tool in its corresponding task.
     protected array $tools = [
         RagStatusTool::class,
+        RagStoreKnowledgeTool::class,
     ];
 
     protected array $resources = [];
