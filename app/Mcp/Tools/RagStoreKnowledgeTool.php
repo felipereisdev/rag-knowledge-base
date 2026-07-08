@@ -56,22 +56,29 @@ class RagStoreKnowledgeTool extends Tool
             }
 
             foreach ($entities as $entityData) {
+                // Search on name+type to match the unique constraint and
+                // preserve the caller's requested type. Without `type` in the
+                // search, an existing entity with a different type would be
+                // returned and the requested type silently lost.
                 $entity = Entity::firstOrCreate(
-                    ['project_id' => $pid, 'name' => $entityData['name']],
-                    ['type' => $entityData['type'] ?? ''],
+                    [
+                        'project_id' => $pid,
+                        'name' => $entityData['name'],
+                        'type' => $entityData['type'] ?? '',
+                    ]
                 );
                 $entry->entities()->attach($entity->id);
             }
 
             foreach ($relations as $relData) {
-                $subject = Entity::firstOrCreate(
-                    ['project_id' => $pid, 'name' => $relData['subject']],
-                    ['type' => ''],
-                );
-                $object = Entity::firstOrCreate(
-                    ['project_id' => $pid, 'name' => $relData['object']],
-                    ['type' => ''],
-                );
+                // Relations reference entities by name regardless of type, so
+                // look up by name only and fall back to creating with type=''.
+                // Using firstOrCreate with only name in the search would risk
+                // matching an existing typed entity with the wrong type and
+                // then attempting a duplicate insert; an explicit lookup
+                // avoids that race.
+                $subject = $this->findOrCreateNamedEntity($pid, $relData['subject']);
+                $object = $this->findOrCreateNamedEntity($pid, $relData['object']);
                 Relation::create([
                     'project_id' => $pid,
                     'subject_id' => $subject->id,
@@ -126,6 +133,32 @@ class RagStoreKnowledgeTool extends Tool
         }
 
         return $strings;
+    }
+
+    /**
+     * Find an entity by name (regardless of type) or create one with type=''.
+     *
+     * Relations reference entities by name only, so we look up ignoring type
+     * to reuse any existing typed entity. If none exists we create a bare
+     * placeholder with an empty type. This avoids the duplicate-key violations
+     * that firstOrCreate would trigger when searching on name alone against
+     * an existing entity whose type differs from the create values.
+     */
+    private function findOrCreateNamedEntity(string $projectId, string $name): Entity
+    {
+        $entity = Entity::where('project_id', $projectId)
+            ->where('name', $name)
+            ->first();
+
+        if ($entity) {
+            return $entity;
+        }
+
+        return Entity::create([
+            'project_id' => $projectId,
+            'name' => $name,
+            'type' => '',
+        ]);
     }
 
     /**
