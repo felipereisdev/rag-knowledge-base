@@ -12,6 +12,11 @@ class KnowledgeEntry extends Model
 {
     use HasUuids;
 
+    protected static function booted(): void
+    {
+        static::observe(\App\Observers\KnowledgeEntryObserver::class);
+    }
+
     protected $keyType = 'string';
 
     public $incrementing = false;
