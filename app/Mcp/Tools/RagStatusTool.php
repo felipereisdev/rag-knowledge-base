@@ -11,8 +11,10 @@ use Illuminate\Support\Facades\DB;
 use Laravel\Mcp\Request;
 use Laravel\Mcp\Response;
 use Laravel\Mcp\Server\Attributes\Description;
+use Laravel\Mcp\Server\Attributes\Name;
 use Laravel\Mcp\Server\Tool;
 
+#[Name('rag_status')]
 #[Description('Show the status of the knowledge base for a project: entry counts, tags, categories. Auto-creates the project from the current working directory if project_id is omitted.')]
 class RagStatusTool extends Tool
 {
