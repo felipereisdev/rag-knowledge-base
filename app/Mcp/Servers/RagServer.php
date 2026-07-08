@@ -2,6 +2,7 @@
 
 namespace App\Mcp\Servers;
 
+use App\Mcp\Tools\RagQueryGraphTool;
 use App\Mcp\Tools\RagSearchTool;
 use App\Mcp\Tools\RagStatusTool;
 use App\Mcp\Tools\RagStoreKnowledgeTool;
@@ -23,6 +24,7 @@ class RagServer extends Server
         RagStatusTool::class,
         RagStoreKnowledgeTool::class,
         RagSearchTool::class,
+        RagQueryGraphTool::class,
     ];
 
     protected array $resources = [];
