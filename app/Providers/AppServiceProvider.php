@@ -77,7 +77,7 @@ class AppServiceProvider extends ServiceProvider
 
         try {
             $state = DB::table('embedding_model_state')->where('id', 1)->first();
-        } catch (\Throwable $e) {
+        } catch (\Illuminate\Database\QueryException $e) {
             return;
         }
 

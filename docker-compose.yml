@@ -121,6 +121,12 @@ services:
         condition: service_healthy
       embedder:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "php artisan queue:work --once --no-interaction || exit 1"]
+      interval: 30s
+      timeout: 60s
+      retries: 3
+      start_period: 30s
     restart: unless-stopped
 
 volumes:
