@@ -75,7 +75,11 @@ class AppServiceProvider extends ServiceProvider
         $configuredModel = config('app.rag_embedding_model', 'paraphrase-multilingual-mpnet-base-v2');
         $configuredDim = (int) config('app.rag_embedding_dim', 768);
 
-        $state = DB::table('embedding_model_state')->where('id', 1)->first();
+        try {
+            $state = DB::table('embedding_model_state')->where('id', 1)->first();
+        } catch (\Throwable $e) {
+            return;
+        }
 
         if (! $state) {
             DB::table('embedding_model_state')->insert([

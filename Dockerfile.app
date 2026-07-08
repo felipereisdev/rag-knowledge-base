@@ -23,6 +23,8 @@ RUN composer dump-autoload --no-dev --optimize --no-scripts
 FROM php:8.3-fpm-alpine
 
 RUN apk add --no-cache \
+    postgresql-libs \
+    libzip \
     libpq-dev \
     libzip-dev \
     icu-libs \
