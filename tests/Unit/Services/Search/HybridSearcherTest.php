@@ -6,10 +6,14 @@ use App\Models\Project;
 use App\Models\Relation;
 use App\Services\Search\HybridSearcher;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Queue;
 use Laravel\Ai\Embeddings;
 
 describe('HybridSearcher', function () {
     beforeEach(function () {
+        // Prevent IndexEntryJob from running synchronously when entries are created
+        Queue::fake();
+
         $this->project = Project::create(['id' => 'r1', 'name' => 'R1', 'root_path' => '/p']);
         $this->fakeVector = array_fill(0, 768, 0.1);
 
