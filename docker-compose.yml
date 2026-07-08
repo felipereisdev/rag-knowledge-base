@@ -17,5 +17,25 @@ services:
       retries: 5
     restart: unless-stopped
 
+  embedder:
+    build:
+      context: services/embedder
+      dockerfile: Dockerfile
+    container_name: rag-embedder
+    ports:
+      - "8001:8000"
+    environment:
+      - RAG_EMBEDDING_MODEL=paraphrase-multilingual-mpnet-base-v2
+      - RAG_EMBEDDING_DIM=768
+    volumes:
+      - ~/.cache/huggingface:/root/.cache/huggingface
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+    restart: unless-stopped
+
 volumes:
   rag_pgdata:
