@@ -10,6 +10,7 @@
     "license": "MIT",
     "require": {
         "php": "^8.3",
+        "laravel/ai": "^0.9.0",
         "laravel/framework": "^13.8",
         "laravel/tinker": "^3.0",
         "martis/martis": "^1.11"
