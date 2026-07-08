@@ -24,7 +24,7 @@ class ProjectResource extends Resource
 
             Text::make('id', 'Slug')
                 ->sortable()
-                ->rules('required', 'alpha_dash')
+                ->rules(['required', 'alpha_dash'])
                 ->help('Used in URLs and as project identifier.'),
 
             Text::make('name')

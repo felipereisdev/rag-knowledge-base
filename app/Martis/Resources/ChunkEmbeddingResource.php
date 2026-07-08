@@ -25,10 +25,10 @@ class ChunkEmbeddingResource extends Resource
             BelongsTo::make('entry', 'Entry')->searchable(),
             BelongsTo::make('project', 'Project')->searchable(),
             Number::make('chunk_index')->sortable(),
-            Textarea::make('content')->readonly(),
+            Textarea::make('content')
+                ->help('Text content of this chunk. Editable only on create.'),
             Text::make('embedding')
-                ->readonly()
-                ->help('Vector(768). Preview only — full vector not editable.'),
+                ->help('Vector(768). Pass a JSON array, e.g. [0.1,0.2,...].'),
         ];
     }
 }
