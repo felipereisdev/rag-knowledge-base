@@ -34,16 +34,17 @@ class ParagraphChunker
             // Detect heading - store as prefix, don't add to content
             if (preg_match('/^(#{1,6})\s+(.+)$/', $paragraph)) {
                 $currentHeading = $paragraph;
+
                 continue;
             }
 
-            $candidate = $currentContent . $paragraph;
+            $candidate = $currentContent.$paragraph;
 
             if (strlen($candidate) > $this->maxChars && $currentContent !== '') {
                 $chunks[] = new Chunk($this->withHeading($currentHeading, trim($currentContent)), $index++);
-                $currentContent = $paragraph . "\n\n";
+                $currentContent = $paragraph."\n\n";
             } else {
-                $currentContent = $candidate . "\n\n";
+                $currentContent = $candidate."\n\n";
             }
         }
 
@@ -56,6 +57,6 @@ class ParagraphChunker
 
     private function withHeading(string $heading, string $content): string
     {
-        return $heading !== '' ? $heading . "\n\n" . $content : $content;
+        return $heading !== '' ? $heading."\n\n".$content : $content;
     }
 }

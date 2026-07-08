@@ -5,6 +5,7 @@ namespace App\Services\Search;
 class SearchResult
 {
     /**
+     * @param  array<string>  $tags
      * @param  array<string>  $matchedBy  ['vector', 'keyword', 'graph']
      */
     public function __construct(

@@ -293,7 +293,7 @@ class HybridSearcher
                 category: $entry->category,
                 tags: $entry->tags->pluck('name')->toArray(),
                 matchedBy: $data['matchedBy'],
-                graphExpanded: $data['graphExpanded'] ?? false,
+                graphExpanded: $data['graphExpanded'],
             );
         }
 
@@ -307,6 +307,10 @@ class HybridSearcher
             [$content, $query]
         );
 
-        return $result?->headline ?? mb_substr($content, 0, 200);
+        if ($result === null) {
+            return mb_substr($content, 0, 200);
+        }
+
+        return $result->headline;
     }
 }

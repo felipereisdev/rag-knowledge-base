@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Observers\KnowledgeEntryObserver;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -14,7 +15,7 @@ class KnowledgeEntry extends Model
 
     protected static function booted(): void
     {
-        static::observe(\App\Observers\KnowledgeEntryObserver::class);
+        static::observe(KnowledgeEntryObserver::class);
     }
 
     protected $keyType = 'string';

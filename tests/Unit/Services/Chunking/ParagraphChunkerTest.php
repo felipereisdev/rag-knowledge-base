@@ -1,11 +1,10 @@
 <?php
 
 use App\Services\Chunking\ParagraphChunker;
-use App\Services\Chunking\Chunk;
 
 describe('ParagraphChunker', function () {
     it('splits content by blank lines', function () {
-        $chunker = new ParagraphChunker();
+        $chunker = new ParagraphChunker;
         $content = "First paragraph.\n\nSecond paragraph.\n\nThird paragraph.";
 
         $chunks = $chunker->chunk($content);
@@ -22,7 +21,7 @@ describe('ParagraphChunker', function () {
     it('groups paragraphs up to max chars', function () {
         $chunker = new ParagraphChunker(maxChars: 100);
         // Each paragraph is 30 chars; 3 fit in 100 chars (90 + 2 separators)
-        $content = str_repeat('A', 30) . "\n\n" . str_repeat('B', 30) . "\n\n" . str_repeat('C', 30) . "\n\n" . str_repeat('D', 30);
+        $content = str_repeat('A', 30)."\n\n".str_repeat('B', 30)."\n\n".str_repeat('C', 30)."\n\n".str_repeat('D', 30);
 
         $chunks = $chunker->chunk($content);
 
@@ -34,7 +33,7 @@ describe('ParagraphChunker', function () {
     });
 
     it('preserves headings as prefix', function () {
-        $chunker = new ParagraphChunker();
+        $chunker = new ParagraphChunker;
         $content = "# Section Title\n\nParagraph under the section.";
 
         $chunks = $chunker->chunk($content);
@@ -45,7 +44,7 @@ describe('ParagraphChunker', function () {
     });
 
     it('handles empty content', function () {
-        $chunker = new ParagraphChunker();
+        $chunker = new ParagraphChunker;
 
         $chunks = $chunker->chunk('');
 
@@ -53,7 +52,7 @@ describe('ParagraphChunker', function () {
     });
 
     it('handles single paragraph', function () {
-        $chunker = new ParagraphChunker();
+        $chunker = new ParagraphChunker;
 
         $chunks = $chunker->chunk('Just one paragraph.');
 

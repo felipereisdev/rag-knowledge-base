@@ -1,0 +1,62 @@
+<?php
+
+use App\Models\KnowledgeEntry;
+use App\Models\Project;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Queue;
+use Laravel\Ai\Embeddings;
+
+describe('Search page', function () {
+    it('loads with 200 status', function () {
+        $response = $this->get('/search');
+
+        $response->assertOk();
+        $response->assertSee('RAG Knowledge Base');
+    });
+
+    it('displays search form', function () {
+        $response = $this->get('/search');
+
+        $response->assertSee('name="q"', false);
+        $response->assertSee('name="project_id"', false);
+        $response->assertSee('name="category"', false);
+    });
+
+    it('shows results for a matching query', function () {
+        Queue::fake();
+
+        $project = Project::create(['id' => 'r1', 'name' => 'R1', 'root_path' => '/p']);
+        $entry = KnowledgeEntry::create([
+            'project_id' => $project->id,
+            'title' => 'Laravel routing',
+            'content' => 'Routes are defined in routes/web.php',
+            'status' => 'approved',
+        ]);
+
+        $fakeVector = array_fill(0, 768, 0.1);
+        Embeddings::fake([[$fakeVector]]);
+
+        DB::table('chunk_embeddings')->insert([
+            'entry_id' => $entry->id,
+            'project_id' => $project->id,
+            'chunk_index' => 0,
+            'content' => 'Routes are defined in routes/web.php',
+            'embedding' => '['.implode(',', $fakeVector).']',
+        ]);
+
+        $response = $this->get('/search?q=routing');
+
+        $response->assertOk();
+        $response->assertSee('Laravel routing');
+    });
+
+    it('shows empty state when no results', function () {
+        $fakeVector = array_fill(0, 768, 0.1);
+        Embeddings::fake([[$fakeVector]]);
+
+        $response = $this->get('/search?q=nonexistentxyz');
+
+        $response->assertOk();
+        $response->assertSee('Found 0 results');
+    });
+});
