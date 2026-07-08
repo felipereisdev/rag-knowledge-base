@@ -59,18 +59,25 @@ class MartisServiceProvider extends ServiceProvider
      */
     protected function registerMainMenu(): void
     {
-        // Martis::mainMenu(function ($request, $menu) {
-        //     return $menu->sections([
-        //         MenuSection::make('Operations', [
-        //             MenuItem::resource(\App\Martis\Resources\ClientResource::class),
-        //             MenuItem::resource(\App\Martis\Resources\ProjectResource::class),
-        //         ])->icon('briefcase'),
-        //
-        //         MenuSection::make('Reports', [
-        //             MenuItem::link('Weekly summary', '/reports/weekly')->icon('chart-line'),
-        //         ])->icon('file-text'),
-        //     ]);
-        // });
+        Martis::mainMenu(function ($request, $menu) {
+            return $menu->sections([
+                MenuSection::make('Knowledge', [
+                    MenuItem::resource(\App\Martis\Resources\KnowledgeEntryResource::class),
+                    MenuItem::resource(\App\Martis\Resources\TagResource::class),
+                    MenuItem::resource(\App\Martis\Resources\EntityResource::class),
+                    MenuItem::resource(\App\Martis\Resources\RelationResource::class),
+                ])->icon('book'),
+
+                MenuSection::make('Projects', [
+                    MenuItem::resource(\App\Martis\Resources\ProjectResource::class),
+                    MenuItem::resource(\App\Martis\Resources\ProjectPathResource::class),
+                ])->icon('folder'),
+
+                MenuSection::make('System', [
+                    MenuItem::resource(\App\Martis\Resources\ChunkEmbeddingResource::class),
+                ])->icon('gear'),
+            ]);
+        });
     }
 
     /**
@@ -81,10 +88,9 @@ class MartisServiceProvider extends ServiceProvider
      */
     protected function registerDashboards(): void
     {
-        // Martis::dashboards([
-        //     \App\Martis\Dashboards\OperationsDashboard::class,
-        //     \App\Martis\Dashboards\RevenueDashboard::class,
-        // ]);
+        Martis::dashboards([
+            \App\Martis\Dashboards\MainDashboard::class,
+        ]);
     }
 
     /**
