@@ -30,8 +30,15 @@ return [
     | Auth Middleware
     |--------------------------------------------------------------------------
     | Applied to protected Martis routes (everything except login/logout).
+    |
+    | Disabled (empty array) for local-only access — no login required.
+    | Re-enable by setting this to ['martis.auth'] (or env-driven via
+    | MARTIS_AUTH_MIDDLEWARE) before exposing the panel publicly.
     */
-    'auth_middleware' => ['martis.auth'],
+    'auth_middleware' => array_filter(
+        array_map('trim', explode(',', (string) env('MARTIS_AUTH_MIDDLEWARE', ''))),
+        static fn (string $m): bool => $m !== '',
+    ),
 
     /*
     |--------------------------------------------------------------------------
