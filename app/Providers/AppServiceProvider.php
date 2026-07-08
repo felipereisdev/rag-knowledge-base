@@ -4,6 +4,7 @@ namespace App\Providers;
 
 use App\Models\Entity;
 use App\Models\Relation;
+use Illuminate\Database\QueryException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -77,7 +78,7 @@ class AppServiceProvider extends ServiceProvider
 
         try {
             $state = DB::table('embedding_model_state')->where('id', 1)->first();
-        } catch (\Illuminate\Database\QueryException $e) {
+        } catch (QueryException $e) {
             return;
         }
 

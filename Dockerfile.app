@@ -43,3 +43,34 @@ RUN chmod +x /usr/local/bin/entrypoint-app.sh /usr/local/bin/entrypoint-worker.s
 RUN chown -R www-data:www-data /var/www/html/storage /var/www/html/bootstrap/cache
 
 ENTRYPOINT ["/usr/local/bin/entrypoint-app.sh"]
+
+# Stage 2-dev-builder: Reinstall with dev dependencies for testing
+FROM builder AS dev-builder
+
+RUN composer install --dev --optimize-autoloader --no-interaction --no-scripts
+RUN composer dump-autoload --optimize
+
+# Stage app-dev: Final image with dev dependencies (Pest, PHPStan, Pint)
+FROM php:8.3-fpm-alpine AS app-dev
+
+RUN apk add --no-cache \
+    postgresql-libs \
+    libzip \
+    libpq-dev \
+    libzip-dev \
+    icu-libs \
+    && docker-php-ext-install pdo_pgsql pgsql bcmath opcache zip \
+    && apk del libpq-dev libzip-dev
+
+COPY docker/php/php.ini /usr/local/etc/php/conf.d/production.ini
+
+WORKDIR /var/www/html
+
+COPY --from=dev-builder /var/www/html .
+COPY docker/entrypoint-app.sh /usr/local/bin/entrypoint-app.sh
+COPY docker/entrypoint-worker.sh /usr/local/bin/entrypoint-worker.sh
+RUN chmod +x /usr/local/bin/entrypoint-app.sh /usr/local/bin/entrypoint-worker.sh
+
+RUN chown -R www-data:www-data /var/www/html/storage /var/www/html/bootstrap/cache
+
+ENTRYPOINT ["/usr/local/bin/entrypoint-app.sh"]

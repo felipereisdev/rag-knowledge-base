@@ -129,6 +129,41 @@ services:
       start_period: 30s
     restart: unless-stopped
 
+  app-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile.app
+      target: app-dev
+    container_name: rag-app-dev
+    profiles: ["dev"]
+    volumes:
+      - ./:/var/www/html
+      - storage:/var/www/html/storage
+      - bootstrap-cache:/var/www/html/bootstrap/cache
+    environment:
+      - APP_ENV=testing
+      - APP_DEBUG=true
+      - DB_CONNECTION=pgsql
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_DATABASE=rag
+      - DB_USERNAME=rag
+      - DB_PASSWORD=secret
+      - RAG_EMBED_URL=http://embedder:8000/v1
+      - RAG_EMBED_KEY=rag-local
+      - RAG_EMBEDDING_MODEL=paraphrase-multilingual-mpnet-base-v2
+      - RAG_EMBEDDING_DIM=768
+      - QUEUE_CONNECTION=database
+      - SESSION_DRIVER=database
+      - CACHE_STORE=database
+    depends_on:
+      postgres:
+        condition: service_healthy
+      embedder:
+        condition: service_healthy
+    entrypoint: ["sh", "-c"]
+    command: ["sleep infinity"]
+
 volumes:
   rag-pgdata:
   storage:
