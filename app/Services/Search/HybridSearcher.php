@@ -271,8 +271,14 @@ class HybridSearcher
             return [];
         }
 
+        // Filter to approved entries at hydration so pending/rejected drafts
+        // never surface in search results. This is the single chokepoint
+        // that covers all match paths (vector, FTS, and graph expansion);
+        // vectorSearch doesn't apply a status filter and graph expansion
+        // can pull in related entries of any status.
         $entries = KnowledgeEntry::with(['tags', 'entities'])
             ->whereIn('id', array_keys($fused))
+            ->where('status', 'approved')
             ->get()
             ->keyBy('id');
 

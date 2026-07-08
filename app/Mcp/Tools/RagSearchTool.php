@@ -37,7 +37,7 @@ class RagSearchTool extends Tool
         }
 
         $query = (string) $request->get('query', '');
-        $limit = (int) ($request->get('limit') ?? $request->get('top_k') ?? 5);
+        $limit = (int) ($request->get('limit') ?? 5);
         $minScore = (float) ($request->get('min_score') ?? 0.30);
         $expandGraph = (bool) ($request->get('expand_graph') ?? true);
         $category = $request->get('category');

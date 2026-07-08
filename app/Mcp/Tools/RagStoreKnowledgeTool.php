@@ -92,7 +92,7 @@ class RagStoreKnowledgeTool extends Tool
         });
 
         $project = Project::find($pid);
-        $lang = $project?->language ?? 'en';
+        $lang = $project->language ?? 'en';
 
         $pending = KnowledgeEntry::where('project_id', $pid)->where('status', 'pending')->count();
         $approved = KnowledgeEntry::where('project_id', $pid)->where('status', 'approved')->count();
@@ -213,15 +213,17 @@ class RagStoreKnowledgeTool extends Tool
             'project_id' => $schema->string()
                 ->description('The project ID. If omitted, resolves from the current working directory.'),
             'entities' => $schema->array()
-                ->items($schema->object()
-                    ->property('name', $schema->string())
-                    ->property('type', $schema->string()))
+                ->items($schema->object([
+                    'name' => $schema->string(),
+                    'type' => $schema->string(),
+                ]))
                 ->description('Salient entities mentioned in the content.'),
             'relations' => $schema->array()
-                ->items($schema->object()
-                    ->property('subject', $schema->string())
-                    ->property('predicate', $schema->string())
-                    ->property('object', $schema->string()))
+                ->items($schema->object([
+                    'subject' => $schema->string(),
+                    'predicate' => $schema->string(),
+                    'object' => $schema->string(),
+                ]))
                 ->description('Subject-predicate-object triples between entities.'),
         ];
     }
