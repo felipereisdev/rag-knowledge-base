@@ -2,18 +2,40 @@
 
 A per-project knowledge base RAG (Retrieval-Augmented Generation) for AI coding assistants, with an **approval workflow** so you control what goes into the knowledge base.
 
-**Phase 3 (current):** MCP server (7 tools via `laravel/mcp`), 3 Artisan commands (`rag:store`, `rag:import`, `rag:search`), and a graph explorer page at `/martis/graph`.
+**Phase 4 (current):** MCP server (7 tools via `laravel/mcp`), 3 Artisan commands (`rag:store`, `rag:import`, `rag:search`), a graph explorer page at `/martis/graph`, full Docker stack, and a GitHub Actions CI/CD pipeline.
 
 ## Requirements
 
 - PHP 8.3+
 - Composer 2.x
-- Docker (for Postgres+pgvector)
+- Docker (for the full stack, or just Postgres+pgvector if running on host)
 
 ## Quick start
 
 ```bash
-# 1. Start Postgres+pgvector
+# 1. Clone and enter the project
+git clone <repo-url> rag
+cd rag
+
+# 2. Copy environment file
+cp .env.example .env
+
+# 3. Start all services (app, web, worker, postgres, embedder)
+docker compose up -d --build
+
+# 4. Run migrations
+docker compose exec app php artisan migrate
+
+# 5. Open the admin panel
+open http://localhost:8080/martis
+```
+
+### Running without Docker
+
+If you prefer to run the app on your host:
+
+```bash
+# 1. Start Postgres+pgvector only
 docker compose up -d postgres
 
 # 2. Install dependencies
@@ -29,6 +51,60 @@ php artisan serve
 # 5. Open the admin panel
 open http://localhost:8000/martis
 ```
+
+## Docker
+
+The `docker-compose.yml` orchestrates 5 services:
+
+| Service | Image | Port | Purpose |
+|---|---|---|---|
+| `app` | `Dockerfile.app` (PHP-FPM 8.3) | — | Laravel application |
+| `web` | `nginx:alpine` | `8080:80` | nginx reverse proxy |
+| `worker` | `Dockerfile.app` | — | Queue worker (`queue:work`) |
+| `postgres` | `pgvector/pgvector:pg16` | `5433:5432` | Postgres + pgvector |
+| `embedder` | `services/embedder/` (FastAPI) | `8001:8000` | Embedding sidecar |
+
+### Common commands
+
+```bash
+# Start all services
+docker compose up -d --build
+
+# Run migrations
+docker compose exec app php artisan migrate
+
+# Run tests (uses the dev profile with test dependencies)
+docker compose --profile dev up -d --build app-dev
+docker compose --profile dev exec app-dev vendor/bin/pest
+
+# Run static analysis
+docker compose --profile dev exec app-dev vendor/bin/phpstan analyse --level=6 --memory-limit=2G
+
+# Check formatting
+docker compose --profile dev exec app-dev vendor/bin/pint --test
+
+# View logs
+docker compose logs -f app
+docker compose logs -f worker
+
+# Stop everything
+docker compose down
+
+# Stop and remove volumes (fresh start)
+docker compose down -v
+```
+
+## CI/CD
+
+GitHub Actions runs on every push and PR:
+
+| Job | When | What |
+|---|---|---|
+| `test` | All pushes + PRs | `docker compose up` + Pest (full integration) |
+| `lint` | All pushes + PRs | PHPStan level 6 + Pint check |
+| `build-and-push` | Push to `main` only | Build `Dockerfile.app` + push to `ghcr.io` |
+
+The Docker image is published to `ghcr.io/<owner>/rag-app:latest` on every merge to main.
 
 ## MCP Integration
 
@@ -70,8 +146,9 @@ php artisan rag:reindex --project=my-project
 
 ### Graph explorer
 
-Open `http://localhost:8000/martis/graph` in a browser to visualize entities and
-relations as an interactive network graph (powered by vis-network).
+Open `http://localhost:8080/martis/graph` in a browser to visualize entities and
+relations as an interactive network graph (powered by vis-network). When running
+on host with `php artisan serve`, use port `8000` instead.
 
 ## Configuration
 
