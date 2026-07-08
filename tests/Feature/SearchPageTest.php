@@ -59,4 +59,18 @@ describe('Search page', function () {
         $response->assertOk();
         $response->assertSee('Found 0 results');
     });
+
+    it('handles empty query string without crashing', function () {
+        $response = $this->get('/search?q=');
+
+        $response->assertOk();
+        $response->assertSee('RAG Knowledge Base');
+    });
+
+    it('handles whitespace-only query without crashing', function () {
+        $response = $this->get('/search?q=%20');
+
+        $response->assertOk();
+        $response->assertSee('RAG Knowledge Base');
+    });
 });

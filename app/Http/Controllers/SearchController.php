@@ -10,7 +10,7 @@ class SearchController extends Controller
 {
     public function index(Request $request, HybridSearcher $searcher): View
     {
-        $query = $request->input('q', '');
+        $query = (string) $request->input('q', '');
         $projectId = $request->input('project_id');
         $category = $request->input('category');
 
