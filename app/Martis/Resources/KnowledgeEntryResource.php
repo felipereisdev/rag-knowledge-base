@@ -3,9 +3,7 @@
 namespace App\Martis\Resources;
 
 use App\Martis\Actions\ApproveEntries;
-use App\Martis\Actions\ApproveEntryInline;
 use App\Martis\Actions\RejectEntries;
-use App\Martis\Actions\RejectEntryInline;
 use App\Models\KnowledgeEntry;
 use Illuminate\Http\Request;
 use Martis\Actions\Action;
@@ -44,38 +42,25 @@ class KnowledgeEntryResource extends Resource
     }
 
     /**
-     * Approve / Reject on BOTH surfaces:
-     *  - bulk dropdown (select rows → Actions) via ApproveEntries / RejectEntries;
-     *  - per-row inline ✓/✗ buttons via the *Inline subclasses (->onlyInline()),
-     *    rendered after the default view/edit/delete icons.
+     * Per-row inline ✓/✗ buttons AND the bulk "Actions" dropdown from a single
+     * action each. Martis v1.28.3 made ->showInline() additive (it keeps
+     * showOnIndex=true), so one showInline action appears in both surfaces — no
+     * need to register the operation twice.
      *
-     * A single action is inline XOR in the dropdown (the dropdown filters out
-     * showInline actions), so the same operation is registered under two
-     * distinct classes/uriKeys. NOTE: Martis caches the resource schema with a
-     * "forever" TTL — run `php artisan martis:cache:clear` (automated in the
-     * container entrypoint) after changing this list, or the SPA keeps rendering
-     * the old one.
+     * NOTE: Martis caches the resource schema (forever TTL); the container
+     * entrypoint runs `martis:cache:clear` on boot so changes here take effect.
      *
      * @return array<int, Action>
      */
     public function actions(Request $request): array
     {
         return [
-            // Bulk dropdown (multi-select)
             ApproveEntries::make()
+                ->showInline()
                 ->icon('check-circle')
                 ->iconColor('#16a34a'),
             RejectEntries::make()
-                ->icon('x-circle')
-                ->iconColor('#dc2626'),
-
-            // Per-row inline buttons
-            ApproveEntryInline::make()
-                ->onlyInline()
-                ->icon('check-circle')
-                ->iconColor('#16a34a'),
-            RejectEntryInline::make()
-                ->onlyInline()
+                ->showInline()
                 ->icon('x-circle')
                 ->iconColor('#dc2626'),
         ];
