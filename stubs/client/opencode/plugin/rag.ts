@@ -31,7 +31,7 @@ export const RagMemory: Plugin = async ({ client, directory }) => {
   return {
     event: async ({ event }) => {
       if (event.type === "session.created") {
-        await ragPost("ensure-project", { cwd: directory }) // POST /hooks/ensure-project
+        await ragPost("ensure-project", { cwd: directory })
       }
       if (CONDENSE && event.type === "session.idle") {
         const id = (event as any).properties?.sessionID
@@ -51,7 +51,7 @@ export const RagMemory: Plugin = async ({ client, directory }) => {
         .join(" ")
         .trim()
       if (text.length < 8) return
-      const hits = await ragPost("search", { cwd: directory, query: text }) // POST /hooks/search
+      const hits = await ragPost("search", { cwd: directory, query: text })
       if (hits) {
         output.parts.push({ type: "text", text: `\n\n[RAG] Relevant prior knowledge:\n${hits}` })
       }
@@ -59,7 +59,7 @@ export const RagMemory: Plugin = async ({ client, directory }) => {
 
     "experimental.chat.system.transform": async (_input, output) => {
       if (!INJECT_ON_START) return
-      const digest = await ragPost("digest", { cwd: directory }) // POST /hooks/digest
+      const digest = await ragPost("digest", { cwd: directory })
       if (digest) output.system.push(`<rag-approved-knowledge>\n${digest}\n</rag-approved-knowledge>`)
     },
   }

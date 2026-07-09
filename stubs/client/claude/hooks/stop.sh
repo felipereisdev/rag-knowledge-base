@@ -13,6 +13,5 @@ ACTIVE=$(printf '%s' "$INPUT" | python3 -c 'import json,sys; print(json.load(sys
 [ "$ACTIVE" = "True" ] && exit 0
 
 REASON=$(rag_condense_instruction)
-printf '%s' "$INPUT" >/dev/null
 python3 -c 'import json,sys; print(json.dumps({"decision":"block","reason":sys.argv[1]}))' "$REASON"
 exit 0

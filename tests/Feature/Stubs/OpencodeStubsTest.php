@@ -9,7 +9,8 @@ it('ships the opencode plugin and mcp snippet', function () {
     $ts = file_get_contents("$base/plugin/rag.ts");
     expect($ts)->toContain('session.idle')
         ->and($ts)->toContain('chat.message')
-        ->and($ts)->toContain('/hooks/search')
+        ->and($ts)->toContain('/hooks/')
+        ->and($ts)->toContain('ragPost("search"')
         ->and($ts)->toContain('__RAG_URL__');
 
     $mcp = json_decode(file_get_contents("$base/mcp.snippet.json"), true);

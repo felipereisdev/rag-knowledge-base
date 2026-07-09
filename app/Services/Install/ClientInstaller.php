@@ -74,12 +74,42 @@ class ClientInstaller
     private function deepMerge(array $a, array $b): array
     {
         foreach ($b as $k => $v) {
-            $a[$k] = (is_array($v) && isset($a[$k]) && is_array($a[$k]))
-                ? $this->deepMerge($a[$k], $v)
-                : $v;
+            if (is_array($v) && isset($a[$k]) && is_array($a[$k])) {
+                $a[$k] = array_is_list($v)
+                    ? $this->mergeLists($a[$k], $v)
+                    : $this->deepMerge($a[$k], $v);
+            } else {
+                $a[$k] = $v;
+            }
         }
 
         return $a;
+    }
+
+    /**
+     * Append items from $incoming that aren't already present in $existing
+     * (compared by JSON representation), rather than merging by numeric index.
+     * This keeps hook-event lists (e.g. .claude/settings.json's
+     * hooks.SessionStart) non-destructive: a client's own hook entries
+     * survive alongside RAG's, and re-running install() is idempotent.
+     *
+     * @param  array<int, mixed>  $existing
+     * @param  array<int, mixed>  $incoming
+     * @return array<int, mixed>
+     */
+    private function mergeLists(array $existing, array $incoming): array
+    {
+        $existingEncoded = array_map(fn ($item) => json_encode($item), $existing);
+
+        foreach ($incoming as $item) {
+            $encoded = json_encode($item);
+            if (! in_array($encoded, $existingEncoded, true)) {
+                $existing[] = $item;
+                $existingEncoded[] = $encoded;
+            }
+        }
+
+        return $existing;
     }
 
     public function appendMarkedBlock(string $path, string $block): void

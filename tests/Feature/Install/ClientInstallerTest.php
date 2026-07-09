@@ -63,3 +63,36 @@ it('is idempotent on a second run', function () {
     expect($second)->toBe($first);
     File::deleteDirectory($target);
 });
+
+it('preserves an existing SessionStart hook when merging settings.json', function () {
+    $target = tmpTarget();
+    File::makeDirectory("$target/.claude", 0777, true, true);
+    File::put("$target/.claude/settings.json", json_encode([
+        'hooks' => [
+            'SessionStart' => [
+                ['hooks' => [['type' => 'command', 'command' => 'USER_OWN.sh']]],
+            ],
+        ],
+    ]));
+    $installer = new ClientInstaller(base_path('stubs/client'));
+
+    $installer->install($target, ['claude'], 'http://localhost:8080', 'tok');
+
+    $settings = json_decode(File::get("$target/.claude/settings.json"), true);
+    $sessionStart = $settings['hooks']['SessionStart'];
+    $commands = array_map(
+        fn ($entry) => $entry['hooks'][0]['command'] ?? null,
+        $sessionStart
+    );
+
+    expect($commands)->toContain('USER_OWN.sh');
+    expect(collect($commands)->contains(fn ($c) => str_contains((string) $c, 'session-start.sh')))->toBeTrue();
+
+    $first = File::get("$target/.claude/settings.json");
+    $installer->install($target, ['claude'], 'http://localhost:8080', 'tok');
+    $second = File::get("$target/.claude/settings.json");
+
+    expect($second)->toBe($first);
+
+    File::deleteDirectory($target);
+});
