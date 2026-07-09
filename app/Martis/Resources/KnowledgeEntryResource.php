@@ -17,6 +17,7 @@ use Martis\Fields\KeyValue;
 use Martis\Fields\Select;
 use Martis\Fields\Text;
 use Martis\Fields\Textarea;
+use Martis\Layout\Section;
 use Martis\Resource;
 
 class KnowledgeEntryResource extends Resource
@@ -66,58 +67,103 @@ class KnowledgeEntryResource extends Resource
         ];
     }
 
+    /**
+     * Drawer form (create / update / detail): a 12-column grid grouped into
+     * Sections, each field sized with ->span(N). Returning Sections from
+     * fields() is phpstan-clean since Martis v1.28.4 (field methods accept
+     * list<FieldContract|LayoutContract>). The index table is defined
+     * separately in fieldsForIndex() so it stays a flat sortable table.
+     */
     public function fields(Request $request): array
     {
         return [
-            Id::make('id'),
+            Section::make('Entry', [
+                BelongsTo::make('project', 'Project')
+                    ->searchable()
+                    ->span(6),
+                Select::make('category')
+                    ->options($this->categoryOptions())
+                    ->span(6),
+                Text::make('title')
+                    ->searchable()
+                    ->required()
+                    ->span(12),
+                Textarea::make('content')
+                    ->help('Markdown supported.')
+                    ->span(12),
+            ])->columns(12),
 
+            Section::make('Classification', [
+                Select::make('status')
+                    ->options($this->statusOptions())
+                    ->default('pending')
+                    ->span(4),
+                Text::make('source')
+                    ->help('manual, mcp, import, or cli.')
+                    ->span(4),
+                Text::make('author')
+                    ->span(4),
+                BelongsToMany::make('Tags', 'tags', TagResource::class)
+                    ->searchable()
+                    ->span(6),
+                BelongsToMany::make('Entities', 'entities', EntityResource::class)
+                    ->searchable()
+                    ->span(6),
+                KeyValue::make('metadata')
+                    ->span(12),
+            ])->columns(12),
+        ];
+    }
+
+    /**
+     * Flat columns for the index table.
+     */
+    public function fieldsForIndex(Request $request): array
+    {
+        return [
+            Id::make('id'),
             BelongsTo::make('project', 'Project')
                 ->sortable()
                 ->searchable(),
-
             Text::make('title')
                 ->sortable()
-                ->searchable()
-                ->required(),
-
-            Textarea::make('content')
-                ->hideFromIndex()
-                ->help('Markdown supported.'),
-
+                ->searchable(),
             Select::make('category')
-                ->options([
-                    'business-rule' => 'Business Rule',
-                    'design-decision' => 'Design Decision',
-                    'architecture' => 'Architecture',
-                    'documentation' => 'Documentation',
-                    'insight' => 'Insight',
-                    'convention' => 'Convention',
-                    'constraint' => 'Constraint',
-                ]),
-
+                ->options($this->categoryOptions()),
             Select::make('status')
-                ->options([
-                    'pending' => 'Pending',
-                    'approved' => 'Approved',
-                    'rejected' => 'Rejected',
-                ])
-                ->default('pending'),
-
-            Text::make('source')
-                ->help('manual, mcp, import, or cli.'),
-
+                ->options($this->statusOptions()),
+            Text::make('source'),
             Text::make('author'),
-
-            KeyValue::make('metadata'),
-
-            BelongsToMany::make('Tags', 'tags', TagResource::class)
-                ->searchable(),
-
-            BelongsToMany::make('Entities', 'entities', EntityResource::class)
-                ->searchable(),
-
             DateTime::make('created_at')
                 ->sortable(),
+        ];
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    private function categoryOptions(): array
+    {
+        return [
+            'business-rule' => 'Business Rule',
+            'design-decision' => 'Design Decision',
+            'architecture' => 'Architecture',
+            'documentation' => 'Documentation',
+            'insight' => 'Insight',
+            'convention' => 'Convention',
+            'constraint' => 'Constraint',
+        ];
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    private function statusOptions(): array
+    {
+        return [
+            'pending' => 'Pending',
+            'approved' => 'Approved',
+            'rejected' => 'Rejected',
         ];
     }
 }

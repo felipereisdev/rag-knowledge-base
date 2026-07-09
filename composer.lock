@@ -2739,16 +2739,16 @@
         },
         {
             "name": "martis/martis",
-            "version": "v1.28.3",
+            "version": "v1.28.4",
             "source": {
                 "type": "git",
                 "url": "https://github.com/Real-Edge-FX/martis-package.git",
-                "reference": "2b3046f8171ccdf4aef7a0ed7ed8bf7888ccfc41"
+                "reference": "25a2cbc92ab025b736cdf6219edac023853421b7"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/Real-Edge-FX/martis-package/zipball/2b3046f8171ccdf4aef7a0ed7ed8bf7888ccfc41",
-                "reference": "2b3046f8171ccdf4aef7a0ed7ed8bf7888ccfc41",
+                "url": "https://api.github.com/repos/Real-Edge-FX/martis-package/zipball/25a2cbc92ab025b736cdf6219edac023853421b7",
+                "reference": "25a2cbc92ab025b736cdf6219edac023853421b7",
                 "shasum": ""
             },
             "require": {
@@ -2794,9 +2794,9 @@
             "description": "Martis — React-first Laravel admin engine with full-stack resources, lenses, metrics, and a token-driven design system.",
             "support": {
                 "issues": "https://github.com/Real-Edge-FX/martis-package/issues",
-                "source": "https://github.com/Real-Edge-FX/martis-package/tree/v1.28.3"
+                "source": "https://github.com/Real-Edge-FX/martis-package/tree/v1.28.4"
             },
-            "time": "2026-07-09T15:10:55+00:00"
+            "time": "2026-07-09T16:05:39+00:00"
         },
         {
             "name": "monolog/monolog",
