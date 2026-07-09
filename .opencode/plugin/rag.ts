@@ -46,14 +46,16 @@ export const RagMemory: Plugin = async ({ client, directory }) => {
     },
 
     "chat.message": async (_input, output) => {
-      const text = (output.parts ?? [])
-        .map((p: any) => (p.type === "text" ? p.text : ""))
-        .join(" ")
-        .trim()
+      const textParts = (output.parts ?? []).filter((p: any) => p.type === "text")
+      const text = textParts.map((p: any) => p.text).join(" ").trim()
       if (text.length < 8) return
       const hits = await ragPost("search", { cwd: directory, query: text })
       if (hits) {
-        output.parts.push({ type: "text", text: `\n\n[RAG] Relevant prior knowledge:\n${hits}` })
+        // Mutate the existing text part instead of pushing a bare one: a pushed
+        // { type, text } lacks the id/sessionID/messageID keys opencode's part
+        // schema now requires, which rejects the whole user message on save.
+        const target = textParts[textParts.length - 1]
+        if (target) target.text += `\n\n[RAG] Relevant prior knowledge:\n${hits}`
       }
     },
 
