@@ -1,0 +1,5 @@
+{
+  "mcpServers": {
+    "rag": { "url": "__RAG_URL__/mcp/rag" }
+  }
+}

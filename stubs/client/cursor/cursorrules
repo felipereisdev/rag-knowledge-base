@@ -1,0 +1,11 @@
+# RAG Knowledge Base
+#
+# This project is wired to a RAG knowledge base over MCP (rag_* tools) and Cursor hooks.
+#
+# - Before answering questions about business rules, architecture, or past decisions,
+#   call rag_search first.
+# - When you establish a durable decision/rule/convention, call rag_store_knowledge
+#   (it goes to a pending approval queue; a human approves it in the admin UI).
+# - The sessionStart hook can inject a digest of approved knowledge (opt-in), and the
+#   stop hook asks you to condense the session before finishing.
+# - Project is resolved from the working directory; you rarely pass project_id.

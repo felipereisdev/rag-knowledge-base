@@ -1,0 +1,7 @@
+{
+  "version": 1,
+  "hooks": {
+    "sessionStart": [{ "command": "./.cursor/hooks/session-start.sh" }],
+    "stop": [{ "command": "./.cursor/hooks/stop.sh", "loop_limit": 2 }]
+  }
+}
