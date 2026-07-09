@@ -4,6 +4,8 @@ namespace App\Martis\Resources;
 
 use App\Models\KnowledgeEntry;
 use Illuminate\Http\Request;
+use Martis\Contracts\OverrideContract;
+use Martis\DrawerOverride;
 use Martis\Fields\BelongsTo;
 use Martis\Fields\BelongsToMany;
 use Martis\Fields\DateTime;
@@ -16,6 +18,21 @@ use Martis\Resource;
 
 class KnowledgeEntryResource extends Resource
 {
+    public function overrideCreate(): ?OverrideContract
+    {
+        return DrawerOverride::create();
+    }
+
+    public function overrideUpdate(): ?OverrideContract
+    {
+        return DrawerOverride::update();
+    }
+
+    public function overrideDetail(): ?OverrideContract
+    {
+        return DrawerOverride::detail();
+    }
+
     public static function model(): string
     {
         return KnowledgeEntry::class;

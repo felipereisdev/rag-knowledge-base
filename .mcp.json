@@ -1,9 +1,12 @@
 {
   "mcpServers": {
+    "martis": {
+      "type": "http",
+      "url": "http://127.0.0.1:8091/mcp"
+    },
     "rag": {
-      "command": "php",
-      "args": ["artisan", "mcp:start", "rag"],
-      "cwd": "."
+      "type": "http",
+      "url": "http://localhost:8080/mcp/rag"
     }
   }
 }

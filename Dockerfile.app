@@ -17,7 +17,9 @@ COPY composer.json composer.lock ./
 RUN composer install --no-dev --optimize-autoloader --no-interaction --no-scripts
 
 COPY . .
-RUN composer dump-autoload --no-dev --optimize --no-scripts
+RUN mkdir -p bootstrap/cache \
+    && composer dump-autoload --no-dev --optimize --no-scripts \
+    && php artisan package:discover --ansi
 
 # Stage 2: Final (production)
 FROM php:8.3-fpm-alpine AS production
@@ -28,6 +30,7 @@ RUN apk add --no-cache \
     libpq-dev \
     libzip-dev \
     icu-libs \
+    nginx \
     && docker-php-ext-install pdo_pgsql pgsql bcmath opcache zip \
     && apk del libpq-dev libzip-dev
 
@@ -39,6 +42,9 @@ COPY --from=builder /var/www/html .
 COPY docker/entrypoint-app.sh /usr/local/bin/entrypoint-app.sh
 COPY docker/entrypoint-worker.sh /usr/local/bin/entrypoint-worker.sh
 RUN chmod +x /usr/local/bin/entrypoint-app.sh /usr/local/bin/entrypoint-worker.sh
+
+# Publish Martis SPA assets into the image so nginx can serve them
+RUN php artisan martis:publish-assets --no-interaction
 
 RUN chown -R www-data:www-data /var/www/html/storage /var/www/html/bootstrap/cache
 

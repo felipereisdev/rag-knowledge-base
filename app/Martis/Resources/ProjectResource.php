@@ -4,6 +4,8 @@ namespace App\Martis\Resources;
 
 use App\Models\Project;
 use Illuminate\Http\Request;
+use Martis\Contracts\OverrideContract;
+use Martis\DrawerOverride;
 use Martis\Fields\Id;
 use Martis\Fields\Select;
 use Martis\Fields\Text;
@@ -12,6 +14,21 @@ use Martis\Resource;
 
 class ProjectResource extends Resource
 {
+    public function overrideCreate(): ?OverrideContract
+    {
+        return DrawerOverride::create();
+    }
+
+    public function overrideUpdate(): ?OverrideContract
+    {
+        return DrawerOverride::update();
+    }
+
+    public function overrideDetail(): ?OverrideContract
+    {
+        return DrawerOverride::detail();
+    }
+
     public static function model(): string
     {
         return Project::class;

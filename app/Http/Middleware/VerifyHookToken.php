@@ -11,9 +11,15 @@ class VerifyHookToken
     public function handle(Request $request, Closure $next): Response
     {
         $expected = (string) config('rag.hooks.token', '');
-        $provided = (string) ($request->bearerToken() ?? '');
 
-        if ($expected === '' || ! hash_equals($expected, $provided)) {
+        // No token configured: open access, matching the project's localhost
+        // model (the /mcp/rag endpoint is unauthenticated too). Setting a token
+        // is opt-in hardening for networked deployments.
+        if ($expected === '') {
+            return $next($request);
+        }
+
+        if (! hash_equals($expected, (string) ($request->bearerToken() ?? ''))) {
             return response('Unauthorized', 401);
         }
 

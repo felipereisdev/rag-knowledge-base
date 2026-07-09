@@ -39,7 +39,9 @@ class RagInstallCommand extends Command
         }
 
         $url = (string) ($this->option('url') ?: text('RAG server URL', default: 'http://localhost:8080'));
-        $token = (string) ($this->option('token') ?: text('RAG hook token', required: true));
+        // Token is optional: blank means the server's /hooks/* routes are open
+        // (localhost model). Only set it if the server has RAG_HOOK_TOKEN configured.
+        $token = (string) ($this->option('token') ?: text('RAG hook token (blank = no auth, for localhost)', default: '', required: false));
 
         $written = $installer->install($target, $harnesses, $url, $token);
 

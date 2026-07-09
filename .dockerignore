@@ -11,6 +11,7 @@ tests/
 storage/logs/
 storage/framework/cache/
 storage/pail/
+bootstrap/cache/
 node_modules/
 vendor/
 .phpunit.cache/

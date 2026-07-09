@@ -1,98 +1,343 @@
 # RAG Knowledge Base
 
-A per-project knowledge base RAG (Retrieval-Augmented Generation) for AI coding assistants, with an **approval workflow** so you control what goes into the knowledge base.
+A standalone **RAG (Retrieval-Augmented Generation) knowledge base** for AI coding assistants. It runs as a self-contained Docker server that any project, in any language, can connect to via **MCP** (Model Context Protocol) over HTTP — no code integration required in the host project.
 
-**Phase 4 (current):** MCP server (7 tools via `laravel/mcp`), 3 Artisan commands (`rag:store`, `rag:import`, `rag:search`), a graph explorer page at `/martis/graph`, full Docker stack, and a GitHub Actions CI/CD pipeline.
+Key features:
+
+- **MCP server** (7 tools) accessible over HTTP from any harness (Claude Code, Cursor, Codex, VS Code, Continue, …)
+- **Passive capture via hooks** — optional `rag:install` wires Claude Code / Codex / Cursor / opencode to auto-create the project, auto-search each prompt, and condense each session into the approval queue
+- **Approval workflow** — the assistant stores knowledge as *pending*; you approve via the admin UI before it's searchable
+- **Hybrid search** — vector (pgvector) + full-text (tsvector) + reciprocal rank fusion + knowledge-graph expansion
+- **Embeddings configurable** — local sidecar (offline, multilingual, free) by default, or any OpenAI-compatible API
+- **Admin panel + graph explorer** — built on Martis, visualize entities and relations interactively
+- **Plug-and-play** — clone, `docker compose up`, connect your harness. No PHP on the host, no manual key generation
+
+---
+
+## How it works
+
+```
+┌─────────────────────┐         MCP (HTTP)          ┌──────────────────────────┐
+│  Your AI assistant  │  ────  POST /mcp/rag  ────▶  │  RAG Knowledge Base      │
+│  (any harness)      │                              │  (Docker: app+web+worker │
+│  any language       │  ◀──  JSON-RPC response ───  │   +postgres+embedder)    │
+└─────────────────────┘                              └──────────────────────────┘
+        │                                                       │
+        │ .mcp.json points to                                   │ pgvector + tsvector
+        │ http://localhost:8080/mcp/rag                          │ approval workflow
+```
+
+The RAG server is **independent** of your project. Your project only needs one entry in its MCP config pointing at the running server. The host project can be Python, Node, Go, Ruby, another Laravel app — anything.
+
+---
 
 ## Requirements
 
-- PHP 8.3+
-- Composer 2.x
-- Docker (for the full stack, or just Postgres+pgvector if running on host)
+The only hard requirement for running the server:
 
-## Quick start
+- **Docker** + **Docker Compose** (to run the 5-service stack)
+
+That's it. No PHP, no Composer, no Python needed on your host — everything runs inside containers.
+
+---
+
+## Install the RAG server (one-time)
 
 ```bash
-# 1. Clone and enter the project
-git clone <repo-url> rag
-cd rag
+# 1. Clone and enter
+git clone <repo-url> rag-kb
+cd rag-kb
 
-# 2. Copy environment file
-cp .env.example .env
-
-# 3. Start all services (app, web, worker, postgres, embedder)
+# 2. Start all services (app, web, worker, postgres, embedder)
 docker compose up -d --build
-
-# 4. Run migrations
-docker compose exec app php artisan migrate
-
-# 5. Open the admin panel
-open http://localhost:8080/martis
 ```
 
-### Running without Docker
+On first boot the server automatically:
+- creates the `.env` from `.env.example`
+- generates the `APP_KEY`
+- runs the database migrations
 
-If you prefer to run the app on your host:
+The embedder downloads the embedding model on first start (~1 GB, cached in a volume afterward). Wait ~60 seconds for it to become healthy:
 
 ```bash
-# 1. Start Postgres+pgvector only
-docker compose up -d postgres
-
-# 2. Install dependencies
-composer install
-
-# 3. Run migrations and seed
-php artisan migrate
-php artisan db:seed
-
-# 4. Start the dev server
-php artisan serve
-
-# 5. Open the admin panel
-open http://localhost:8000/martis
+# 3. Wait for the stack to be healthy, then verify
+docker compose ps          # all services should show "(healthy)"
+curl -s http://localhost:8080/up   # → real-time app response
 ```
 
-## Docker
+Open the admin panel: **http://localhost:8080/martis**
 
-The `docker-compose.yml` orchestrates 5 services:
+A default admin user is created automatically on first boot:
+
+| Field | Value |
+|---|---|
+| Email | `admin@rag.local` |
+| Password | `password` |
+
+> **Change this password** after first login (Profile → Change Password) before exposing the server to a network.
+
+Done. The RAG server is running. Now connect your harness (next section).
+
+---
+
+## Connect your harness (any project)
+
+Add the RAG server to your harness's MCP config. The server endpoint is:
+
+```
+http://localhost:8080/mcp/rag
+```
+
+### Claude Code / opencode
+
+In your project (the project you want the assistant to have knowledge of), add to `.mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "rag": {
+      "type": "http",
+      "url": "http://localhost:8080/mcp/rag"
+    }
+  }
+}
+```
+
+### Cursor
+
+`Settings → Cursor Settings → Features → MCP → + Add MCP Server`:
+
+```json
+{
+  "mcpServers": {
+    "rag": {
+      "url": "http://localhost:8080/mcp/rag"
+    }
+  }
+}
+```
+
+### VS Code (Continue / Copilot extension)
+
+Add to `.continue/config.json` (or the equivalent for your MCP-capable extension):
+
+```json
+{
+  "mcpServers": {
+    "rag": {
+      "url": "http://localhost:8080/mcp/rag",
+      "transport": "streamable-http"
+    }
+  }
+}
+```
+
+### Codex / other CLI agents
+
+Any tool that speaks MCP over HTTP (Streamable transport) connects with the same URL. See the tool's MCP docs for its config format.
+
+> **One server, many projects.** You can run the RAG server once and point any number of projects/harnesses at it. Each project is identified by its working directory, so knowledge stays isolated per project automatically.
+
+### Verify the connection
+
+After connecting, ask your assistant to check the knowledge base status. The assistant will call the `rag_status` tool and report the project's entry counts. You can also test the endpoint directly:
+
+```bash
+curl -s -X POST http://localhost:8080/mcp/rag \
+  -H 'Content-Type: application/json' \
+  -H 'Accept: application/json, text/event-stream' \
+  -H 'MCP-Protocol-Version: 2025-11-25' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"test","version":"0.0.0"}}}'
+```
+
+---
+
+## Passive capture with hooks (`rag:install`)
+
+Connecting the MCP (above) gives your assistant the `rag_*` tools, but it still relies on the assistant *remembering* to call them. The **hook layer** makes capture passive — it wires your harness's lifecycle so knowledge is retrieved and stored automatically, feeding the same pending-approval queue.
+
+What the hooks do:
+
+- **Session start** — ensure the project exists; optionally inject a digest of approved knowledge (opt-in).
+- **Each prompt** — auto-search the base and inject relevant hits.
+- **Session end** — ask the current session to condense its durable knowledge and store it via `rag_store_knowledge` (→ pending approval).
+
+### Install into a client project
+
+```bash
+# from the RAG repo (needs PHP 8.3 on the host, like the dev tooling)
+php artisan rag:install \
+  --target=/path/to/your/project \
+  --harness=claude,codex,cursor,opencode \
+  --url=http://localhost:8080
+  # --token=... only if the server has RAG_HOOK_TOKEN set (see below)
+```
+
+Omit any flag to be prompted for it. The installer is **idempotent and non-destructive** — it merges into existing config (never clobbers your own hooks) and wires **only** the `rag` MCP. Re-running is safe.
+
+| Harness | Session-start inject | Per-prompt search | End-of-session condense | Wiring |
+|---|---|---|---|---|
+| Claude Code | ✅ | ✅ | ✅ | `.claude/settings.json` + hooks |
+| Codex CLI | ✅ | ✅ | ✅ | `.codex/hooks.json` (run `/hooks` once to trust) |
+| Cursor | ✅ | — *(platform can't inject per-prompt)* | ✅ | `.cursor/hooks.json` |
+| opencode | ✅ | ✅ | ✅ | `.opencode/plugin/rag.ts` |
+
+> Hooks require **`python3`** on the client machine (JSON handling) and fail safe: if the server is unreachable they no-op silently and never break your session.
+
+### Enable the hook endpoints on the server
+
+The hooks call `/hooks/*` routes on the server. If your running `rag-app` image predates this feature, rebuild so the routes exist:
+
+```bash
+docker compose up -d --build app web
+```
+
+By default these routes are **open on localhost** — the same model as the `/mcp/rag` endpoint, so no token is needed and you can leave `--token` blank in `rag:install`. If you expose the server on a network, lock them down with a token:
+
+```env
+# docker-compose.yml, under the `app` service `environment` (optional hardening)
+RAG_HOOK_TOKEN=<a-strong-secret>
+```
+
+When a token is set, pass the same value as `--token` to `rag:install`. Client-side tuning knobs (in the installed `hooks/config.sh`):
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `RAG_HOOK_INJECT_ON_START` | `false` | Inject the approved-knowledge digest at session start (opt-in) |
+| `RAG_HOOK_SEARCH_MIN_SCORE` | `0.40` | Auto-search relevance floor |
+| `RAG_HOOK_SEARCH_LIMIT` | `3` | Max auto-search hits |
+| `RAG_HOOK_CONDENSE` | `true` | End-of-session condensation nudge |
+
+> The token is written into the client's `hooks/config.sh` in plaintext — add it to that project's `.gitignore` if the repo is shared.
+
+---
+
+## MCP tools
+
+| Tool | Purpose |
+|---|---|
+| `rag_status` | Project status (entry counts, tags, categories). Auto-creates the project from the working directory. |
+| `rag_store_knowledge` | Store a **pending** entry with tags/entities/relations. Requires approval before it's searchable. |
+| `rag_search` | Hybrid search: vector + full-text + RRF + knowledge-graph expansion. |
+| `rag_query_graph` | Explore entity relationships in the knowledge graph. |
+| `rag_import_document` | Import a `.md`/`.txt` file (split by H1/H2 into entries). |
+| `rag_open_approval_ui` | Get the URL of the approval panel. |
+| `rag_list_projects` | List all projects with stats. |
+
+### Artisan commands (CLI equivalents)
+
+If you're on the host with the repo, you can also drive the server from the CLI:
+
+```bash
+docker compose exec app php artisan rag:store "Title" --content="..." --category=business-rule --tags=a,b
+docker compose exec app php artisan rag:import path/to/file.md --project=my-project
+docker compose exec app php artisan rag:search "query" --project=my-project --limit=5
+docker compose exec app php artisan rag:reindex --project=my-project
+```
+
+---
+
+## The approval workflow
+
+1. Your assistant stores knowledge via `rag_store_knowledge` → entry is created with status **pending** (not yet searchable).
+2. You review pending entries at **http://localhost:8080/martis/resources/knowledge-entries** and approve or reject them.
+3. On approval, the worker embeds the entry (vector + tsvector) and it becomes searchable via `rag_search`.
+
+This keeps the assistant from polluting the knowledge base with unverified claims — you stay in control of what's searchable.
+
+---
+
+## Embeddings
+
+The server supports two embedding backends, configured via environment variables:
+
+### Default: local sidecar (offline, free, multilingual)
+
+The `embedder` service runs a FastAPI app with `paraphrase-multilingual-mpnet-base-v2` (768-dim). No API key, no internet after the initial model download. Good for PT/EN. This is the out-of-the-box default.
+
+```env
+RAG_EMBED_URL=http://embedder:8000/v1   # inside Docker
+RAG_EMBED_KEY=rag-local
+RAG_EMBEDDING_MODEL=paraphrase-multilingual-mpnet-base-v2
+RAG_EMBEDDING_DIM=768
+```
+
+### Alternative: external API (OpenAI / Voyage / any OpenAI-compatible)
+
+Point the server at an external embeddings endpoint instead of the sidecar. Smaller stack (you can drop the `embedder` service), but requires an API key and incurs per-token cost. Set in `docker-compose.yml` under the `app` and `worker` `environment`:
+
+```env
+RAG_EMBED_URL=https://api.openai.com/v1
+RAG_EMBED_KEY=sk-...
+RAG_EMBEDDING_MODEL=text-embedding-3-small
+RAG_EMBEDDING_DIM=1536
+```
+
+> If you change the model or dimension on an existing database, the server detects the mismatch on boot and automatically re-embeds all chunks.
+
+---
+
+## Configuration
+
+Environment variables are set in `docker-compose.yml` (they override anything in `.env`). The relevant ones:
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `DB_HOST` | `postgres` | Postgres host (`postgres` inside Docker) |
+| `DB_PORT` | `5432` | Postgres port |
+| `DB_DATABASE` | `rag` | Database name |
+| `DB_USERNAME` / `DB_PASSWORD` | `rag` / `secret` | Database credentials |
+| `RAG_EMBED_URL` | `http://embedder:8000/v1` | Embedding endpoint (sidecar or external) |
+| `RAG_EMBEDDING_MODEL` | `paraphrase-multilingual-mpnet-base-v2` | Embedding model name |
+| `RAG_EMBEDDING_DIM` | `768` | Embedding dimension (must match the model) |
+| `RAG_SEARCH_MIN_SCORE` | `0.30` | Minimum score cutoff for search results |
+| `RAG_SEARCH_LIMIT` | `10` | Default result limit |
+| `MARTIS_AUTH_MIDDLEWARE` | (empty) | Auth middleware for admin routes (empty = no auth — **localhost only**) |
+
+> **Security.** By default the server has no authentication — it is intended for **localhost** use. If you expose it on a network, set `MARTIS_AUTH_MIDDLEWARE` and put the MCP endpoint behind a reverse proxy with auth.
+
+---
+
+## Docker services
 
 | Service | Image | Port | Purpose |
 |---|---|---|---|
 | `app` | `Dockerfile.app` (PHP-FPM 8.3) | — | Laravel application |
 | `web` | `nginx:alpine` | `8080:80` | nginx reverse proxy |
-| `worker` | `Dockerfile.app` | — | Queue worker (`queue:work`) |
+| `worker` | `Dockerfile.app` | — | Queue worker (embedding + indexing jobs) |
 | `postgres` | `pgvector/pgvector:pg16` | `5433:5432` | Postgres + pgvector |
-| `embedder` | `services/embedder/` (FastAPI) | `8001:8000` | Embedding sidecar |
+| `embedder` | `services/embedder/` (FastAPI) | `8001:8000` | Embedding sidecar (optional if using external API) |
 
 ### Common commands
 
 ```bash
-# Start all services
+# Start / stop
 docker compose up -d --build
+docker compose down
+docker compose down -v          # fresh start (wipes data)
 
-# Run migrations
-docker compose exec app php artisan migrate
-
-# Run tests (uses the dev profile with test dependencies)
-docker compose --profile dev up -d --build app-dev
-docker compose --profile dev exec app-dev vendor/bin/pest
-
-# Run static analysis
-docker compose --profile dev exec app-dev vendor/bin/phpstan analyse --level=6 --memory-limit=2G
-
-# Check formatting
-docker compose --profile dev exec app-dev vendor/bin/pint --test
-
-# View logs
+# Inspect
+docker compose ps
 docker compose logs -f app
 docker compose logs -f worker
 
-# Stop everything
-docker compose down
+# Run migrations manually
+docker compose exec app php artisan migrate
 
-# Stop and remove volumes (fresh start)
-docker compose down -v
+# Tests / static analysis / formatting (uses the dev profile)
+docker compose --profile dev up -d --build app-dev
+docker compose --profile dev exec app-dev vendor/bin/pest
+docker compose --profile dev exec app-dev vendor/bin/phpstan analyse --memory-limit=2G
+docker compose --profile dev exec app-dev vendor/bin/pint --test
 ```
+
+---
+
+## Graph explorer
+
+Open **http://localhost:8080/martis/graph** in a browser to visualize entities and their relations as an interactive network graph (powered by vis-network). Filter by project to focus on one knowledge base at a time.
+
+---
 
 ## CI/CD
 
@@ -106,91 +351,46 @@ GitHub Actions runs on every push and PR:
 
 The Docker image is published to `ghcr.io/<owner>/rag-app:latest` on every merge to main.
 
-## MCP Integration
-
-This project exposes a Model Context Protocol (MCP) server so that AI assistants
-(Claude Code, Cursor, Codex) can store and search knowledge programmatically.
-
-The `.mcp.json` at the repo root registers the `rag` server:
-
-```json
-{
-  "mcpServers": {
-    "rag": {
-      "command": "php",
-      "args": ["artisan", "mcp:start", "rag"],
-      "cwd": "."
-    }
-  }
-}
-```
-
-### Available MCP tools
-
-- `rag_status` — project status (counts, language, tags)
-- `rag_store_knowledge` — store a pending entry with tags/entities/relations
-- `rag_search` — hybrid vector + FTS + KAG search
-- `rag_query_graph` — explore entity relationships
-- `rag_import_document` — import a .md/.txt file (split by H1/H2)
-- `rag_open_approval_ui` — get the approval URL
-- `rag_list_projects` — list all projects with stats
-
-### Artisan commands (CLI equivalents)
-
-```bash
-php artisan rag:store "Title" --content="..." --category=business-rule --tags=a,b
-php artisan rag:import path/to/file.md --project=my-project
-php artisan rag:search "query" --project=my-project --limit=5
-php artisan rag:reindex --project=my-project
-```
-
-### Graph explorer
-
-Open `http://localhost:8080/martis/graph` in a browser to visualize entities and
-relations as an interactive network graph (powered by vis-network). When running
-on host with `php artisan serve`, use port `8000` instead.
-
-## Configuration
-
-Environment variables (in `.env`):
-
-| Variable | Default | Meaning |
-|---|---|---|
-| `DB_CONNECTION` | `pgsql` | Database driver |
-| `DB_HOST` | `127.0.0.1` | Postgres host |
-| `DB_PORT` | `5433` | Postgres port (host side) |
-| `DB_DATABASE` | `rag` | Database name |
-| `DB_USERNAME` | `rag` | Database user |
-| `DB_PASSWORD` | `secret` | Database password |
-| `RAG_EMBEDDING_MODEL` | `paraphrase-multilingual-mpnet-base-v2` | Embedding model |
-| `RAG_EMBEDDING_DIM` | `768` | Embedding dimension |
-| `MARTIS_AUTH_MIDDLEWARE` | (empty) | Auth middleware for Martis routes (empty = no auth, local only) |
+---
 
 ## Development
 
 ```bash
-# Run tests
+# Run tests on the host (requires PHP 8.3, Composer, and Postgres+pgvector)
+composer install
+cp .env.example .env
+php artisan key:generate
+php artisan migrate
 ./vendor/bin/pest
 
-# Static analysis
+# Static analysis / formatting
 ./vendor/bin/phpstan analyse --memory-limit=2G
-
-# Format
 ./vendor/bin/pint
 ```
 
+---
+
 ## Project structure
 
-- `app/Models/` — Eloquent models (Project, KnowledgeEntry, Tag, Entity, Relation, ProjectPath, ChunkEmbedding, etc.)
-- `app/Martis/Resources/` — Martis resources (CRUD UI definitions)
-- `app/Martis/Dashboards/` — Martis custom dashboards
-- `app/Mcp/Servers/` — MCP server registration (`RagServer`)
-- `app/Mcp/Tools/` — MCP tool classes (7 tools)
-- `app/Console/Commands/` — Artisan commands (`rag:store`, `rag:import`, `rag:search`, `rag:reindex`)
-- `app/Services/Search/` — Hybrid search engine (vector + FTS + RRF + KAG)
-- `app/Services/Graph/` — Knowledge graph explorer service
-- `app/Services/Importing/` — Document importer service (.md/.txt splitting)
-- `database/migrations/` — Postgres schema with pgvector and tsvector
-- `tests/` — Pest PHP tests
-- `docs/superpowers/specs/` — Design specs
-- `docs/superpowers/plans/` — Implementation plans
+```
+app/
+├── Mcp/
+│   ├── Servers/RagServer.php      # MCP server registration (7 tools)
+│   └── Tools/                     # The 7 MCP tool classes
+├── Martis/
+│   ├── Resources/                 # Admin CRUD definitions
+│   └── Dashboards/                # Custom dashboards
+├── Models/                        # Project, KnowledgeEntry, Tag, Entity, Relation, ...
+├── Services/
+│   ├── Search/                    # Hybrid search engine (vector + FTS + RRF + KAG)
+│   ├── Graph/                     # Knowledge graph explorer
+│   ├── Importing/                 # Document importer (.md/.txt splitting)
+│   ├── Indexing/                  # Embedding + indexing pipeline
+│   └── Chunking/                  # Text chunking strategies
+└── Console/Commands/             # rag:store, rag:import, rag:search, rag:reindex
+routes/
+└── ai.php                         # Registers the RAG MCP server (local + HTTP)
+services/
+└── embedder/                      # FastAPI embedding sidecar (Python)
+docker/                            # nginx, php-fpm, entrypoints
+```
