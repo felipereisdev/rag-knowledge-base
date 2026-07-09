@@ -8,6 +8,13 @@ if [ ! -f .env ]; then
     cp .env.example .env
 fi
 
+# Drop stale package/service discovery caches BEFORE any artisan call. The
+# bootstrap/cache volume can outlive an image (and is shared with the --dev
+# app-dev image), so a cached manifest may reference packages this --no-dev
+# image doesn't have (e.g. laravel/pail) — which crashes every artisan command
+# and loops the container. Regenerating from the current image is always safe.
+rm -f bootstrap/cache/packages.php bootstrap/cache/services.php
+
 # Generate APP_KEY on first boot if missing (plug-and-play: no manual setup needed)
 if [ -z "$APP_KEY" ] && ! grep -q "^APP_KEY=base64:" .env 2>/dev/null; then
     echo "Generating APP_KEY..."

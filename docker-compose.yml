@@ -41,6 +41,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.app
+      target: production
     container_name: rag-app
     volumes:
       - storage:/var/www/html/storage
@@ -100,6 +101,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.app
+      target: production
     container_name: rag-worker
     entrypoint: ["/usr/local/bin/entrypoint-worker.sh"]
     volumes:
