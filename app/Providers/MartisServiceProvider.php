@@ -3,7 +3,6 @@
 namespace App\Providers;
 
 use App\Martis\Dashboards\MainDashboard;
-use App\Martis\Resources\ChunkEmbeddingResource;
 use App\Martis\Resources\EntityResource;
 use App\Martis\Resources\KnowledgeEntryResource;
 use App\Martis\Resources\ProjectPathResource;
@@ -80,10 +79,6 @@ class MartisServiceProvider extends ServiceProvider
                     MenuItem::resource(ProjectResource::class),
                     MenuItem::resource(ProjectPathResource::class),
                 ])->icon('folder'),
-
-                MenuSection::make('System', [
-                    MenuItem::resource(ChunkEmbeddingResource::class),
-                ])->icon('gear'),
             ]);
         });
     }

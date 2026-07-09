@@ -3,9 +3,7 @@
 namespace App\Martis\Resources;
 
 use App\Martis\Actions\ApproveEntries;
-use App\Martis\Actions\ApproveEntryInline;
 use App\Martis\Actions\RejectEntries;
-use App\Martis\Actions\RejectEntryInline;
 use App\Models\KnowledgeEntry;
 use Illuminate\Http\Request;
 use Martis\Actions\Action;
@@ -44,40 +42,25 @@ class KnowledgeEntryResource extends Resource
     }
 
     /**
-     * Approve / Reject on two surfaces at once:
+     * Per-row inline Approve / Reject buttons.
      *
-     *  - Bulk "Actions" dropdown (select 1+ rows) via ApproveEntries / RejectEntries.
-     *  - Per-row inline ✓/✗ buttons via ApproveEntryInline / RejectEntryInline.
-     *
-     * The Martis SPA (v1.28.2) splits the resource's action list client-side:
-     * the bulk dropdown is built from `showOnIndex && !showInline`, while the
-     * per-row buttons are built from `showInline`. A single action is therefore
-     * EITHER a dropdown item OR an inline button — never both. Registering each
-     * behaviour twice under distinct uriKeys (the `*Inline` subclasses) is what
-     * lets Approve/Reject appear in BOTH places. The inline buttons render in
-     * the trailing Actions column, after the default view/edit/delete icons.
+     * `->showInline()` renders each action as a button in the trailing Actions
+     * column, after the default view/edit/delete icons (the documented Martis
+     * pattern: `[👁 ✏ 🗑] [Approve] [Reject]`). In v1.28.2 an action is inline
+     * XOR in the bulk dropdown, so with showInline the bulk-select checkbox is
+     * not shown — fine here: per-row Approve/Reject is the moderation workflow.
      *
      * @return array<int, Action>
      */
     public function actions(Request $request): array
     {
         return [
-            // Bulk dropdown (multi-select)
             ApproveEntries::make()
+                ->showInline()
                 ->icon('check-circle')
                 ->iconColor('#16a34a'),
             RejectEntries::make()
-                ->icon('x-circle')
-                ->iconColor('#dc2626'),
-
-            // Per-row inline buttons (onlyInline: excluded from the dropdown,
-            // shown as a ✓/✗ button on every row).
-            ApproveEntryInline::make()
-                ->onlyInline()
-                ->icon('check-circle')
-                ->iconColor('#16a34a'),
-            RejectEntryInline::make()
-                ->onlyInline()
+                ->showInline()
                 ->icon('x-circle')
                 ->iconColor('#dc2626'),
         ];
