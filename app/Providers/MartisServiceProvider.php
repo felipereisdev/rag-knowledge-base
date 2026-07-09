@@ -5,7 +5,6 @@ namespace App\Providers;
 use App\Martis\Dashboards\MainDashboard;
 use App\Martis\Resources\EntityResource;
 use App\Martis\Resources\KnowledgeEntryResource;
-use App\Martis\Resources\ProjectPathResource;
 use App\Martis\Resources\ProjectResource;
 use App\Martis\Resources\RelationResource;
 use App\Martis\Resources\TagResource;
@@ -77,7 +76,6 @@ class MartisServiceProvider extends ServiceProvider
 
                 MenuSection::make('Projects', [
                     MenuItem::resource(ProjectResource::class),
-                    MenuItem::resource(ProjectPathResource::class),
                 ])->icon('folder'),
             ]);
         });

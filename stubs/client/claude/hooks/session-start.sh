@@ -2,7 +2,7 @@
 # Claude Code SessionStart: ensure project exists; optionally inject digest.
 DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 RAG_HOOK_DIR="$DIR"
-. "$DIR/../../hooks/lib/rag-core.sh" 2>/dev/null || . "$DIR/lib/rag-core.sh" 2>/dev/null
+. "$DIR/lib/rag-core.sh" 2>/dev/null
 rag_load_config
 
 CWD="${CLAUDE_PROJECT_DIR:-$(pwd)}"

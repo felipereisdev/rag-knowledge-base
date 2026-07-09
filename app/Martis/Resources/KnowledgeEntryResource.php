@@ -3,7 +3,9 @@
 namespace App\Martis\Resources;
 
 use App\Martis\Actions\ApproveEntries;
+use App\Martis\Actions\ApproveEntryInline;
 use App\Martis\Actions\RejectEntries;
+use App\Martis\Actions\RejectEntryInline;
 use App\Models\KnowledgeEntry;
 use Illuminate\Http\Request;
 use Martis\Actions\Action;
@@ -42,25 +44,38 @@ class KnowledgeEntryResource extends Resource
     }
 
     /**
-     * Per-row inline Approve / Reject buttons.
+     * Approve / Reject on BOTH surfaces:
+     *  - bulk dropdown (select rows → Actions) via ApproveEntries / RejectEntries;
+     *  - per-row inline ✓/✗ buttons via the *Inline subclasses (->onlyInline()),
+     *    rendered after the default view/edit/delete icons.
      *
-     * `->showInline()` renders each action as a button in the trailing Actions
-     * column, after the default view/edit/delete icons (the documented Martis
-     * pattern: `[👁 ✏ 🗑] [Approve] [Reject]`). In v1.28.2 an action is inline
-     * XOR in the bulk dropdown, so with showInline the bulk-select checkbox is
-     * not shown — fine here: per-row Approve/Reject is the moderation workflow.
+     * A single action is inline XOR in the dropdown (the dropdown filters out
+     * showInline actions), so the same operation is registered under two
+     * distinct classes/uriKeys. NOTE: Martis caches the resource schema with a
+     * "forever" TTL — run `php artisan martis:cache:clear` (automated in the
+     * container entrypoint) after changing this list, or the SPA keeps rendering
+     * the old one.
      *
      * @return array<int, Action>
      */
     public function actions(Request $request): array
     {
         return [
+            // Bulk dropdown (multi-select)
             ApproveEntries::make()
-                ->showInline()
                 ->icon('check-circle')
                 ->iconColor('#16a34a'),
             RejectEntries::make()
-                ->showInline()
+                ->icon('x-circle')
+                ->iconColor('#dc2626'),
+
+            // Per-row inline buttons
+            ApproveEntryInline::make()
+                ->onlyInline()
+                ->icon('check-circle')
+                ->iconColor('#16a34a'),
+            RejectEntryInline::make()
+                ->onlyInline()
                 ->icon('x-circle')
                 ->iconColor('#dc2626'),
         ];
