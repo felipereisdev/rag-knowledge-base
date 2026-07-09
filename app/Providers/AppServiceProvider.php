@@ -4,6 +4,7 @@ namespace App\Providers;
 
 use App\Models\Entity;
 use App\Models\Relation;
+use App\Services\Install\ClientInstaller;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -23,6 +24,8 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
+        $this->app->bind(ClientInstaller::class, fn () => new ClientInstaller(base_path('stubs/client')));
+
         Route::get('/martis/graph', function () {
             return view('martis.graph-explorer');
         })->name('martis.graph');
