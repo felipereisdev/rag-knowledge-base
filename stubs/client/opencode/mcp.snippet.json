@@ -1,0 +1,5 @@
+{
+  "mcp": {
+    "rag": { "type": "remote", "url": "__RAG_URL__/mcp/rag", "enabled": true }
+  }
+}
