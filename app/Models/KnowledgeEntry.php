@@ -3,7 +3,6 @@
 namespace App\Models;
 
 use App\Observers\KnowledgeEntryObserver;
-use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
@@ -11,16 +10,10 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class KnowledgeEntry extends Model
 {
-    use HasUuids;
-
     protected static function booted(): void
     {
         static::observe(KnowledgeEntryObserver::class);
     }
-
-    protected $keyType = 'string';
-
-    public $incrementing = false;
 
     protected $fillable = [
         'project_id', 'title', 'content', 'category', 'source',

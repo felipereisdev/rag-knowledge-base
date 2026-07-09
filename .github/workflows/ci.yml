@@ -60,7 +60,7 @@ jobs:
         run: docker compose --profile dev exec -T app-dev vendor/bin/pest
 
       - name: Tear down
-        if: always
+        if: always()
         run: docker compose down -v
 
   lint:
@@ -86,7 +86,7 @@ jobs:
         run: docker compose --profile dev exec -T app-dev vendor/bin/pint --test
 
       - name: Tear down
-        if: always
+        if: always()
         run: docker compose down -v
 
   build-and-push:

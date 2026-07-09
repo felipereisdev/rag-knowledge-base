@@ -18,12 +18,12 @@ return new class extends Migration
             $table->string('predicate');
             $table->bigInteger('object_id');
             $table->foreign('object_id')->references('id')->on('entities')->cascadeOnDelete();
-            $table->uuid('entry_id')->nullable();
+            $table->bigInteger('entry_id')->nullable();
             $table->foreign('entry_id')->references('id')->on('knowledge_entries')->cascadeOnDelete();
             $table->timestampTz('created_at')->useCurrent();
         });
 
-        DB::statement("CREATE UNIQUE INDEX idx_relations_unique ON relations (project_id, subject_id, predicate, object_id, COALESCE(entry_id, '00000000-0000-0000-0000-000000000000'))");
+        DB::statement('CREATE UNIQUE INDEX idx_relations_unique ON relations (project_id, subject_id, predicate, object_id, COALESCE(entry_id, 0))');
     }
 
     public function down(): void

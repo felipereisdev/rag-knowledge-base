@@ -9,7 +9,7 @@ return new class extends Migration
     public function up(): void
     {
         Schema::create('entry_tags', function (Blueprint $table) {
-            $table->uuid('entry_id');
+            $table->bigInteger('entry_id');
             $table->foreign('entry_id')->references('id')->on('knowledge_entries')->cascadeOnDelete();
             $table->bigInteger('tag_id');
             $table->foreign('tag_id')->references('id')->on('tags')->cascadeOnDelete();

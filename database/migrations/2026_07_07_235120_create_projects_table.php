@@ -13,7 +13,7 @@ return new class extends Migration
             $table->string('name');
             $table->string('root_path');
             $table->text('description')->default('');
-            $table->string('project_type')->default('');
+            $table->text('project_type')->default('[]');
             $table->string('language')->default('en');
             $table->timestampTz('created_at')->useCurrent();
             $table->timestampTz('updated_at')->useCurrent();

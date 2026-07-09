@@ -9,7 +9,7 @@ class SearchResult
      * @param  array<string>  $matchedBy  ['vector', 'keyword', 'graph']
      */
     public function __construct(
-        public readonly string $entryId,
+        public readonly int $entryId,
         public readonly string $title,
         public readonly string $snippet,
         public readonly float $score,

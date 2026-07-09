@@ -71,7 +71,7 @@ class MigrateSqliteCommand extends Command
                 'name' => $r['name'],
                 'root_path' => $r['root_path'],
                 'description' => $r['description'] ?? '',
-                'project_type' => $r['project_type'] ?? '',
+                'project_type' => $this->normalizeProjectType($r['project_type'] ?? ''),
                 'language' => $r['language'] ?? 'en',
                 'created_at' => $this->epochToDatetime($r['created_at']),
                 'updated_at' => $this->epochToDatetime($r['updated_at']),
@@ -80,6 +80,22 @@ class MigrateSqliteCommand extends Command
         }
 
         $this->info("  projects: {$count} migrated");
+    }
+
+    /**
+     * The legacy SQLite schema stored project_type as a single string.
+     * The MultiSelect field now expects a JSON array, so wrap scalar
+     * values and pass through anything already encoded as a JSON array.
+     */
+    private function normalizeProjectType(mixed $value): string
+    {
+        if (is_string($value) && str_starts_with(trim($value), '[')) {
+            return $value;
+        }
+
+        $value = is_string($value) ? trim($value) : '';
+
+        return $value === '' ? '[]' : json_encode([$value]);
     }
 
     private function migrateProjectPaths(SQLite3 $sqlite): void
@@ -111,17 +127,26 @@ class MigrateSqliteCommand extends Command
     {
         $rows = $this->fetchAll($sqlite, 'SELECT * FROM knowledge_entries');
         $count = 0;
+        $idMap = [];
 
         foreach ($rows as $r) {
-            $existing = DB::table('knowledge_entries')->where('id', $r['id'])->exists();
+            // Entry ids are now auto-increment bigints, so the legacy SQLite
+            // UUID id cannot be preserved. Dedup on (project_id, title) and map
+            // the old uuid → new bigint id for the dependent tables below.
+            $existing = DB::table('knowledge_entries')
+                ->where('project_id', $r['project_id'])
+                ->where('title', $r['title'])
+                ->first();
+
             if ($existing) {
+                $idMap[$r['id']] = $existing->id;
+
                 continue;
             }
 
             $status = $r['status'] === 'indexed' ? 'approved' : $r['status'];
 
-            DB::table('knowledge_entries')->insert([
-                'id' => $r['id'],
+            $newId = DB::table('knowledge_entries')->insertGetId([
                 'project_id' => $r['project_id'],
                 'title' => $r['title'],
                 'content' => $r['content'],
@@ -133,10 +158,12 @@ class MigrateSqliteCommand extends Command
                 'created_at' => $this->epochToDatetime($r['created_at']),
                 'updated_at' => $this->epochToDatetime($r['updated_at']),
             ]);
+            $idMap[$r['id']] = $newId;
             $count++;
         }
 
         $this->info("  knowledge_entries: {$count} migrated (status 'indexed' → 'approved')");
+        $this->idMaps['entries'] = $idMap;
     }
 
     private function migrateTags(SQLite3 $sqlite): void
@@ -174,15 +201,17 @@ class MigrateSqliteCommand extends Command
         $rows = $this->fetchAll($sqlite, 'SELECT * FROM entry_tags');
         $count = 0;
         $tagMap = $this->idMaps['tags'] ?? [];
+        $entryMap = $this->idMaps['entries'] ?? [];
 
         foreach ($rows as $r) {
             $newTagId = $tagMap[$r['tag_id']] ?? null;
-            if ($newTagId === null) {
+            $newEntryId = $entryMap[$r['entry_id']] ?? null;
+            if ($newTagId === null || $newEntryId === null) {
                 continue;
             }
 
             $existing = DB::table('entry_tags')
-                ->where('entry_id', $r['entry_id'])
+                ->where('entry_id', $newEntryId)
                 ->where('tag_id', $newTagId)
                 ->exists();
             if ($existing) {
@@ -190,7 +219,7 @@ class MigrateSqliteCommand extends Command
             }
 
             DB::table('entry_tags')->insert([
-                'entry_id' => $r['entry_id'],
+                'entry_id' => $newEntryId,
                 'tag_id' => $newTagId,
             ]);
             $count++;
@@ -235,6 +264,7 @@ class MigrateSqliteCommand extends Command
         $rows = $this->fetchAll($sqlite, 'SELECT * FROM relations');
         $count = 0;
         $entityMap = $this->idMaps['entities'] ?? [];
+        $entryMap = $this->idMaps['entries'] ?? [];
 
         foreach ($rows as $r) {
             $newSubjectId = $entityMap[$r['subject_id']] ?? null;
@@ -253,12 +283,14 @@ class MigrateSqliteCommand extends Command
                 continue;
             }
 
+            $newEntryId = ($r['entry_id'] ?? null) ? ($entryMap[$r['entry_id']] ?? null) : null;
+
             DB::table('relations')->insert([
                 'project_id' => $r['project_id'],
                 'subject_id' => $newSubjectId,
                 'predicate' => $r['predicate'],
                 'object_id' => $newObjectId,
-                'entry_id' => $r['entry_id'] ?: null,
+                'entry_id' => $newEntryId,
                 'created_at' => $this->epochToDatetime($r['created_at'] ?? time()),
             ]);
             $count++;
@@ -272,15 +304,17 @@ class MigrateSqliteCommand extends Command
         $rows = $this->fetchAll($sqlite, 'SELECT * FROM entry_entities');
         $count = 0;
         $entityMap = $this->idMaps['entities'] ?? [];
+        $entryMap = $this->idMaps['entries'] ?? [];
 
         foreach ($rows as $r) {
             $newEntityId = $entityMap[$r['entity_id']] ?? null;
-            if ($newEntityId === null) {
+            $newEntryId = $entryMap[$r['entry_id']] ?? null;
+            if ($newEntityId === null || $newEntryId === null) {
                 continue;
             }
 
             $existing = DB::table('entry_entities')
-                ->where('entry_id', $r['entry_id'])
+                ->where('entry_id', $newEntryId)
                 ->where('entity_id', $newEntityId)
                 ->exists();
             if ($existing) {
@@ -288,7 +322,7 @@ class MigrateSqliteCommand extends Command
             }
 
             DB::table('entry_entities')->insert([
-                'entry_id' => $r['entry_id'],
+                'entry_id' => $newEntryId,
                 'entity_id' => $newEntityId,
             ]);
             $count++;
@@ -301,11 +335,18 @@ class MigrateSqliteCommand extends Command
     {
         $rows = $this->fetchAll($sqlite, 'SELECT * FROM entry_links');
         $count = 0;
+        $entryMap = $this->idMaps['entries'] ?? [];
 
         foreach ($rows as $r) {
+            $newFrom = $entryMap[$r['from_entry']] ?? null;
+            $newTo = $entryMap[$r['to_entry']] ?? null;
+            if ($newFrom === null || $newTo === null) {
+                continue;
+            }
+
             $existing = DB::table('entry_links')
-                ->where('from_entry', $r['from_entry'])
-                ->where('to_entry', $r['to_entry'])
+                ->where('from_entry', $newFrom)
+                ->where('to_entry', $newTo)
                 ->where('relation', $r['relation'])
                 ->exists();
             if ($existing) {
@@ -313,8 +354,8 @@ class MigrateSqliteCommand extends Command
             }
 
             DB::table('entry_links')->insert([
-                'from_entry' => $r['from_entry'],
-                'to_entry' => $r['to_entry'],
+                'from_entry' => $newFrom,
+                'to_entry' => $newTo,
                 'relation' => $r['relation'],
             ]);
             $count++;
@@ -323,7 +364,7 @@ class MigrateSqliteCommand extends Command
         $this->info("  entry_links: {$count} migrated");
     }
 
-    /** @var array<string, array<int, int>> */
+    /** @var array<string, array<int|string, int>> */
     private array $idMaps = [];
 
     /** @return array<int, array<string, mixed>> */

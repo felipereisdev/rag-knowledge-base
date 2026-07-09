@@ -10,9 +10,9 @@ return new class extends Migration
     public function up(): void
     {
         Schema::create('entry_links', function (Blueprint $table) {
-            $table->uuid('from_entry');
+            $table->bigInteger('from_entry');
             $table->foreign('from_entry')->references('id')->on('knowledge_entries')->cascadeOnDelete();
-            $table->uuid('to_entry');
+            $table->bigInteger('to_entry');
             $table->foreign('to_entry')->references('id')->on('knowledge_entries')->cascadeOnDelete();
             $table->string('relation')->default('related');
             $table->primary(['from_entry', 'to_entry', 'relation']);

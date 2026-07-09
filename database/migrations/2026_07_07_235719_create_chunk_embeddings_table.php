@@ -14,7 +14,7 @@ return new class extends Migration
 
         Schema::create('chunk_embeddings', function (Blueprint $table) {
             $table->id();
-            $table->uuid('entry_id');
+            $table->bigInteger('entry_id');
             $table->foreign('entry_id')->references('id')->on('knowledge_entries')->cascadeOnDelete();
             $table->string('project_id');
             $table->foreign('project_id')->references('id')->on('projects')->cascadeOnDelete();

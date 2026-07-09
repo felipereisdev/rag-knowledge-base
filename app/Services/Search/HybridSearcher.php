@@ -311,7 +311,7 @@ class HybridSearcher
             $snippet = $this->highlight($entry->content, $query);
 
             $results[] = new SearchResult(
-                entryId: $entryId,
+                entryId: (int) $entryId,
                 title: $entry->title,
                 snippet: $snippet,
                 score: $data['score'],

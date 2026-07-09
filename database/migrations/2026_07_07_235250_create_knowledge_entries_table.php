@@ -10,7 +10,7 @@ return new class extends Migration
     public function up(): void
     {
         Schema::create('knowledge_entries', function (Blueprint $table) {
-            $table->uuid('id')->primary();
+            $table->id();
             $table->string('project_id');
             $table->foreign('project_id')->references('id')->on('projects')->cascadeOnDelete();
             $table->string('title');

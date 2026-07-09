@@ -2,11 +2,13 @@
 
 namespace App\Martis\Resources;
 
+use App\Enums\ProjectTechnology;
 use App\Models\Project;
 use Illuminate\Http\Request;
 use Martis\Contracts\OverrideContract;
 use Martis\DrawerOverride;
 use Martis\Fields\Id;
+use Martis\Fields\MultiSelect;
 use Martis\Fields\Select;
 use Martis\Fields\Text;
 use Martis\Fields\Textarea;
@@ -41,6 +43,7 @@ class ProjectResource extends Resource
 
             Text::make('id', 'Slug')
                 ->sortable()
+                ->immutable()
                 ->rules(['required', 'alpha_dash'])
                 ->help('Used in URLs and as project identifier.'),
 
@@ -55,14 +58,10 @@ class ProjectResource extends Resource
 
             Textarea::make('description'),
 
-            Select::make('project_type')
-                ->options([
-                    'python' => 'Python',
-                    'typescript' => 'TypeScript',
-                    'go' => 'Go',
-                    'rust' => 'Rust',
-                    'other' => 'Other',
-                ]),
+            MultiSelect::make('project_type', 'Tech Stack')
+                ->options(ProjectTechnology::options())
+                ->displayUsingLabels()
+                ->help('Programming languages and databases used in the project.'),
 
             Select::make('language')
                 ->options([

@@ -9,6 +9,7 @@ use App\Mcp\Tools\RagQueryGraphTool;
 use App\Mcp\Tools\RagSearchTool;
 use App\Mcp\Tools\RagStatusTool;
 use App\Mcp\Tools\RagStoreKnowledgeTool;
+use App\Mcp\Tools\RagUpdateProjectTool;
 use Laravel\Mcp\Server;
 use Laravel\Mcp\Server\Attributes\Instructions;
 use Laravel\Mcp\Server\Attributes\Name;
@@ -22,6 +23,7 @@ class RagServer extends Server
     protected array $tools = [
         RagStatusTool::class,
         RagStoreKnowledgeTool::class,
+        RagUpdateProjectTool::class,
         RagSearchTool::class,
         RagQueryGraphTool::class,
         RagImportDocumentTool::class,

@@ -17,9 +17,28 @@ class Project extends Model
 
     protected $attributes = [
         'description' => '',
-        'project_type' => '',
+        'project_type' => '[]',
         'language' => 'en',
     ];
+
+    /**
+     * The text columns are NOT NULL with defaults, but Martis writes an empty
+     * optional field as NULL — which the DB rejects on update (create is saved
+     * by $attributes defaults). Coerce NULL back to the empty sentinel on every
+     * write path so no writer can violate the not-null constraint.
+     *
+     * project_type stays a plain JSON-string column (no array cast): Martis's
+     * MultiSelect fill() already encodes to JSON and resolve() decodes it, so a
+     * cast here would double-encode. Its empty sentinel is the string '[]'.
+     */
+    protected static function booted(): void
+    {
+        static::saving(function (self $project): void {
+            $project->description ??= '';
+            $project->project_type ??= '[]';
+            $project->language ??= 'en';
+        });
+    }
 
     /** @return HasMany<KnowledgeEntry, $this> */
     public function entries(): HasMany
