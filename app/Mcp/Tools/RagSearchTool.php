@@ -2,6 +2,7 @@
 
 namespace App\Mcp\Tools;
 
+use App\Exceptions\ProjectNotIdentifiedException;
 use App\Mcp\Tools\Concerns\ResolvesProjectId;
 use App\Models\KnowledgeEntry;
 use App\Models\Project;
@@ -22,7 +23,11 @@ class RagSearchTool extends Tool
 
     public function handle(Request $request): Response
     {
-        $pid = $this->resolveProjectId($request->get('project_id'), $request->get('cwd'));
+        try {
+            $pid = $this->resolveProjectId($request->get('project_id'), $request->get('cwd'));
+        } catch (ProjectNotIdentifiedException $e) {
+            return Response::text($e->getMessage());
+        }
         $project = Project::find($pid);
 
         if (! $project) {

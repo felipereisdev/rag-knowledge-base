@@ -2,6 +2,7 @@
 
 namespace App\Mcp\Tools;
 
+use App\Exceptions\ProjectNotIdentifiedException;
 use App\Mcp\Tools\Concerns\ResolvesProjectId;
 use App\Models\Entity;
 use App\Models\KnowledgeEntry;
@@ -25,7 +26,11 @@ class RagStoreKnowledgeTool extends Tool
 
     public function handle(Request $request): Response
     {
-        $pid = $this->ensureProject($request->get('project_id'), $request->get('cwd'));
+        try {
+            $pid = $this->ensureProject($request->get('project_id'), $request->get('cwd'));
+        } catch (ProjectNotIdentifiedException $e) {
+            return Response::text($e->getMessage());
+        }
         $title = (string) $request->get('title', '');
         $content = (string) $request->get('content', '');
         $category = (string) $request->get('category', 'insight');
@@ -111,7 +116,7 @@ class RagStoreKnowledgeTool extends Tool
             $graphLine.
             "  ID: {$entry->id}\n\n".
             "Project: {$pid} — {$pending} pending, {$approved} approved\n".
-            'Approve at http://127.0.0.1:8000/martis/resources/knowledge-entries';
+            'Approve at '.config('app.url', 'http://localhost:8080').'/martis/resources/knowledge-entries';
 
         return Response::text($text);
     }

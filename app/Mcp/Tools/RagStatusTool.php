@@ -2,6 +2,7 @@
 
 namespace App\Mcp\Tools;
 
+use App\Exceptions\ProjectNotIdentifiedException;
 use App\Mcp\Tools\Concerns\ResolvesProjectId;
 use App\Models\KnowledgeEntry;
 use App\Models\Project;
@@ -32,7 +33,11 @@ class RagStatusTool extends Tool
         if ($explicitId !== null && $explicitId !== '') {
             $pid = $explicitId;
         } else {
-            $pid = $this->ensureProject(null, $request->get('cwd'));
+            try {
+                $pid = $this->ensureProject(null, $request->get('cwd'));
+            } catch (ProjectNotIdentifiedException $e) {
+                return Response::text($e->getMessage());
+            }
         }
 
         $project = Project::find($pid);

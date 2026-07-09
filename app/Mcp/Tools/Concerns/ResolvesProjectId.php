@@ -2,6 +2,7 @@
 
 namespace App\Mcp\Tools\Concerns;
 
+use App\Exceptions\ProjectNotIdentifiedException;
 use App\Models\Project;
 use App\Models\ProjectPath;
 use Illuminate\Support\Str;
@@ -9,17 +10,20 @@ use Illuminate\Support\Str;
 trait ResolvesProjectId
 {
     /**
-     * Resolve a project_id from explicit arg, cwd, or slugified basename.
+     * Resolve a project_id from an explicit arg, the MCP URL segment, or cwd.
      *
-     * Mirrors the Python _resolve_project_id: if $projectId is null,
-     * search project_paths for an ancestor of $cwd; if none found,
-     * slugify the basename of $cwd.
+     * Precedence:
+     *   1. explicit $projectId argument
+     *   2. the {project} segment of a project-scoped MCP URL (/mcp/rag/{project})
+     *   3. $cwd — an explicitly supplied client working directory (the hooks pass
+     *      this): match a ProjectPath ancestor, else slugify its basename
      *
-     * Enhancement over Python: matches ancestor paths (cwd starting with
-     * path + '/'), not just exact path equality. The longest ancestor wins.
-     * Ancestor matching uses strpos + substring rather than LIKE so that
-     * underscores and percent signs in stored paths are treated literally
-     * (LIKE treats '_' and '%' as wildcards).
+     * If none of these identify a project, we throw. The server runs as a shared
+     * HTTP service and cannot see the client filesystem, so falling back to the
+     * server's own getcwd() would silently resolve to the container's docroot
+     * (e.g. "public") — a wrong, shared bucket. Failing loudly is safer.
+     *
+     * @throws ProjectNotIdentifiedException when no identity can be determined
      */
     public function resolveProjectId(?string $projectId, ?string $cwd = null): string
     {
@@ -27,49 +31,67 @@ trait ResolvesProjectId
             return $projectId;
         }
 
-        $cwd = $cwd ?? getcwd();
-
-        // Search project_paths for an ancestor of $cwd (or an exact match).
-        // A stored path is an ancestor of $cwd when $cwd starts with path
-        // and the next character is '/'. Use strpos + substring instead of
-        // LIKE so '_' and '%' in stored paths are literal, not wildcards.
-        // Order by longest path so the most specific ancestor wins.
-        $match = ProjectPath::query()
-            ->where('path', $cwd)
-            ->orWhereRaw(
-                'strpos(?, path) = 1 AND substring(? FROM length(path) + 1 FOR 1) = ?',
-                [$cwd, $cwd, '/']
-            )
-            ->orderByRaw('LENGTH(path) DESC')
-            ->first();
-
-        if ($match) {
-            return $match->project_id;
+        $routeProject = $this->routeProjectId();
+        if ($routeProject !== null) {
+            return $routeProject;
         }
 
-        return $this->slugify(basename($cwd));
+        if ($cwd !== null && $cwd !== '') {
+            // Search project_paths for an ancestor of $cwd (or an exact match).
+            // A stored path is an ancestor of $cwd when $cwd starts with path
+            // and the next character is '/'. Use strpos + substring instead of
+            // LIKE so '_' and '%' in stored paths are literal, not wildcards.
+            // Order by longest path so the most specific ancestor wins.
+            $match = ProjectPath::query()
+                ->where('path', $cwd)
+                ->orWhereRaw(
+                    'strpos(?, path) = 1 AND substring(? FROM length(path) + 1 FOR 1) = ?',
+                    [$cwd, $cwd, '/']
+                )
+                ->orderByRaw('LENGTH(path) DESC')
+                ->first();
+
+            if ($match) {
+                return $match->project_id;
+            }
+
+            return $this->slugify(basename($cwd));
+        }
+
+        throw new ProjectNotIdentifiedException;
     }
 
     /**
      * Ensure a project exists, creating it if needed. Returns project_id.
      *
-     * Mirrors the Python _ensure_project.
+     * @throws ProjectNotIdentifiedException when no identity can be determined
      */
     public function ensureProject(?string $projectId, ?string $cwd = null): string
     {
-        // Compute cwd once so resolveProjectId and the create branch agree.
-        $cwd = $cwd ?? getcwd();
         $pid = $this->resolveProjectId($projectId, $cwd);
 
         if (! Project::where('id', $pid)->exists()) {
             Project::create([
                 'id' => $pid,
-                'name' => basename($cwd) ?: $pid,
-                'root_path' => $cwd,
+                'name' => ($cwd !== null && $cwd !== '') ? (basename($cwd) ?: $pid) : $pid,
+                'root_path' => $cwd ?? '',
             ]);
         }
 
         return $pid;
+    }
+
+    /**
+     * The {project} segment of a project-scoped MCP URL, or null.
+     *
+     * Present only when the client connected via /mcp/rag/{project}; absent for
+     * the bare /mcp/rag route and outside an HTTP request (CLI, tests).
+     */
+    protected function routeProjectId(): ?string
+    {
+        $project = request()->route('project');
+
+        return is_string($project) && $project !== '' ? $project : null;
     }
 
     public function slugify(string $text): string

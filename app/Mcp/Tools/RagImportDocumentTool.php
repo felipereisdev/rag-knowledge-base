@@ -2,6 +2,7 @@
 
 namespace App\Mcp\Tools;
 
+use App\Exceptions\ProjectNotIdentifiedException;
 use App\Mcp\Tools\Concerns\ResolvesProjectId;
 use App\Services\Importing\DocumentImporter;
 use Illuminate\Contracts\JsonSchema\JsonSchema;
@@ -24,7 +25,11 @@ class RagImportDocumentTool extends Tool
 
     public function handle(Request $request): Response
     {
-        $pid = $this->ensureProject($request->get('project_id'), $request->get('cwd'));
+        try {
+            $pid = $this->ensureProject($request->get('project_id'), $request->get('cwd'));
+        } catch (ProjectNotIdentifiedException $e) {
+            return Response::text($e->getMessage());
+        }
         $filePath = (string) $request->get('file_path', '');
         $category = (string) ($request->get('category') ?? 'insight');
         $tags = $request->get('tags');
@@ -42,7 +47,7 @@ class RagImportDocumentTool extends Tool
         $text = 'Imported '.count($entryIds)." entries from {$filePath}.\n".
             "  Project: {$pid}\n".
             "  Status: pending (needs approval)\n\n".
-            'Approve at http://127.0.0.1:8000/martis/resources/knowledge-entries';
+            'Approve at '.config('app.url', 'http://localhost:8080').'/martis/resources/knowledge-entries';
 
         return Response::text($text);
     }

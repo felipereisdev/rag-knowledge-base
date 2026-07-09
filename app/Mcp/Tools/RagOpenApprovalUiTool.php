@@ -2,6 +2,7 @@
 
 namespace App\Mcp\Tools;
 
+use App\Exceptions\ProjectNotIdentifiedException;
 use App\Mcp\Tools\Concerns\ResolvesProjectId;
 use Illuminate\Contracts\JsonSchema\JsonSchema;
 use Illuminate\JsonSchema\Types\Type;
@@ -19,8 +20,12 @@ class RagOpenApprovalUiTool extends Tool
 
     public function handle(Request $request): Response
     {
-        $pid = $this->resolveProjectId($request->get('project_id'), $request->get('cwd'));
-        $base = (string) config('app.url', 'http://127.0.0.1:8000');
+        try {
+            $pid = $this->resolveProjectId($request->get('project_id'), $request->get('cwd'));
+        } catch (ProjectNotIdentifiedException $e) {
+            return Response::text($e->getMessage());
+        }
+        $base = (string) config('app.url', 'http://localhost:8080');
         $url = "{$base}/martis/resources/knowledge-entries?filter[status]=pending&filter[project_id]={$pid}";
 
         return Response::text("Approval UI for project '{$pid}':\n{$url}");

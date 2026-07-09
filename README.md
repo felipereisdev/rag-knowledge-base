@@ -82,11 +82,13 @@ Done. The RAG server is running. Now connect your harness (next section).
 
 ## Connect your harness (any project)
 
-Add the RAG server to your harness's MCP config. The server endpoint is:
+Add the RAG server to your harness's MCP config. The endpoint is **project-scoped** — the last path segment is your project id, which is how a shared server keeps each project's knowledge isolated (it can't see your filesystem, so it can't infer the project on its own):
 
 ```
-http://localhost:8080/mcp/rag
+http://localhost:8080/mcp/rag/<your-project-id>
 ```
+
+Pick any stable slug for `<your-project-id>` (e.g. the repo name) and use the same id everywhere you wire this project. `rag:install` (below) sets this automatically.
 
 ### Claude Code / opencode
 
@@ -97,7 +99,7 @@ In your project (the project you want the assistant to have knowledge of), add t
   "mcpServers": {
     "rag": {
       "type": "http",
-      "url": "http://localhost:8080/mcp/rag"
+      "url": "http://localhost:8080/mcp/rag/my-project"
     }
   }
 }
@@ -111,7 +113,7 @@ In your project (the project you want the assistant to have knowledge of), add t
 {
   "mcpServers": {
     "rag": {
-      "url": "http://localhost:8080/mcp/rag"
+      "url": "http://localhost:8080/mcp/rag/my-project"
     }
   }
 }
@@ -125,7 +127,7 @@ Add to `.continue/config.json` (or the equivalent for your MCP-capable extension
 {
   "mcpServers": {
     "rag": {
-      "url": "http://localhost:8080/mcp/rag",
+      "url": "http://localhost:8080/mcp/rag/my-project",
       "transport": "streamable-http"
     }
   }
@@ -136,7 +138,7 @@ Add to `.continue/config.json` (or the equivalent for your MCP-capable extension
 
 Any tool that speaks MCP over HTTP (Streamable transport) connects with the same URL. See the tool's MCP docs for its config format.
 
-> **One server, many projects.** You can run the RAG server once and point any number of projects/harnesses at it. Each project is identified by its working directory, so knowledge stays isolated per project automatically.
+> **One server, many projects.** Run the RAG server once and point any number of projects at it. Each project is identified by the id in its MCP URL (`/mcp/rag/<id>`) — since a shared HTTP server can't see your filesystem, that id is what keeps knowledge isolated per project.
 
 ### Verify the connection
 

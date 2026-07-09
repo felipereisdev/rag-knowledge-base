@@ -6,6 +6,7 @@ namespace App\Console\Commands;
 
 use App\Services\Install\ClientInstaller;
 use Illuminate\Console\Command;
+use Illuminate\Support\Str;
 
 use function Laravel\Prompts\multiselect;
 use function Laravel\Prompts\text;
@@ -16,7 +17,8 @@ class RagInstallCommand extends Command
         {--target= : Path to the client project (default: cwd)}
         {--harness= : Comma-separated: claude,codex,cursor,opencode}
         {--url= : RAG server base URL}
-        {--token= : RAG hook bearer token}';
+        {--token= : RAG hook bearer token}
+        {--project= : Project id on the RAG server (default: slugified target basename)}';
 
     protected $description = 'Provision a client project to use the RAG server (hooks + skill + rag MCP).';
 
@@ -43,9 +45,17 @@ class RagInstallCommand extends Command
         // (localhost model). Only set it if the server has RAG_HOOK_TOKEN configured.
         $token = (string) ($this->option('token') ?: text('RAG hook token (blank = no auth, for localhost)', default: '', required: false));
 
-        $written = $installer->install($target, $harnesses, $url, $token);
+        // The project id is pinned into the client's MCP URL (/mcp/rag/<id>),
+        // because a shared HTTP RAG server can't see the client filesystem to
+        // infer it. Default to the slugified target basename.
+        $project = (string) $this->option('project');
+        if ($project === '') {
+            $project = Str::slug(basename($target)) ?: 'project';
+        }
 
-        $this->info('Installed RAG integration into '.$target);
+        $written = $installer->install($target, $harnesses, $url, $token, $project);
+
+        $this->info("Installed RAG integration into {$target} (project: {$project})");
         foreach ($written as $rel) {
             $this->line('  + '.$rel);
         }

@@ -1,5 +1,5 @@
 {
   "mcpServers": {
-    "rag": { "type": "http", "url": "__RAG_URL__/mcp/rag" }
+    "rag": { "type": "http", "url": "__RAG_URL__/mcp/rag/__RAG_PROJECT__" }
   }
 }
