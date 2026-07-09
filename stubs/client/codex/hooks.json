@@ -1,0 +1,11 @@
+{
+  "SessionStart": [
+    { "hooks": [{ "type": "command", "command": ".codex/hooks/session-start.sh" }] }
+  ],
+  "UserPromptSubmit": [
+    { "hooks": [{ "type": "command", "command": ".codex/hooks/user-prompt.sh" }] }
+  ],
+  "Stop": [
+    { "hooks": [{ "type": "command", "command": ".codex/hooks/stop.sh" }] }
+  ]
+}
