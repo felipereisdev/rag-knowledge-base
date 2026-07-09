@@ -2,8 +2,11 @@
 
 namespace App\Martis\Resources;
 
+use App\Martis\Actions\ApproveEntries;
+use App\Martis\Actions\RejectEntries;
 use App\Models\KnowledgeEntry;
 use Illuminate\Http\Request;
+use Martis\Actions\Action;
 use Martis\Contracts\OverrideContract;
 use Martis\DrawerOverride;
 use Martis\Fields\BelongsTo;
@@ -36,6 +39,26 @@ class KnowledgeEntryResource extends Resource
     public static function model(): string
     {
         return KnowledgeEntry::class;
+    }
+
+    /**
+     * Bulk actions: select pending entries and Approve (makes them searchable)
+     * or Reject them.
+     *
+     * @return array<int, Action>
+     */
+    public function actions(Request $request): array
+    {
+        return [
+            ApproveEntries::make()
+                ->showInline()
+                ->icon('check-circle')
+                ->iconColor('#16a34a'),
+            RejectEntries::make()
+                ->showInline()
+                ->icon('x-circle')
+                ->iconColor('#dc2626'),
+        ];
     }
 
     public function fields(Request $request): array
