@@ -219,3 +219,4 @@ php artisan rag:reindex --project=rag
 - User asks about code/rules/decisions → call `rag_search` first
 - User explains a rule or makes a decision → call `rag_store_knowledge`
 - User has docs in files → call `rag_import_document`
+- End of session → the Stop hook asks you to condense durable knowledge and call `rag_store_knowledge` (dedup with `rag_search` first); it lands in the pending approval queue.
