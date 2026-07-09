@@ -125,10 +125,10 @@ class KnowledgeEntryResource extends Resource
 
             KeyValue::make('metadata'),
 
-            BelongsToMany::make('tags', 'Tags')
+            BelongsToMany::make('Tags', 'tags', TagResource::class)
                 ->searchable(),
 
-            BelongsToMany::make('entities', 'Entities')
+            BelongsToMany::make('Entities', 'entities', EntityResource::class)
                 ->searchable(),
 
             DateTime::make('created_at')
