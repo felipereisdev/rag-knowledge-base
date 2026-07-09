@@ -20,5 +20,12 @@ php artisan migrate --force --no-interaction
 echo "Seeding database..."
 php artisan db:seed --force --no-interaction
 
+# Clear Martis caches on every boot. The schema/dashboards layers have a
+# "forever" TTL and live in the cache store (DB), so they persist across image
+# rebuilds — a stale cached schema silently masks Resource/field/action changes
+# until cleared. Clearing here makes a rebuild always reflect the current code.
+echo "Clearing Martis caches..."
+php artisan martis:cache:clear --no-interaction || true
+
 echo "Starting PHP-FPM..."
 exec php-fpm
