@@ -1,11 +1,12 @@
 <?php
+
 // tests/Feature/Stubs/CodexStubsTest.php
 
 it('ships Codex adapters, hooks.json, and mcp snippet', function () {
     $base = base_path('stubs/client/codex');
 
     foreach (['hooks/session-start.sh', 'hooks/user-prompt.sh', 'hooks/stop.sh',
-              'hooks.json', 'config.toml.snippet'] as $rel) {
+        'hooks.json', 'config.toml.snippet'] as $rel) {
         expect(file_exists("$base/$rel"))->toBeTrue("missing $rel");
     }
 

@@ -180,15 +180,26 @@ class HybridSearcher
     /**
      * @param  array<string, array{score: float, rank: int}>  $vector
      * @param  array<string, array{score: float, rank: int}>  $fts
-     * @return array<string, array{score: float, matchedBy: array<string>}>
+     * @return array<string, array{score: float, matchedBy: array<string>, graphExpanded: bool}>
      */
     private function reciprocalRankFusion(array $vector, array $fts): array
     {
         $fused = [];
         $allEntryIds = array_unique(array_merge(array_keys($vector), array_keys($fts)));
 
+        // Raw RRF scores are bounded by numSources * (1 / rrfK): each list
+        // contributes at most 1/(rrfK+0) to a single item, so with two lists at
+        // k=60 the ceiling is ~0.033. That is far below the cosine-similarity
+        // scale that the rest of the system, the min_score threshold, and the
+        // documented relevance calibration (~0.65+) all assume. Normalising by
+        // that theoretical maximum maps scores back to [0, 1] while preserving
+        // the RRF ordering exactly (it is a monotonic rescale), so a hit ranked
+        // first by every active retriever scores 1.0 instead of 0.033.
+        $activeSources = ($vector !== [] ? 1 : 0) + ($fts !== [] ? 1 : 0);
+        $maxScore = $activeSources > 0 ? $activeSources / $this->rrfK : 1.0;
+
         foreach ($allEntryIds as $entryId) {
-            $score = 0;
+            $score = 0.0;
             $matchedBy = [];
 
             if (isset($vector[$entryId])) {
@@ -201,14 +212,22 @@ class HybridSearcher
                 $matchedBy[] = 'keyword';
             }
 
-            $fused[$entryId] = ['score' => $score, 'matchedBy' => $matchedBy];
+            // graphExpanded defaults to false here so every downstream consumer
+            // (sortAndLimit, hydrate) can rely on the key existing even when
+            // graph expansion is disabled; expandGraph() overrides it to true
+            // only for entries it pulls in.
+            $fused[$entryId] = [
+                'score' => $score / $maxScore,
+                'matchedBy' => $matchedBy,
+                'graphExpanded' => false,
+            ];
         }
 
         return $fused;
     }
 
     /**
-     * @param  array<string, array{score: float, matchedBy: array<string>}>  $fused
+     * @param  array<string, array{score: float, matchedBy: array<string>, graphExpanded: bool}>  $fused
      * @return array<string, array{score: float, matchedBy: array<string>, graphExpanded: bool}>
      */
     private function expandGraph(array $fused, ?string $projectId): array

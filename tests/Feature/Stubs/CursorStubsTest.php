@@ -1,4 +1,5 @@
 <?php
+
 // tests/Feature/Stubs/CursorStubsTest.php
 
 it('ships Cursor session-start + stop hooks, config, mcp, rules', function () {

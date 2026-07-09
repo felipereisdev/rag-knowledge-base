@@ -150,6 +150,58 @@ describe('HybridSearcher', function () {
             ->and($entryIds)->toContain($entry2->id);
     });
 
+    it('returns results without crashing when expand_graph is false', function () {
+        $entry = KnowledgeEntry::create([
+            'project_id' => $this->project->id,
+            'title' => 'No graph expansion',
+            'content' => 'Routes are defined in routes/web.php',
+            'status' => 'approved',
+        ]);
+        DB::table('chunk_embeddings')->insert([
+            'entry_id' => $entry->id,
+            'project_id' => $this->project->id,
+            'chunk_index' => 0,
+            'content' => 'Routes are defined in routes/web.php',
+            'embedding' => '['.implode(',', $this->fakeVector).']',
+        ]);
+
+        $searcher = new HybridSearcher(minScore: 0.2, expandGraph: false);
+        $results = $searcher->search('routing', $this->project->id);
+
+        expect($results)->not->toBeEmpty()
+            ->and($results[0]->entryId)->toBe($entry->id)
+            ->and($results[0]->graphExpanded)->toBeFalse();
+    });
+
+    it('normalizes fused scores so a top hit scores near 1.0, not the raw RRF ceiling', function () {
+        // Entry matched by BOTH vector and keyword at rank 0. The raw RRF score
+        // for that case is 2/rrfK ≈ 0.033; after normalization it must land
+        // near 1.0 (well above the documented ~0.65 relevance calibration and
+        // the default 0.30 min_score), not at the tiny raw ceiling.
+        $entry = KnowledgeEntry::create([
+            'project_id' => $this->project->id,
+            'title' => 'Eloquent models',
+            'content' => 'Eloquent is the ORM',
+            'status' => 'approved',
+        ]);
+        DB::table('chunk_embeddings')->insert([
+            'entry_id' => $entry->id,
+            'project_id' => $this->project->id,
+            'chunk_index' => 0,
+            'content' => 'Eloquent is the ORM',
+            'embedding' => '['.implode(',', $this->fakeVector).']',
+        ]);
+
+        $searcher = new HybridSearcher(minScore: 0.2, expandGraph: false);
+        $results = $searcher->search('eloquent', $this->project->id);
+
+        expect($results)->not->toBeEmpty()
+            ->and($results[0]->matchedBy)->toContain('vector')
+            ->and($results[0]->matchedBy)->toContain('keyword')
+            ->and($results[0]->score)->toBeGreaterThanOrEqual(0.65)
+            ->and($results[0]->score)->toBeLessThanOrEqual(1.0);
+    });
+
     it('returns empty results for no matches', function () {
         $searcher = new HybridSearcher;
         $results = $searcher->search('nonexistent query xyz', $this->project->id);

@@ -1,4 +1,5 @@
 <?php
+
 // tests/Feature/Hooks/DigestEndpointTest.php
 
 use App\Models\KnowledgeEntry;

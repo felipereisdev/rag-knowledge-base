@@ -1,4 +1,5 @@
 <?php
+
 // tests/Feature/Hooks/SearchEndpointTest.php
 
 use App\Models\KnowledgeEntry;
@@ -26,7 +27,7 @@ it('formats results from the searcher', function () {
         'project_id' => 'acme', 'title' => 'A', 'content' => 'x', 'status' => 'approved',
     ]));
 
-    $mock = \Mockery::mock(HybridSearcher::class);
+    $mock = Mockery::mock(HybridSearcher::class);
     $mock->shouldReceive('search')->andReturn([
         (object) ['title' => 'Owner scoping', 'category' => 'architecture',
             'tags' => ['auth'], 'matchedBy' => ['vector'], 'score' => 0.91,

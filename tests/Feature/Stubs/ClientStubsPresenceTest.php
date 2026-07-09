@@ -1,4 +1,5 @@
 <?php
+
 // tests/Feature/Stubs/ClientStubsPresenceTest.php
 
 it('ships the shared shell core and config templates', function () {

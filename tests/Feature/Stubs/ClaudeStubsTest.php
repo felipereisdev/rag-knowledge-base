@@ -1,11 +1,12 @@
 <?php
+
 // tests/Feature/Stubs/ClaudeStubsTest.php
 
 it('ships Claude adapters, settings, mcp, and skill', function () {
     $base = base_path('stubs/client/claude');
 
     foreach (['hooks/session-start.sh', 'hooks/user-prompt.sh', 'hooks/stop.sh',
-              'settings.json', 'mcp.json', 'skills/using-rag/SKILL.md'] as $rel) {
+        'settings.json', 'mcp.json', 'skills/using-rag/SKILL.md'] as $rel) {
         expect(file_exists("$base/$rel"))->toBeTrue("missing $rel");
     }
 

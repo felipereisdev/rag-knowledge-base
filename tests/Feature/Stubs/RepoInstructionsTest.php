@@ -1,4 +1,5 @@
 <?php
+
 // tests/Feature/Stubs/RepoInstructionsTest.php
 
 it('this repo ships the using-rag skill and hooks-aware AGENTS section', function () {

@@ -49,13 +49,17 @@ class KnowledgeEntryResource extends Resource
      */
     public function actions(Request $request): array
     {
+        // Registered as standard bulk actions so they surface in the index
+        // "Actions" dropdown once one or more rows are selected. The Martis SPA
+        // builds that dropdown from actions matching `showOnIndex && !showInline`,
+        // so calling `showInline()` here would remove them from the dropdown
+        // (an action renders as EITHER an inline per-row button OR a dropdown
+        // item, never both). The icons/colours still render in the dropdown.
         return [
             ApproveEntries::make()
-                ->showInline()
                 ->icon('check-circle')
                 ->iconColor('#16a34a'),
             RejectEntries::make()
-                ->showInline()
                 ->icon('x-circle')
                 ->iconColor('#dc2626'),
         ];
@@ -76,6 +80,7 @@ class KnowledgeEntryResource extends Resource
                 ->required(),
 
             Textarea::make('content')
+                ->hideFromIndex()
                 ->help('Markdown supported.'),
 
             Select::make('category')

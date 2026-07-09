@@ -1,4 +1,5 @@
 <?php
+
 // tests/Feature/Stubs/AgentsTemplateTest.php
 
 it('ships an AGENTS.md RAG section with idempotency markers', function () {

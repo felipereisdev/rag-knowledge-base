@@ -1,4 +1,5 @@
 <?php
+
 // tests/Feature/Stubs/OpencodeStubsTest.php
 
 it('ships the opencode plugin and mcp snippet', function () {

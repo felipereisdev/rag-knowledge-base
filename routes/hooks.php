@@ -1,4 +1,5 @@
 <?php
+
 // routes/hooks.php
 
 use App\Http\Controllers\HookController;
