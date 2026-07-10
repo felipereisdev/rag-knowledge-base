@@ -63,7 +63,7 @@ class RagStoreKnowledgeTool extends Tool
             $graphLine.
             "  ID: {$entry->id}\n\n".
             "Project: {$pid} — {$pending} pending, {$approved} approved\n".
-            'Approve at '.config('app.url', 'http://localhost:8090').'/martis/resources/knowledge-entries';
+            'Approve at '.config('app.url', 'http://localhost:8080').'/martis/resources/knowledge-entries';
 
         return Response::text($text);
     }
