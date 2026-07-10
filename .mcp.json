@@ -6,7 +6,7 @@
         },
         "rag": {
             "type": "http",
-            "url": "http://localhost:8080/mcp/rag/rag"
+            "url": "http://localhost:8090/mcp/rag/rag"
         }
     }
 }

@@ -15,7 +15,7 @@ use Laravel\Mcp\Server\Attributes\Name;
 use Laravel\Mcp\Server\Tool;
 
 #[Name('rag_update_project')]
-#[Description('Update a project\'s metadata: its tech stack (programming languages and databases), and optionally its description and content language. Writes immediately (no approval workflow — metadata, not knowledge). Inspect the repo to determine which technologies it actually uses, then pass the full authoritative list; this replaces the stored list.')]
+#[Description('Update a project\'s metadata: its tech stack (programming languages, frameworks and databases), and optionally its description and content language. Writes immediately (no approval workflow — metadata, not knowledge). Inspect the repo to determine which technologies it actually uses, then pass the full authoritative list; this replaces the stored list.')]
 class RagUpdateProjectTool extends Tool
 {
     use ResolvesProjectId;
@@ -107,7 +107,7 @@ class RagUpdateProjectTool extends Tool
         return [
             'technologies' => $schema->array()
                 ->items($schema->string())
-                ->description('The project\'s tech stack — programming languages and databases, as lowercase identifiers, e.g. ["python","typescript","postgresql","redis"]. Values are matched against the known catalog (case-insensitive); unrecognized values are coerced to "other". Replaces the stored list.'),
+                ->description('The project\'s tech stack — programming languages, frameworks and databases, as lowercase identifiers, e.g. ["php","typescript","laravel","react","postgresql","redis"]. Values are matched against the known catalog (case-insensitive); unrecognized values are coerced to "other". Replaces the stored list.'),
             'description' => $schema->string()
                 ->description('Short project description. Optional; only updated when provided.'),
             'language' => $schema->string()

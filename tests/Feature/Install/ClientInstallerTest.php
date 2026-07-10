@@ -15,28 +15,28 @@ function tmpTarget(): string
 
 it('substitutes placeholders', function () {
     $installer = new ClientInstaller(base_path('stubs/client'));
-    $out = $installer->substitute('url=__RAG_URL__ token=__RAG_TOKEN__ project=__RAG_PROJECT__', 'http://x:8080', 'secret', 'proj');
-    expect($out)->toBe('url=http://x:8080 token=secret project=proj');
+    $out = $installer->substitute('url=__RAG_URL__ token=__RAG_TOKEN__ project=__RAG_PROJECT__', 'http://x:8090', 'secret', 'proj');
+    expect($out)->toBe('url=http://x:8090 token=secret project=proj');
 });
 
 it('installs Claude artifacts with substituted config and rag-only mcp', function () {
     $target = tmpTarget();
     $installer = new ClientInstaller(base_path('stubs/client'));
 
-    $installer->install($target, ['claude'], 'http://localhost:8080', 'tok123', 'acme');
+    $installer->install($target, ['claude'], 'http://localhost:8090', 'tok123', 'acme');
 
     expect(File::exists("$target/.claude/hooks/session-start.sh"))->toBeTrue();
     expect(File::exists("$target/.claude/hooks/lib/rag-core.sh"))->toBeTrue();
 
     $cfg = File::get("$target/.claude/hooks/config.sh");
-    expect($cfg)->toContain('http://localhost:8080')->and($cfg)->toContain('tok123')
+    expect($cfg)->toContain('http://localhost:8090')->and($cfg)->toContain('tok123')
         ->and($cfg)->not->toContain('__RAG_URL__');
 
     $mcp = json_decode(File::get("$target/.mcp.json"), true);
     expect($mcp['mcpServers'])->toHaveKey('rag')->and($mcp['mcpServers'])->not->toHaveKey('martis');
     // The project id is pinned into the MCP URL so a shared HTTP server knows
     // which project this client targets.
-    expect($mcp['mcpServers']['rag']['url'])->toBe('http://localhost:8080/mcp/rag/acme');
+    expect($mcp['mcpServers']['rag']['url'])->toBe('http://localhost:8090/mcp/rag/acme');
 
     File::deleteDirectory($target);
 });
@@ -46,7 +46,7 @@ it('merges into an existing .mcp.json without clobbering', function () {
     File::put("$target/.mcp.json", json_encode(['mcpServers' => ['other' => ['url' => 'x']]]));
     $installer = new ClientInstaller(base_path('stubs/client'));
 
-    $installer->install($target, ['claude'], 'http://localhost:8080', 'tok', 'acme');
+    $installer->install($target, ['claude'], 'http://localhost:8090', 'tok', 'acme');
 
     $mcp = json_decode(File::get("$target/.mcp.json"), true);
     expect($mcp['mcpServers'])->toHaveKeys(['other', 'rag']);
@@ -57,10 +57,10 @@ it('merges into an existing .mcp.json without clobbering', function () {
 it('is idempotent on a second run', function () {
     $target = tmpTarget();
     $installer = new ClientInstaller(base_path('stubs/client'));
-    $installer->install($target, ['claude'], 'http://localhost:8080', 'tok', 'acme');
+    $installer->install($target, ['claude'], 'http://localhost:8090', 'tok', 'acme');
     $first = File::get("$target/.mcp.json");
 
-    $installer->install($target, ['claude'], 'http://localhost:8080', 'tok', 'acme');
+    $installer->install($target, ['claude'], 'http://localhost:8090', 'tok', 'acme');
     $second = File::get("$target/.mcp.json");
 
     expect($second)->toBe($first);
@@ -79,7 +79,7 @@ it('preserves an existing SessionStart hook when merging settings.json', functio
     ]));
     $installer = new ClientInstaller(base_path('stubs/client'));
 
-    $installer->install($target, ['claude'], 'http://localhost:8080', 'tok', 'acme');
+    $installer->install($target, ['claude'], 'http://localhost:8090', 'tok', 'acme');
 
     $settings = json_decode(File::get("$target/.claude/settings.json"), true);
     $sessionStart = $settings['hooks']['SessionStart'];
@@ -92,7 +92,7 @@ it('preserves an existing SessionStart hook when merging settings.json', functio
     expect(collect($commands)->contains(fn ($c) => str_contains((string) $c, 'session-start.sh')))->toBeTrue();
 
     $first = File::get("$target/.claude/settings.json");
-    $installer->install($target, ['claude'], 'http://localhost:8080', 'tok', 'acme');
+    $installer->install($target, ['claude'], 'http://localhost:8090', 'tok', 'acme');
     $second = File::get("$target/.claude/settings.json");
 
     expect($second)->toBe($first);

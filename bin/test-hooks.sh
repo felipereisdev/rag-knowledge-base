@@ -1,6 +1,6 @@
 #!/usr/bin/env sh
 # Smoke-test the Claude adapters against a running backend.
-# Usage: RAG_HOOK_URL=http://localhost:8080 RAG_HOOK_TOKEN=xxx ./bin/test-hooks.sh /path/to/client
+# Usage: RAG_HOOK_URL=http://localhost:8090 RAG_HOOK_TOKEN=xxx ./bin/test-hooks.sh /path/to/client
 set -e
 CLIENT="${1:-.}"
 H="$CLIENT/.claude/hooks"

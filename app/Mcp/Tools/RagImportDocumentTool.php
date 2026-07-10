@@ -47,7 +47,7 @@ class RagImportDocumentTool extends Tool
         $text = 'Imported '.count($entryIds)." entries from {$filePath}.\n".
             "  Project: {$pid}\n".
             "  Status: pending (needs approval)\n\n".
-            'Approve at '.config('app.url', 'http://localhost:8080').'/martis/resources/knowledge-entries';
+            'Approve at '.config('app.url', 'http://localhost:8090').'/martis/resources/knowledge-entries';
 
         return Response::text($text);
     }

@@ -845,7 +845,7 @@ use App\Services\Condense\CandidateParser;
 
 it('parses a JSON array, tolerating code fences and surrounding prose', function () {
     $raw = "Here you go:\n```json\n".json_encode([
-        ['title' => 'A', 'content' => '# a', 'category' => 'decision',
+        ['title' => 'A', 'content' => '# a', 'category' => 'design-decision',
          'entities' => [['name' => 'X', 'type' => 'class']],
          'relations' => [['subject' => 'X', 'predicate' => 'uses', 'object' => 'Y']]],
         ['title' => '', 'content' => 'dropped: no title'],
@@ -855,14 +855,14 @@ it('parses a JSON array, tolerating code fences and surrounding prose', function
 
     expect($out)->toHaveCount(1);
     expect($out[0]['title'])->toBe('A');
-    expect($out[0]['category'])->toBe('decision');
+    expect($out[0]['category'])->toBe('design-decision');
     expect($out[0]['entities'][0]['name'])->toBe('X');
     expect($out[0]['relations'][0]['predicate'])->toBe('uses');
 });
 
-it('defaults category to insight and drops malformed graph items', function () {
+it('coerces an unknown/absent category to insight and drops malformed graph items', function () {
     $raw = json_encode([
-        ['title' => 'T', 'content' => 'c',
+        ['title' => 'T', 'content' => 'c', 'category' => 'decision', // not in chk_category -> insight
          'entities' => [['type' => 'class']], // no name -> dropped
          'relations' => [['subject' => 'X', 'object' => 'Y']]], // no predicate -> dropped
     ]);
@@ -895,6 +895,15 @@ namespace App\Services\Condense;
 final class CandidateParser
 {
     /**
+     * Allowed categories — must match the `chk_category` DB constraint on
+     * `knowledge_entries`. Anything else the LLM emits falls back to 'insight'.
+     */
+    private const CATEGORIES = [
+        'business-rule', 'design-decision', 'architecture',
+        'documentation', 'insight', 'convention', 'constraint',
+    ];
+
+    /**
      * @return list<array{title:string, content:string, category:string,
      *   entities:list<array{name:string,type:string}>,
      *   relations:list<array{subject:string,predicate:string,object:string}>}>
@@ -921,7 +930,10 @@ final class CandidateParser
             if ($title === '' || $content === '') {
                 continue;
             }
-            $category = trim((string) ($item['category'] ?? '')) ?: 'insight';
+            $category = trim((string) ($item['category'] ?? ''));
+            if (! in_array($category, self::CATEGORIES, true)) {
+                $category = 'insight';
+            }
 
             $out[] = [
                 'title' => $title,
@@ -1016,7 +1028,7 @@ final class ExtractionPrompt
         {
           "title": "short descriptive title",
           "content": "Markdown explaining the knowledge",
-          "category": "one of: decision, rule, architecture, fix, convention, insight",
+          "category": "one of: business-rule, design-decision, architecture, documentation, insight, convention, constraint",
           "entities": [{"name": "...", "type": "..."}],
           "relations": [{"subject": "...", "predicate": "...", "object": "..."}]
         }
@@ -1398,6 +1410,7 @@ use App\Models\KnowledgeEntry;
 use App\Models\Project;
 use App\Services\Condense\CondenseDedup;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Queue;
 
 function insertChunk(string $entryId, string $projectId, array $vec): void
 {
@@ -1421,6 +1434,10 @@ function dedupWith(array $queryVec): CondenseDedup
 }
 
 beforeEach(function () {
+    // Prevent the observer from synchronously indexing created entries (which
+    // would insert a chunk_index=0 row and collide with insertChunk, and hit
+    // the real embedder). This test inserts the chunks it needs by hand.
+    Queue::fake();
     Project::create(['id' => 'p1', 'name' => 'p1', 'root_path' => '/tmp/p1']);
 });
 
@@ -1556,8 +1573,12 @@ use App\Services\Condense\CondenseDedup;
 use App\Services\Condense\KnowledgeExtractor;
 use App\Services\Condense\KnowledgeExtractorFactory;
 use App\Services\Condense\TranscriptParser;
+use Illuminate\Support\Facades\Queue;
 
 beforeEach(function () {
+    // Keep the suite hermetic: don't let created entries synchronously index
+    // (which would call the real embedder) under the sync queue.
+    Queue::fake();
     Project::create(['id' => 'p1', 'name' => 'p1', 'root_path' => '/tmp/p1']);
     CondenseSetting::current();
 
@@ -1575,7 +1596,7 @@ beforeEach(function () {
                 public function extract(string $transcript): array
                 {
                     return [[
-                        'title' => 'Use database queue', 'content' => '# c', 'category' => 'decision',
+                        'title' => 'Use database queue', 'content' => '# c', 'category' => 'design-decision',
                         'entities' => [], 'relations' => [],
                     ]];
                 }

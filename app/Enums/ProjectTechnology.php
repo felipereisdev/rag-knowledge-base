@@ -3,8 +3,9 @@
 namespace App\Enums;
 
 /**
- * The technologies a project can be tagged with — programming languages and
- * databases — stored in `projects.project_type` (a JSON-array MultiSelect).
+ * The technologies a project can be tagged with — programming languages,
+ * frameworks and databases — stored in `projects.project_type` (a JSON-array
+ * MultiSelect).
  *
  * Single source of truth for the ProjectResource MultiSelect options and the
  * rag_update_project MCP tool validation. The catalog is grouped so the admin
@@ -77,6 +78,79 @@ final class ProjectTechnology
                 'prolog' => 'Prolog',
                 'apex' => 'Apex',
                 'abap' => 'ABAP',
+            ],
+            'Frameworks' => [
+                // Frontend
+                'react' => 'React',
+                'vue' => 'Vue',
+                'angular' => 'Angular',
+                'svelte' => 'Svelte',
+                'sveltekit' => 'SvelteKit',
+                'solidjs' => 'SolidJS',
+                'preact' => 'Preact',
+                'qwik' => 'Qwik',
+                'lit' => 'Lit',
+                'alpinejs' => 'Alpine.js',
+                'htmx' => 'htmx',
+                'jquery' => 'jQuery',
+                'nextjs' => 'Next.js',
+                'nuxt' => 'Nuxt',
+                'remix' => 'Remix',
+                'astro' => 'Astro',
+                'gatsby' => 'Gatsby',
+                'ember' => 'Ember',
+                'backbone' => 'Backbone.js',
+                // Backend
+                'laravel' => 'Laravel',
+                'symfony' => 'Symfony',
+                'livewire' => 'Livewire',
+                'inertia' => 'Inertia.js',
+                'django' => 'Django',
+                'flask' => 'Flask',
+                'fastapi' => 'FastAPI',
+                'rails' => 'Ruby on Rails',
+                'express' => 'Express',
+                'nestjs' => 'NestJS',
+                'fastify' => 'Fastify',
+                'koa' => 'Koa',
+                'adonisjs' => 'AdonisJS',
+                'spring' => 'Spring',
+                'spring-boot' => 'Spring Boot',
+                'quarkus' => 'Quarkus',
+                'micronaut' => 'Micronaut',
+                'ktor' => 'Ktor',
+                'aspnet' => 'ASP.NET',
+                'phoenix' => 'Phoenix',
+                'gin' => 'Gin',
+                'fiber' => 'Fiber',
+                'echo' => 'Echo',
+                'actix' => 'Actix',
+                'axum' => 'Axum',
+                'rocket' => 'Rocket',
+                // Mobile & desktop
+                'react-native' => 'React Native',
+                'expo' => 'Expo',
+                'flutter' => 'Flutter',
+                'ionic' => 'Ionic',
+                'capacitor' => 'Capacitor',
+                'swiftui' => 'SwiftUI',
+                'jetpack-compose' => 'Jetpack Compose',
+                'electron' => 'Electron',
+                'tauri' => 'Tauri',
+                'dotnet-maui' => '.NET MAUI',
+                // CSS / UI
+                'tailwind' => 'Tailwind CSS',
+                'bootstrap' => 'Bootstrap',
+                'material-ui' => 'Material UI',
+                'chakra-ui' => 'Chakra UI',
+                // Runtime / build / meta
+                'nodejs' => 'Node.js',
+                'deno' => 'Deno',
+                'bun' => 'Bun',
+                'vite' => 'Vite',
+                'webpack' => 'Webpack',
+                'turborepo' => 'Turborepo',
+                'nx' => 'Nx',
             ],
             'Databases' => [
                 'postgresql' => 'PostgreSQL',

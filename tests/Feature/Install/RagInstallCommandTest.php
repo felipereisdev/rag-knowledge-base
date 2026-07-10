@@ -11,7 +11,7 @@ it('installs the selected harness non-interactively via flags', function () {
     $this->artisan('rag:install', [
         '--target' => $target,
         '--harness' => 'claude',
-        '--url' => 'http://localhost:8080',
+        '--url' => 'http://localhost:8090',
         '--token' => 'tok',
     ])->assertExitCode(0);
 
@@ -25,7 +25,7 @@ it('fails clearly when the target does not exist', function () {
     $this->artisan('rag:install', [
         '--target' => '/no/such/dir/xyz',
         '--harness' => 'claude',
-        '--url' => 'http://localhost:8080',
+        '--url' => 'http://localhost:8090',
         '--token' => 'tok',
     ])->assertExitCode(1);
 });

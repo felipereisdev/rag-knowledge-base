@@ -5,6 +5,7 @@ namespace App\Martis\Resources;
 use App\Martis\Actions\ApproveEntries;
 use App\Martis\Actions\RejectEntries;
 use App\Martis\Filters\CategoryFilter;
+use App\Martis\Filters\ProjectFilter;
 use App\Martis\Filters\StatusFilter;
 use App\Models\KnowledgeEntry;
 use Illuminate\Http\Request;
@@ -16,9 +17,10 @@ use Martis\Fields\BelongsToMany;
 use Martis\Fields\DateTime;
 use Martis\Fields\Id;
 use Martis\Fields\KeyValue;
+use Martis\Fields\Markdown;
 use Martis\Fields\Select;
 use Martis\Fields\Text;
-use Martis\Fields\Textarea;
+use Martis\Filters\DateRangeFilter;
 use Martis\Filters\Filter;
 use Martis\Resource;
 
@@ -70,17 +72,23 @@ class KnowledgeEntryResource extends Resource
     }
 
     /**
-     * Index filters: narrow entries by category and status. Options mirror the
-     * form field enumerations (categoryOptions/statusOptions) but flipped to the
-     * SelectFilter label => value shape.
+     * Index filters: narrow entries by project, category, status and creation
+     * date. Category/Status options mirror the form field enumerations flipped
+     * to the SelectFilter label => value shape; Project lists live projects.
+     * "Created Between" is a from/to range (either bound optional).
      *
      * @return array<int, Filter>
      */
     public function filters(Request $request): array
     {
         return [
+            ProjectFilter::make('Project')
+                ->searchable()
+                ->placeholder('Select…'),
             CategoryFilter::make('Category'),
             StatusFilter::make('Status'),
+            DateRangeFilter::make('Created Between')
+                ->column('created_at'),
         ];
     }
 
@@ -104,8 +112,8 @@ class KnowledgeEntryResource extends Resource
                 ->searchable()
                 ->required()
                 ->span(12),
-            Textarea::make('content')
-                ->help('Markdown supported.')
+            Markdown::make('content')
+                ->alwaysShow()
                 ->span(12),
 
             Select::make('status')

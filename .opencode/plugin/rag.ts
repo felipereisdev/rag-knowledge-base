@@ -2,7 +2,7 @@
 // RAG memory plugin for opencode. Talks to the RAG server's /hooks/* endpoints.
 import type { Plugin } from "@opencode-ai/plugin"
 
-const RAG_URL = "http://localhost:8080"
+const RAG_URL = "http://localhost:8090"
 const RAG_TOKEN = ""
 const INJECT_ON_START = false // set true to inject the approved-knowledge digest
 const CONDENSE = true

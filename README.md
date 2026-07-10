@@ -24,7 +24,7 @@ Key features:
 └─────────────────────┘                              └──────────────────────────┘
         │                                                       │
         │ .mcp.json points to                                   │ pgvector + tsvector
-        │ http://localhost:8080/mcp/rag                          │ approval workflow
+        │ http://localhost:8090/mcp/rag                          │ approval workflow
 ```
 
 The RAG server is **independent** of your project. Your project only needs one entry in its MCP config pointing at the running server. The host project can be Python, Node, Go, Ruby, another Laravel app — anything.
@@ -62,10 +62,10 @@ The embedder downloads the embedding model on first start (~1 GB, cached in a vo
 ```bash
 # 3. Wait for the stack to be healthy, then verify
 docker compose ps          # all services should show "(healthy)"
-curl -s http://localhost:8080/up   # → real-time app response
+curl -s http://localhost:8090/up   # → real-time app response
 ```
 
-Open the admin panel: **http://localhost:8080/martis**
+Open the admin panel: **http://localhost:8090/martis**
 
 A default admin user is created automatically on first boot:
 
@@ -85,7 +85,7 @@ Done. The RAG server is running. Now connect your harness (next section).
 Add the RAG server to your harness's MCP config. The endpoint is **project-scoped** — the last path segment is your project id, which is how a shared server keeps each project's knowledge isolated (it can't see your filesystem, so it can't infer the project on its own):
 
 ```
-http://localhost:8080/mcp/rag/<your-project-id>
+http://localhost:8090/mcp/rag/<your-project-id>
 ```
 
 Pick any stable slug for `<your-project-id>` (e.g. the repo name) and use the same id everywhere you wire this project. `rag:install` (below) sets this automatically.
@@ -99,7 +99,7 @@ In your project (the project you want the assistant to have knowledge of), add t
   "mcpServers": {
     "rag": {
       "type": "http",
-      "url": "http://localhost:8080/mcp/rag/my-project"
+      "url": "http://localhost:8090/mcp/rag/my-project"
     }
   }
 }
@@ -113,7 +113,7 @@ In your project (the project you want the assistant to have knowledge of), add t
 {
   "mcpServers": {
     "rag": {
-      "url": "http://localhost:8080/mcp/rag/my-project"
+      "url": "http://localhost:8090/mcp/rag/my-project"
     }
   }
 }
@@ -127,7 +127,7 @@ Add to `.continue/config.json` (or the equivalent for your MCP-capable extension
 {
   "mcpServers": {
     "rag": {
-      "url": "http://localhost:8080/mcp/rag/my-project",
+      "url": "http://localhost:8090/mcp/rag/my-project",
       "transport": "streamable-http"
     }
   }
@@ -145,7 +145,7 @@ Any tool that speaks MCP over HTTP (Streamable transport) connects with the same
 After connecting, ask your assistant to check the knowledge base status. The assistant will call the `rag_status` tool and report the project's entry counts. You can also test the endpoint directly:
 
 ```bash
-curl -s -X POST http://localhost:8080/mcp/rag \
+curl -s -X POST http://localhost:8090/mcp/rag \
   -H 'Content-Type: application/json' \
   -H 'Accept: application/json, text/event-stream' \
   -H 'MCP-Protocol-Version: 2025-11-25' \
@@ -171,7 +171,7 @@ What the hooks do:
 php artisan rag:install \
   --target=/path/to/your/project \
   --harness=claude,codex,cursor,opencode \
-  --url=http://localhost:8080
+  --url=http://localhost:8090
   # --token=... only if the server has RAG_HOOK_TOKEN set (see below)
 ```
 
@@ -242,7 +242,7 @@ docker compose exec app php artisan rag:reindex --project=my-project
 ## The approval workflow
 
 1. Your assistant stores knowledge via `rag_store_knowledge` → entry is created with status **pending** (not yet searchable).
-2. You review pending entries at **http://localhost:8080/martis/resources/knowledge-entries** and approve or reject them.
+2. You review pending entries at **http://localhost:8090/martis/resources/knowledge-entries** and approve or reject them.
 3. On approval, the worker embeds the entry (vector + tsvector) and it becomes searchable via `rag_search`.
 
 This keeps the assistant from polluting the knowledge base with unverified claims — you stay in control of what's searchable.
@@ -305,7 +305,7 @@ Environment variables are set in `docker-compose.yml` (they override anything in
 | Service | Image | Port | Purpose |
 |---|---|---|---|
 | `app` | `Dockerfile.app` (PHP-FPM 8.3) | — | Laravel application |
-| `web` | `nginx:alpine` | `8080:80` | nginx reverse proxy |
+| `web` | `nginx:alpine` | `8090:80` | nginx reverse proxy |
 | `worker` | `Dockerfile.app` | — | Queue worker (embedding + indexing jobs) |
 | `postgres` | `pgvector/pgvector:pg16` | `5433:5432` | Postgres + pgvector |
 | `embedder` | `services/embedder/` (FastAPI) | `8001:8000` | Embedding sidecar (optional if using external API) |
@@ -337,7 +337,7 @@ docker compose --profile dev exec app-dev vendor/bin/pint --test
 
 ## Graph explorer
 
-Open **http://localhost:8080/martis/graph** in a browser to visualize entities and their relations as an interactive network graph (powered by vis-network). Filter by project to focus on one knowledge base at a time.
+Open **http://localhost:8090/martis/graph** in a browser to visualize entities and their relations as an interactive network graph (powered by vis-network). Filter by project to focus on one knowledge base at a time.
 
 ---
 

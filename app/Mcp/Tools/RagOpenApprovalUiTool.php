@@ -25,7 +25,7 @@ class RagOpenApprovalUiTool extends Tool
         } catch (ProjectNotIdentifiedException $e) {
             return Response::text($e->getMessage());
         }
-        $base = (string) config('app.url', 'http://localhost:8080');
+        $base = (string) config('app.url', 'http://localhost:8090');
         $url = "{$base}/martis/resources/knowledge-entries?filter[status]=pending&filter[project_id]={$pid}";
 
         return Response::text("Approval UI for project '{$pid}':\n{$url}");

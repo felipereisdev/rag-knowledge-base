@@ -61,7 +61,7 @@ class ProjectResource extends Resource
             MultiSelect::make('project_type', 'Tech Stack')
                 ->options(ProjectTechnology::options())
                 ->displayUsingLabels()
-                ->help('Programming languages and databases used in the project.'),
+                ->help('Programming languages, frameworks and databases used in the project.'),
 
             Select::make('language')
                 ->options([
