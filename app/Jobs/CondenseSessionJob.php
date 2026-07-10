@@ -52,18 +52,19 @@ final class CondenseSessionJob implements ShouldQueue
                 'status' => 'running',
             ]));
         } catch (QueryException) {
+            Log::info('CondenseSessionJob: session already processed, skipping', ['session_id' => $this->sessionId]);
+
             return;
         }
 
-        try {
-            $text = $parser->parse($this->transcriptPath, $setting->max_transcript_chars);
-        } catch (Throwable $e) {
+        if (! is_readable($this->transcriptPath)) {
             $run->update(['status' => 'failed']);
-            Log::warning('CondenseSessionJob: transcript not readable', ['path' => $this->transcriptPath, 'error' => $e->getMessage()]);
+            Log::warning('CondenseSessionJob: transcript not readable', ['path' => $this->transcriptPath]);
 
             return;
         }
 
+        $text = $parser->parse($this->transcriptPath, $setting->max_transcript_chars);
         if (trim($text) === '') {
             $run->update(['status' => 'skipped']);
 
