@@ -10,14 +10,14 @@ class KnowledgeEntryObserver
 {
     public function created(KnowledgeEntry $entry): void
     {
-        if ($entry->status === 'approved') {
+        if (in_array($entry->status, ['approved', 'pending'], true)) {
             IndexEntryJob::dispatch($entry->id);
         }
     }
 
     public function updated(KnowledgeEntry $entry): void
     {
-        if ($entry->status === 'approved') {
+        if (in_array($entry->status, ['approved', 'pending'], true)) {
             IndexEntryJob::dispatch($entry->id);
         } elseif ($entry->status === 'rejected') {
             DB::table('chunk_embeddings')

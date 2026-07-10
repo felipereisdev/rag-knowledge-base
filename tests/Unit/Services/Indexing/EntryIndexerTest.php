@@ -5,6 +5,7 @@ use App\Models\Project;
 use App\Services\Chunking\ParagraphChunker;
 use App\Services\Indexing\EntryIndexer;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Queue;
 use Laravel\Ai\Embeddings;
 
 describe('EntryIndexer', function () {
@@ -34,6 +35,11 @@ describe('EntryIndexer', function () {
     });
 
     it('deletes old chunks before re-indexing', function () {
+        // Fake the queue so KnowledgeEntry::create's observer doesn't
+        // synchronously dispatch IndexEntryJob (sync connection in tests)
+        // and race with the manually-inserted "old chunk" below.
+        Queue::fake();
+
         $project = Project::create(['id' => 'r1', 'name' => 'R1', 'root_path' => '/p']);
         $entry = KnowledgeEntry::create([
             'project_id' => $project->id,
