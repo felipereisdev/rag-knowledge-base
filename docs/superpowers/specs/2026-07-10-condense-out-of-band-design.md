@@ -95,13 +95,26 @@ Sessão termina
   (trait `ResolvesProjectId`), despacha `CondenseSessionJob`, responde 202
   (fire-and-forget; não espera o LLM).
 - `App\Jobs\CondenseSessionJob` — orquestra os passos 1–8. Injeta
-  `TranscriptParser`, resolve o `KnowledgeExtractor` conforme `CondenseSetting`,
-  usa `HybridSearcher` p/ dedup. Falhas logadas, nunca quebram a sessão.
+  `TranscriptParser`, `KnowledgeExtractorFactory`, `CondenseDedup` e
+  `KnowledgeWriter`. Falhas logadas, nunca quebram a sessão.
 - `App\Services\Condense\TranscriptParser` — lê o JSONL do transcript, filtra
   para texto de user/assistant (descarta chamadas/resultados de ferramentas),
   concatena e trunca para `max_transcript_chars`.
+- `App\Services\Condense\CondenseDedup` — dedup por **similaridade vetorial**:
+  gera o embedding de `title\ncontent` (`local-embedder`) e consulta
+  `chunk_embeddings` (todos os status, filtrado por `project_id`); duplicado se o
+  maior score ≥ `min_dedup_score`. **Depende** de indexar pending (abaixo).
+- **Mudança no `KnowledgeEntryObserver`:** passa a indexar entradas `pending`
+  também (hoje só `approved`), para o dedup vetorial cobrir approved+pending de
+  forma uniforme. `hydrate()`/`ftsSearch()` do `HybridSearcher` já filtram
+  `approved`, então pending continua não vazando na busca normal.
+- `App\Services\Knowledge\KnowledgeWriter` — extrai a escrita transacional
+  (entrada + tags + entities + relations) hoje inline no `RagStoreKnowledgeTool`.
+  Reusada pelo Tool **e** pelo job (DRY).
+- `App\Services\Condense\KnowledgeExtractorFactory` — instancia o driver certo
+  conforme `CondenseSetting`.
 - `App\Services\Condense\KnowledgeExtractor` (interface) —
-  `extract(string $transcript, int $projectId): array` (lista de candidatos
+  `extract(string $transcript): array` (lista de candidatos
   `{title, content(markdown), category, entities[], relations[]}`; `[]` quando
   não há nada durável). Dois drivers:
   - `App\Services\Condense\ClaudeSdkExtractor` — analogia PHP do Agent SDK:
@@ -179,8 +192,10 @@ Array vazio = nada durável → nenhum pending criado.
    `stop_hook_active`. Stop pode disparar mais de uma vez por sessão; só a
    primeira processa.
 5. **Extração retorna `[]`** → nenhum pending; registra `status=skipped`.
-6. **Dedup** reusa `HybridSearcher` (`min_dedup_score`) contra entradas
-   existentes (approved+pending) antes de inserir.
+6. **Dedup** por similaridade vetorial (`CondenseDedup`, `min_dedup_score`)
+   contra `chunk_embeddings` de approved+pending. Requer indexar pending
+   (`HybridSearcher::search()` só retorna approved e por isso não serve para
+   deduplicar contra pending).
 7. **Segurança/robustez:** toda falha de rede/LLM/parse é engolida e logada — um
    hook nunca pode quebrar a sessão do usuário (princípio já vigente no
    `rag-core.sh`).
@@ -188,12 +203,14 @@ Array vazio = nada durável → nenhum pending criado.
 ## 6. Impacto / arquivos
 
 - **Novos:** `CondenseSessionJob`, `TranscriptParser`, `KnowledgeExtractor` +
-  2 drivers, `ExtractionPrompt`, `ExtractorDriver`/`ExtractorProvider` enums,
-  `CondenseSetting` + migração, `CondenseRun` + migração,
+  2 drivers, `KnowledgeExtractorFactory`, `ExtractionPrompt`, `CandidateParser`,
+  `CondenseDedup`, `KnowledgeWriter`, `ExtractorDriver`/`ExtractorProvider`
+  enums, `CondenseSetting` + migração + seed, `CondenseRun` + migração,
   `CondenseSettingResource`, lang keys, testes.
 - **Alterados:** `routes/hooks.php`, `HookController` (+`condense`),
-  `stop.sh` (template bakeado), `lib/rag-core.sh`, `config.sh`,
-  `RagInstallCommand`/`ClientInstaller` (template do stop.sh).
+  `KnowledgeEntryObserver` (indexa pending), `RagStoreKnowledgeTool` (usa
+  `KnowledgeWriter`), `stop.sh` dos harnesses (claude/codex/cursor),
+  `lib/rag-core.sh`, e os testes de stub correspondentes.
 - **Removido:** caminho `rag_condense_instruction` / `decision:block` do Stop.
 
 ## 7. Testes (estratégia)
