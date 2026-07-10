@@ -103,6 +103,7 @@ services:
       dockerfile: Dockerfile.app
       target: production
     container_name: rag-worker
+    profiles: ["condense"]
     entrypoint: ["/usr/local/bin/entrypoint-worker.sh"]
     volumes:
       - storage:/var/www/html/storage
