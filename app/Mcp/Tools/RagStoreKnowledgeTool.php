@@ -4,14 +4,11 @@ namespace App\Mcp\Tools;
 
 use App\Exceptions\ProjectNotIdentifiedException;
 use App\Mcp\Tools\Concerns\ResolvesProjectId;
-use App\Models\Entity;
 use App\Models\KnowledgeEntry;
 use App\Models\Project;
-use App\Models\Relation;
-use App\Models\Tag;
+use App\Services\Knowledge\KnowledgeWriter;
 use Illuminate\Contracts\JsonSchema\JsonSchema;
 use Illuminate\JsonSchema\Types\Type;
-use Illuminate\Support\Facades\DB;
 use Laravel\Mcp\Request;
 use Laravel\Mcp\Response;
 use Laravel\Mcp\Server\Attributes\Description;
@@ -42,59 +39,9 @@ class RagStoreKnowledgeTool extends Tool
         $skipped = (count($rawEntities) - count($entities))
             + (count($rawRelations) - count($relations));
 
-        $entry = DB::transaction(function () use ($pid, $title, $content, $category, $tags, $entities, $relations) {
-            $entry = KnowledgeEntry::create([
-                'project_id' => $pid,
-                'title' => $title,
-                'content' => $content,
-                'category' => $category,
-                'source' => 'mcp',
-                'status' => 'pending',
-            ]);
-
-            foreach ($tags as $tagName) {
-                $tag = Tag::firstOrCreate([
-                    'project_id' => $pid,
-                    'name' => $tagName,
-                ]);
-                $entry->tags()->attach($tag->id);
-            }
-
-            foreach ($entities as $entityData) {
-                // Search on name+type to match the unique constraint and
-                // preserve the caller's requested type. Without `type` in the
-                // search, an existing entity with a different type would be
-                // returned and the requested type silently lost.
-                $entity = Entity::firstOrCreate(
-                    [
-                        'project_id' => $pid,
-                        'name' => $entityData['name'],
-                        'type' => $entityData['type'] ?? '',
-                    ]
-                );
-                $entry->entities()->attach($entity->id);
-            }
-
-            foreach ($relations as $relData) {
-                // Relations reference entities by name regardless of type, so
-                // look up by name only and fall back to creating with type=''.
-                // Using firstOrCreate with only name in the search would risk
-                // matching an existing typed entity with the wrong type and
-                // then attempting a duplicate insert; an explicit lookup
-                // avoids that race.
-                $subject = $this->findOrCreateNamedEntity($pid, $relData['subject']);
-                $object = $this->findOrCreateNamedEntity($pid, $relData['object']);
-                Relation::create([
-                    'project_id' => $pid,
-                    'subject_id' => $subject->id,
-                    'predicate' => $relData['predicate'],
-                    'object_id' => $object->id,
-                    'entry_id' => $entry->id,
-                ]);
-            }
-
-            return $entry;
-        });
+        $entry = app(KnowledgeWriter::class)->store(
+            $pid, $title, $content, $category, 'mcp', $tags, $entities, $relations,
+        );
 
         $project = Project::find($pid);
         $lang = $project->language ?? 'en';
@@ -116,7 +63,7 @@ class RagStoreKnowledgeTool extends Tool
             $graphLine.
             "  ID: {$entry->id}\n\n".
             "Project: {$pid} — {$pending} pending, {$approved} approved\n".
-            'Approve at '.config('app.url', 'http://localhost:8080').'/martis/resources/knowledge-entries';
+            'Approve at '.config('app.url', 'http://localhost:8090').'/martis/resources/knowledge-entries';
 
         return Response::text($text);
     }
@@ -138,32 +85,6 @@ class RagStoreKnowledgeTool extends Tool
         }
 
         return $strings;
-    }
-
-    /**
-     * Find an entity by name (regardless of type) or create one with type=''.
-     *
-     * Relations reference entities by name only, so we look up ignoring type
-     * to reuse any existing typed entity. If none exists we create a bare
-     * placeholder with an empty type. This avoids the duplicate-key violations
-     * that firstOrCreate would trigger when searching on name alone against
-     * an existing entity whose type differs from the create values.
-     */
-    private function findOrCreateNamedEntity(string $projectId, string $name): Entity
-    {
-        $entity = Entity::where('project_id', $projectId)
-            ->where('name', $name)
-            ->first();
-
-        if ($entity) {
-            return $entity;
-        }
-
-        return Entity::create([
-            'project_id' => $projectId,
-            'name' => $name,
-            'type' => '',
-        ]);
     }
 
     /**
