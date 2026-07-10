@@ -20,7 +20,11 @@ it('ships Cursor session-start + stop hooks, config, mcp, rules', function () {
     expect($mcp['mcpServers'])->toHaveKey('rag')->and($mcp['mcpServers'])->not->toHaveKey('martis');
 
     expect(file_get_contents("$base/hooks/session-start.sh"))->toContain('additional_context');
-    expect(file_get_contents("$base/hooks/stop.sh"))->toContain('followup_message');
+
+    $stopSh = file_get_contents("$base/hooks/stop.sh");
+    expect($stopSh)->toContain('rag_condense_post')
+        ->and($stopSh)->toContain("echo '{}'")
+        ->and($stopSh)->not->toContain('followup_message');
     // Stale Python reference must not reappear.
     expect(file_get_contents("$base/cursorrules"))->not->toContain('rag/server/main.py');
 });

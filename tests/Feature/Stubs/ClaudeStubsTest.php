@@ -20,5 +20,9 @@ it('ships Claude adapters, settings, mcp, and skill', function () {
     expect($mcp['mcpServers'])->toHaveKey('rag');
     expect($mcp['mcpServers'])->not->toHaveKey('martis');
 
-    expect(file_get_contents("$base/hooks/stop.sh"))->toContain('stop_hook_active');
+    $stopSh = file_get_contents("$base/hooks/stop.sh");
+    expect($stopSh)->toContain('rag_condense_post')
+        ->and($stopSh)->toContain('transcript_path')
+        ->and($stopSh)->not->toContain('rag_condense_instruction')
+        ->and($stopSh)->not->toContain('decision":"block');
 });

@@ -20,4 +20,10 @@ it('ships Codex adapters, hooks.json, and mcp snippet', function () {
         ->and($toml)->not->toContain('martis');
 
     expect(file_get_contents("$base/hooks/user-prompt.sh"))->toContain('additionalContext');
+
+    $stopSh = file_get_contents("$base/hooks/stop.sh");
+    expect($stopSh)->toContain('rag_condense_post')
+        ->and($stopSh)->toContain('transcript_path')
+        ->and($stopSh)->not->toContain('rag_condense_instruction')
+        ->and($stopSh)->not->toContain('decision":"block');
 });

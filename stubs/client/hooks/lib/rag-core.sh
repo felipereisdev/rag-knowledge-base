@@ -7,7 +7,7 @@ rag_load_config() {
   if [ -f "$RAG_HOOK_DIR/config.sh" ]; then
     . "$RAG_HOOK_DIR/config.sh"
   fi
-  : "${RAG_HOOK_URL:=http://localhost:8080}"
+  : "${RAG_HOOK_URL:=http://localhost:8090}"
   : "${RAG_HOOK_TOKEN:=}"
   : "${RAG_HOOK_INJECT_ON_START:=false}"
   : "${RAG_HOOK_SEARCH_MIN_SCORE:=0.40}"
@@ -47,8 +47,10 @@ rag_search() {
   _rag_post "search" "{\"cwd\": ${_cwd}, \"query\": ${_q}, \"limit\": ${RAG_HOOK_SEARCH_LIMIT}, \"min_score\": ${RAG_HOOK_SEARCH_MIN_SCORE}}"
 }
 
-rag_condense_instruction() {
-  cat <<'EOF'
-Before you finish: judge whether this session produced durable knowledge (a decision, rule, architecture note, non-obvious fix, or convention). If not, stop normally. If yes: first call rag_search to check it is not already stored (dedup); then condense it into one or more knowledge entries — each with a clear title, Markdown content, a category, and any salient entities/relations — and call rag_store_knowledge (it lands in pending for review). Then stop.
-EOF
+# Fire-and-forget: ask the worker to condense a finished session.
+rag_condense_post() {
+  _cwd=$(_rag_json_escape "$1")
+  _sid=$(_rag_json_escape "$2")
+  _tp=$(_rag_json_escape "$3")
+  _rag_post "condense" "{\"cwd\": ${_cwd}, \"session_id\": ${_sid}, \"transcript_path\": ${_tp}}"
 }

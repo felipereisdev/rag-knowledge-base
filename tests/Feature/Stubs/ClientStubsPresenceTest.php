@@ -11,7 +11,8 @@ it('ships the shared shell core and config templates', function () {
 
     $coreSrc = file_get_contents($core);
     expect($coreSrc)->toContain('rag_ensure_project')
-        ->and($coreSrc)->toContain('rag_condense_instruction')
+        ->and($coreSrc)->toContain('rag_condense_post')
+        ->and($coreSrc)->not->toContain('rag_condense_instruction')
         ->and($coreSrc)->toContain('--max-time');
 
     $cfgSrc = file_get_contents($cfg);
