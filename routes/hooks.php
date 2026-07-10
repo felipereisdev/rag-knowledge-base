@@ -12,4 +12,5 @@ Route::middleware(VerifyHookToken::class)
         Route::post('ensure-project', [HookController::class, 'ensure']);
         Route::post('digest', [HookController::class, 'digest']);
         Route::post('search', [HookController::class, 'search']);
+        Route::post('condense', [HookController::class, 'condense']);
     });
