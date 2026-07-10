@@ -2,7 +2,7 @@
 
 namespace App\Services\Condense;
 
-final class TranscriptParser
+class TranscriptParser
 {
     public function parse(string $path, int $maxChars): string
     {

@@ -5,7 +5,7 @@ namespace App\Services\Condense;
 use App\Enums\ExtractorDriver;
 use App\Models\CondenseSetting;
 
-final class KnowledgeExtractorFactory
+class KnowledgeExtractorFactory
 {
     public function __construct(
         private readonly ExtractionPrompt $prompt,
