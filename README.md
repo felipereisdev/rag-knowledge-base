@@ -335,6 +335,35 @@ docker compose --profile dev exec app-dev vendor/bin/pint --test
 
 ---
 
+## Running the condense worker
+
+The out-of-band condenser runs as a queue worker. **Where** it runs is derived
+from the extractor **driver** you set in Martis → *Condense Settings*:
+
+- `driver = claude_sdk` → runs **locally on your host**, reusing your
+  authenticated `claude` CLI (no API key), like claude-mem.
+- `driver = api` → runs **in Docker** (the `rag-worker` service) using the
+  provider API key from `config/ai.php`.
+
+Start it with the helper — it reads the driver and places the worker for you:
+
+```sh
+./bin/condense-worker.sh
+```
+
+- **claude_sdk:** requires `claude` on PATH + authenticated, and this host's
+  `.env` pointing at the exposed services (`DB_HOST=127.0.0.1`, `DB_PORT=5433`,
+  embedder at `http://localhost:8001/v1`).
+- **api:** requires the provider key (e.g. `ANTHROPIC_API_KEY`) in the worker's
+  environment.
+
+> **Note:** the Docker `worker` service is now behind the `condense` compose
+> profile, so a bare `docker compose up` no longer starts it. Use
+> `./bin/condense-worker.sh` (api mode) or
+> `docker compose --profile condense up -d worker`.
+
+---
+
 ## Graph explorer
 
 Open **http://localhost:8090/martis/graph** in a browser to visualize entities and their relations as an interactive network graph (powered by vis-network). Filter by project to focus on one knowledge base at a time.
