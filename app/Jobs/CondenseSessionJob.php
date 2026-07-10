@@ -64,37 +64,40 @@ final class CondenseSessionJob implements ShouldQueue
             return;
         }
 
-        $text = $parser->parse($this->transcriptPath, $setting->max_transcript_chars);
-        if (trim($text) === '') {
-            $run->update(['status' => 'skipped']);
-
-            return;
-        }
-
         try {
+            $text = $parser->parse($this->transcriptPath, $setting->max_transcript_chars);
+            if (trim($text) === '') {
+                $run->update(['status' => 'skipped']);
+
+                return;
+            }
+
             $candidates = $factory->make($setting)->extract($text);
+
+            // Dedup queries chunk_embeddings, but a candidate written earlier in
+            // THIS same loop is indexed asynchronously (IndexEntryJob on the
+            // database queue), so its embedding may not be visible to the next
+            // candidate's dedup within the same session; cross-session dedup is
+            // the design goal.
+            $created = 0;
+            foreach ($candidates as $c) {
+                if ($dedup->isDuplicate($this->projectId, $c['title'], $c['content'], $setting->min_dedup_score)) {
+                    continue;
+                }
+                $writer->store(
+                    $this->projectId, $c['title'], $c['content'], $c['category'],
+                    'condense', [], $c['entities'], $c['relations'],
+                );
+                $created++;
+            }
+
+            $run->update([
+                'status' => $created > 0 ? 'done' : 'skipped',
+                'entries_created' => $created,
+            ]);
         } catch (Throwable $e) {
             $run->update(['status' => 'failed']);
-            Log::warning('CondenseSessionJob: extraction failed', ['error' => $e->getMessage()]);
-
-            return;
+            Log::warning('CondenseSessionJob: run failed', ['session_id' => $this->sessionId, 'error' => $e->getMessage()]);
         }
-
-        $created = 0;
-        foreach ($candidates as $c) {
-            if ($dedup->isDuplicate($this->projectId, $c['title'], $c['content'], $setting->min_dedup_score)) {
-                continue;
-            }
-            $writer->store(
-                $this->projectId, $c['title'], $c['content'], $c['category'],
-                'condense', [], $c['entities'], $c['relations'],
-            );
-            $created++;
-        }
-
-        $run->update([
-            'status' => $created > 0 ? 'done' : 'skipped',
-            'entries_created' => $created,
-        ]);
     }
 }

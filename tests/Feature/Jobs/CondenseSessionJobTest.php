@@ -112,6 +112,24 @@ it('returns early without creating a run when disabled', function () {
     expect(KnowledgeEntry::where('project_id', 'p1')->count())->toBe(0);
 });
 
+it('records failed when a collaborator throws', function () {
+    app()->bind(TranscriptParser::class, fn () => new class extends TranscriptParser {
+        public function parse(string $path, int $maxChars): string { throw new \RuntimeException('boom'); }
+    });
+
+    $path = tempnam(sys_get_temp_dir(), 'tr').'.jsonl';
+    file_put_contents($path, "{}\n");
+
+    (new CondenseSessionJob('p1', $path, 'sess-throws'))->handle(
+        app(TranscriptParser::class), app(KnowledgeExtractorFactory::class),
+        app(CondenseDedup::class), app(\App\Services\Knowledge\KnowledgeWriter::class),
+    );
+
+    $run = CondenseRun::where('session_id', 'sess-throws')->first();
+    expect($run->status)->toBe('failed');
+    expect(KnowledgeEntry::where('project_id', 'p1')->count())->toBe(0);
+});
+
 it('records skipped when the transcript has no durable text', function () {
     app()->bind(TranscriptParser::class, fn () => new class extends TranscriptParser {
         public function parse(string $path, int $maxChars): string { return ''; }

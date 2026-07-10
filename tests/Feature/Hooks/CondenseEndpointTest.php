@@ -28,3 +28,16 @@ it('returns 202 without dispatching when required fields are missing', function 
 
     Queue::assertNothingPushed();
 });
+
+it('returns 202 without dispatching when the project cannot be resolved', function () {
+    Queue::fake();
+
+    $res = $this->postJson('/hooks/condense', [
+        'cwd' => '',
+        'session_id' => 'sess-9',
+        'transcript_path' => '/tmp/acme-app/transcript.jsonl',
+    ]);
+
+    $res->assertStatus(202);
+    Queue::assertNothingPushed();
+});
