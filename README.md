@@ -8,7 +8,7 @@ Key features:
 - **Passive capture via hooks** — optional `rag:install` wires Claude Code / Codex / Cursor / opencode to auto-create the project, auto-search each prompt, and condense each session into the approval queue
 - **Approval workflow** — the assistant stores knowledge as *pending*; you approve via the admin UI before it's searchable
 - **Hybrid search** — vector (pgvector) + full-text (tsvector) + reciprocal rank fusion + knowledge-graph expansion
-- **Embeddings configurable** — local sidecar (offline, multilingual, free) by default, or any OpenAI-compatible API
+- **Embeddings configurable** — local sidecar (offline, multilingual, free) by default, or another configured Laravel AI provider that emits 768-dimensional vectors
 - **Admin panel + graph explorer** — built on Martis, visualize entities and relations interactively
 - **Plug-and-play** — clone, `docker compose up`, connect your harness. No PHP on the host, no manual key generation
 
@@ -265,19 +265,17 @@ RAG_EMBEDDING_MODEL=paraphrase-multilingual-mpnet-base-v2
 RAG_EMBEDDING_DIM=768
 ```
 
-### Alternative: external API (OpenAI / Voyage / any OpenAI-compatible)
+### Alternative: configured embedding provider
 
-Point the server at an external embeddings endpoint instead of the sidecar. Smaller stack (you can drop the `embedder` service), but requires an API key and incurs per-token cost. Set in `docker-compose.yml` under the `app` and `worker` `environment`:
+You may configure another Laravel AI embedding provider instead of the sidecar. Its selected model must emit exactly 768-dimensional vectors. Set the same provider and model for the `app` and `worker` services:
 
 ```env
-RAG_EMBEDDING_PROVIDER=local-embedder
-RAG_EMBED_URL=https://api.openai.com/v1
-RAG_EMBED_KEY=sk-...
+RAG_EMBEDDING_PROVIDER=<configured-provider>
 RAG_EMBEDDING_MODEL=<a-model-configured-to-return-768-dimension-vectors>
 RAG_EMBEDDING_DIM=768
 ```
 
-> Embedding persistence currently supports 768 dimensions only. External providers are compatible when their selected model returns 768-dimension vectors; other dimensions are rejected at boot with an actionable configuration error. When the provider or model changes, the server detects the mismatch and re-embeds stored chunks.
+> Embedding persistence currently supports 768 dimensions only. The application rejects other dimensions at boot until variable-dimension storage is implemented. When the provider or model changes, the server detects the mismatch and re-embeds stored chunks.
 
 ---
 
@@ -291,8 +289,8 @@ Environment variables are set in `docker-compose.yml` (they override anything in
 | `DB_PORT` | `5432` | Postgres port |
 | `DB_DATABASE` | `rag` | Database name |
 | `DB_USERNAME` / `DB_PASSWORD` | `rag` / `secret` | Database credentials |
-| `RAG_EMBEDDING_PROVIDER` | `local-embedder` | Prism provider used for embedding requests |
-| `RAG_EMBED_URL` | `http://embedder:8000/v1` | Embedding endpoint (sidecar or external) |
+| `RAG_EMBEDDING_PROVIDER` | `local-embedder` | Laravel AI embedding provider |
+| `RAG_EMBED_URL` | `http://embedder:8000/v1` | Local sidecar embedding endpoint |
 | `RAG_EMBEDDING_MODEL` | `paraphrase-multilingual-mpnet-base-v2` | Embedding model name |
 | `RAG_EMBEDDING_DIM` | `768` | Embedding dimension; persistence currently requires 768 |
 | `RAG_SEARCH_MIN_SCORE` | `0.30` | Minimum score cutoff for search results |
@@ -311,7 +309,7 @@ Environment variables are set in `docker-compose.yml` (they override anything in
 | `web` | `nginx:alpine` | `8090:80` | nginx reverse proxy |
 | `worker` | `Dockerfile.app` | — | Queue worker (embedding + indexing jobs) |
 | `postgres` | `pgvector/pgvector:pg16` | `5433:5432` | Postgres + pgvector |
-| `embedder` | `services/embedder/` (FastAPI) | `8001:8000` | Embedding sidecar (optional if using external API) |
+| `embedder` | `services/embedder/` (FastAPI) | `8001:8000` | Embedding sidecar (optional when another provider is configured) |
 
 ### Common commands
 
