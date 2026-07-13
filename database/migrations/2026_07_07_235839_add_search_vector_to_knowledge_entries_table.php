@@ -17,22 +17,9 @@ return new class extends Migration
         // Function to compute search_vector from title + content + tag names
         DB::statement("
             CREATE OR REPLACE FUNCTION knowledge_entries_search_vector_update() RETURNS trigger AS \$\$
-            DECLARE
-                search_config regconfig;
             BEGIN
-                SELECT CASE
-                    WHEN replace(lower(coalesce(projects.language, '')), '_', '-') LIKE 'pt%'
-                        THEN 'portuguese'::regconfig
-                    WHEN replace(lower(coalesce(projects.language, '')), '_', '-') LIKE 'es%'
-                        THEN 'spanish'::regconfig
-                    ELSE 'english'::regconfig
-                END
-                INTO search_config
-                FROM projects
-                WHERE projects.id = NEW.project_id;
-
                 NEW.search_vector :=
-                    to_tsvector(coalesce(search_config, 'english'::regconfig),
+                    to_tsvector('english',
                         coalesce(NEW.title, '') || ' ' ||
                         coalesce(NEW.content, '') || ' ' ||
                         coalesce(

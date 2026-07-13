@@ -90,7 +90,9 @@ describe('HybridSearcher', function () {
     });
 
     it('uses the project language for keyword search', function () {
-        $this->project->update(['language' => 'pt']);
+        DB::table('projects')
+            ->where('id', $this->project->id)
+            ->update(['language' => 'pt']);
 
         $entry = KnowledgeEntry::create([
             'project_id' => $this->project->id,
@@ -100,6 +102,42 @@ describe('HybridSearcher', function () {
         ]);
 
         $results = (new HybridSearcher(expandGraph: false))->search('ficar', $this->project->id);
+
+        expect($results)->not->toBeEmpty()
+            ->and($results[0]->entryId)->toBe($entry->id)
+            ->and($results[0]->matchedBy)->toContain('keyword');
+    });
+
+    it('rebuilds keyword vectors when the project language changes', function () {
+        $entry = KnowledgeEntry::create([
+            'project_id' => $this->project->id,
+            'title' => 'Rotas portuguesas',
+            'content' => 'As migrações ficam na pasta database.',
+            'status' => 'approved',
+        ]);
+
+        DB::table('projects')
+            ->where('id', $this->project->id)
+            ->update(['language' => 'pt']);
+
+        $results = (new HybridSearcher(expandGraph: false))->search('ficar', $this->project->id);
+
+        expect($results)->not->toBeEmpty()
+            ->and($results[0]->entryId)->toBe($entry->id)
+            ->and($results[0]->matchedBy)->toContain('keyword');
+    });
+
+    it('uses English for prefix-like unknown project languages', function () {
+        $this->project->update(['language' => 'ptfoo']);
+
+        $entry = KnowledgeEntry::create([
+            'project_id' => $this->project->id,
+            'title' => 'Rotas portuguesas',
+            'content' => 'As migrações ficam na pasta database.',
+            'status' => 'approved',
+        ]);
+
+        $results = (new HybridSearcher(expandGraph: false))->search('ficam', $this->project->id);
 
         expect($results)->not->toBeEmpty()
             ->and($results[0]->entryId)->toBe($entry->id)
