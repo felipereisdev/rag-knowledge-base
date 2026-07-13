@@ -102,14 +102,21 @@ class HybridSearcher
 
         $vector = '['.implode(',', $queryVector).']';
 
-        $sql = 'SELECT
+        // OFFSET 0 keeps the approval lookup correlated so PostgreSQL drives
+        // the bounded CTE from the HNSW index instead of flattening it into a
+        // join that requires sorting every eligible chunk.
+        $sql = 'WITH ann_candidates AS MATERIALIZED (
+                SELECT
                     ce.entry_id,
                     ce.chunk_index,
                     ce.content,
-                    1 - (ce.embedding <=> ?::vector) AS semantic_similarity
+                    ce.embedding <=> ?::vector AS distance
                 FROM chunk_embeddings ce
-                JOIN knowledge_entries ke ON ke.id = ce.entry_id
-                WHERE ke.status = \'approved\'';
+                WHERE EXISTS (
+                    SELECT 1
+                    FROM knowledge_entries ke
+                    WHERE ke.id = ce.entry_id
+                      AND ke.status = \'approved\'';
 
         $bindings = [$vector];
 
@@ -123,11 +130,22 @@ class HybridSearcher
             $bindings[] = $category;
         }
 
-        $sql .= " AND (ce.embedding <=> ?::vector) <= ?
+        $sql .= " OFFSET 0
+                )
+                  AND (ce.embedding <=> ?::vector) <= ?
                   AND (ce.embedding <=> ?::vector) > '-Infinity'::float8
                   AND (ce.embedding <=> ?::vector) < 'Infinity'::float8
-                  ORDER BY ce.embedding <=> ?::vector ASC, ce.entry_id ASC, ce.chunk_index ASC
-                  LIMIT ?";
+                ORDER BY ce.embedding <=> ?::vector ASC
+                LIMIT ?
+            )
+            SELECT
+                entry_id,
+                chunk_index,
+                content,
+                1 - distance AS semantic_similarity,
+                distance
+            FROM ann_candidates
+            ORDER BY distance ASC, entry_id ASC, chunk_index ASC";
         array_push(
             $bindings,
             $vector,
@@ -137,50 +155,69 @@ class HybridSearcher
             $vector,
         );
 
-        $results = [];
-        $acceptedRank = 0;
-        $candidateLimit = max(1, $this->vectorTopK * 4);
+        return DB::transaction(function () use ($sql, $bindings): array {
+            DB::statement('SET LOCAL hnsw.iterative_scan = strict_order');
 
-        while (true) {
-            $rows = DB::select($sql, [...$bindings, $candidateLimit]);
+            $results = [];
+            $acceptedRank = 0;
+            $candidateLimit = max(1, $this->vectorTopK * 4);
 
-            foreach ($rows as $row) {
-                $rawScore = is_string($row->semantic_similarity)
-                    ? strtoupper($row->semantic_similarity)
-                    : (string) $row->semantic_similarity;
+            while (true) {
+                // The lookahead row proves whether the boundary-distance tie
+                // group is complete before deterministic PHP deduplication.
+                $fetchLimit = $candidateLimit + 1;
+                $rows = DB::select($sql, [...$bindings, $fetchLimit]);
+                $fetchedCount = count($rows);
 
-                if (in_array($rawScore, ['NAN', 'INF', '-INF'], true)) {
-                    continue;
+                if ($fetchedCount > $candidateLimit) {
+                    $boundaryDistance = (string) $rows[$candidateLimit - 1]->distance;
+                    $extraDistance = (string) $rows[$candidateLimit]->distance;
+
+                    if ($boundaryDistance === $extraDistance) {
+                        $candidateLimit *= 2;
+
+                        continue;
+                    }
                 }
 
-                $score = (float) $row->semantic_similarity;
-                if (! is_finite($score)) {
-                    continue;
+                foreach (array_slice($rows, 0, $candidateLimit) as $row) {
+                    $rawScore = is_string($row->semantic_similarity)
+                        ? strtoupper($row->semantic_similarity)
+                        : (string) $row->semantic_similarity;
+
+                    if (in_array($rawScore, ['NAN', 'INF', '-INF'], true)) {
+                        continue;
+                    }
+
+                    $score = (float) $row->semantic_similarity;
+                    if (! is_finite($score)) {
+                        continue;
+                    }
+
+                    $entryId = (int) $row->entry_id;
+                    if (isset($results[$entryId])) {
+                        continue;
+                    }
+
+                    $results[$entryId] = [
+                        'score' => $score,
+                        'rank' => $acceptedRank++,
+                        'chunkIndex' => (int) $row->chunk_index,
+                        'chunkContent' => (string) $row->content,
+                    ];
+
+                    if (count($results) >= $this->vectorTopK) {
+                        return $results;
+                    }
                 }
 
-                $entryId = (int) $row->entry_id;
-                if (isset($results[$entryId])) {
-                    continue;
-                }
-
-                $results[$entryId] = [
-                    'score' => $score,
-                    'rank' => $acceptedRank++,
-                    'chunkIndex' => (int) $row->chunk_index,
-                    'chunkContent' => (string) $row->content,
-                ];
-
-                if (count($results) >= $this->vectorTopK) {
+                if ($fetchedCount < $fetchLimit) {
                     return $results;
                 }
-            }
 
-            if (count($rows) < $candidateLimit) {
-                return $results;
+                $candidateLimit *= 2;
             }
-
-            $candidateLimit *= 2;
-        }
+        });
     }
 
     /**

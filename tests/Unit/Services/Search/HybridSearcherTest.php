@@ -5,6 +5,7 @@ use App\Models\KnowledgeEntry;
 use App\Models\Project;
 use App\Models\Relation;
 use App\Services\Search\HybridSearcher;
+use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
 use Laravel\Ai\Embeddings;
@@ -553,5 +554,100 @@ describe('HybridSearcher', function () {
 
         expect(array_map(fn ($result) => $result->entryId, $results))
             ->toBe([$crowdingEntry->id, $nextEntry->id]);
+    });
+
+    it('uses the hnsw index for vector candidate ordering', function () {
+        $queryVector = array_fill(0, 768, 0.0);
+        $queryVector[0] = 1.0;
+        Embeddings::fake([[$queryVector]]);
+
+        $entry = KnowledgeEntry::create([
+            'project_id' => $this->project->id,
+            'title' => 'HNSW candidate',
+            'content' => 'The vector query should use the HNSW index.',
+            'status' => 'approved',
+        ]);
+        DB::table('chunk_embeddings')->insert([
+            'entry_id' => $entry->id,
+            'project_id' => $this->project->id,
+            'chunk_index' => 0,
+            'content' => 'The vector query should use the HNSW index.',
+            'embedding' => '['.implode(',', $queryVector).']',
+        ]);
+
+        $vectorQuery = null;
+        DB::listen(function (QueryExecuted $query) use (&$vectorQuery): void {
+            if ($vectorQuery === null && str_contains($query->sql, 'chunk_embeddings ce')) {
+                $vectorQuery = $query;
+            }
+        });
+
+        (new HybridSearcher(
+            minScore: 0.3,
+            expandGraph: false,
+            vectorTopK: 1,
+        ))->search('vectoronlyterm', $this->project->id);
+
+        expect($vectorQuery)->not->toBeNull();
+
+        $planRows = DB::transaction(function () use ($vectorQuery): array {
+            DB::statement('SET LOCAL enable_seqscan = off');
+
+            return DB::select('EXPLAIN (COSTS OFF) '.$vectorQuery->sql, $vectorQuery->bindings);
+        });
+        $plan = implode("\n", array_map(
+            fn (object $row): string => (string) ((array) $row)['QUERY PLAN'],
+            $planRows,
+        ));
+
+        expect($plan)->toContain('idx_chunk_embeddings_vector');
+    });
+
+    it('completes hnsw boundary ties before deterministic entry ordering', function () {
+        $queryVector = array_fill(0, 768, 0.0);
+        $queryVector[0] = 1.0;
+        Embeddings::fake([[$queryVector]]);
+
+        $lowerIdEntry = KnowledgeEntry::create([
+            'project_id' => $this->project->id,
+            'title' => 'Lower ID tied entry',
+            'content' => 'This tied entry should sort first by entry ID.',
+            'status' => 'approved',
+        ]);
+        $crowdingEntry = KnowledgeEntry::create([
+            'project_id' => $this->project->id,
+            'title' => 'Earlier indexed tied chunks',
+            'content' => 'These chunks fill the initial ANN boundary.',
+            'status' => 'approved',
+        ]);
+
+        $chunks = [];
+        for ($chunkIndex = 0; $chunkIndex < 8; $chunkIndex++) {
+            $chunks[] = [
+                'entry_id' => $crowdingEntry->id,
+                'project_id' => $this->project->id,
+                'chunk_index' => $chunkIndex,
+                'content' => "Earlier indexed tied chunk {$chunkIndex}.",
+                'embedding' => '['.implode(',', $queryVector).']',
+            ];
+        }
+        $chunks[] = [
+            'entry_id' => $lowerIdEntry->id,
+            'project_id' => $this->project->id,
+            'chunk_index' => 0,
+            'content' => 'Later indexed but lower ID tied chunk.',
+            'embedding' => '['.implode(',', $queryVector).']',
+        ];
+        DB::table('chunk_embeddings')->insert($chunks);
+
+        $results = (new HybridSearcher(
+            limit: 1,
+            minScore: 0.3,
+            expandGraph: false,
+            vectorTopK: 1,
+        ))->search('vectoronlyterm', $this->project->id);
+
+        expect($results)->toHaveCount(1)
+            ->and($results[0]->entryId)->toBe($lowerIdEntry->id);
     });
 });
