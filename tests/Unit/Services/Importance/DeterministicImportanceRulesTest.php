@@ -141,7 +141,7 @@ it('does not veto a question that is followed by its answer', function () {
 });
 
 it('hard-vetoes an agent-operation message with no knowledge assertion', function () {
-    $evaluation = evaluateRules('Let me read the RetryPolicy file and run the test suite for the shipping module now.');
+    $evaluation = evaluateRules('Let me open the file.');
 
     expect($evaluation->vetoed)->toBeTrue()
         ->and(triggeredRuleIds($evaluation))->toContain('agent_operation_only');
@@ -171,16 +171,69 @@ it('still hard-vetoes genuine agent-operation narration about tests and tool cal
         ->and(triggeredRuleIds($evaluation))->toContain('agent_operation_only');
 });
 
+it('does not veto a first-person clause with anything at all after its object', function (string $content) {
+    // The round-5 inversion, and the test that ends four rounds of the same
+    // losing game.
+    //
+    // Rounds 1-4 defined shape-(a) narration by enumerating what BREAKS it: a
+    // marker list, then a progress-tail reader, then a class of clause-opening
+    // separators (',' ';' ':' en-dash, em-dash) plus a head-noun anchor. Each
+    // round, an adversarial reviewer found real facts hard-vetoed through the
+    // separator that had NOT been enumerated -- '(', '[', a quote, the ASCII
+    // '--', '/', a newline -- and the head-noun anchor additionally failed
+    // whenever the true head noun ended the sentence ('I updated the log
+    // format.'). A blacklist of the ways a sentence can carry a fact cannot be
+    // completed. The blacklist WAS the bug.
+    //
+    // v5 inverts the predicate: shape (a) is a WHITELIST -- a first-person
+    // operational opener, a tooling-artefact object, terminal punctuation, END.
+    // Any residual content whatsoever means the sentence is not a bare
+    // operational clause and it escapes to the judge. Nothing is enumerated, so
+    // there is nothing left to under-list. Every case below escapes for the same
+    // single reason.
+    $evaluation = evaluateRules($content);
+
+    expect($evaluation->vetoed)->toBeFalse(
+        'False-vetoed real knowledge by: '.implode(', ', triggeredRuleIds($evaluation)),
+    );
+})->with([
+    // The nine confirmed round-4 false vetoes, verbatim.
+    'parenthetical tail' => 'I checked the logs (the worker restarts on every deploy).',
+    'parenthetical tail, migration' => 'I read the diff (the migration runs concurrently).',
+    'bracket tail' => 'I read the config file [the parser lowercases every key].',
+    'ASCII double-dash tail' => 'I checked the logs -- the worker restarts on every deploy.',
+    'pt: parenthetical tail' => 'Verifiquei os logs (o worker reinicia a cada deploy).',
+    'pt: parenthetical tail, parser' => 'Li o ficheiro (o parser normaliza cada chave).',
+    // The sentence-final head-noun bug: the '.' inside the v4 anchor's trailing
+    // exclusion class also matched the sentence-final period, so the "another
+    // noun follows" test could never fire and the anchor wrongly held. v5 has no
+    // anchor: 'format' is simply residual content after the object 'the log'.
+    'sentence-final head noun "format"' => 'I updated the log format.',
+    'sentence-final head noun "algorithm"' => 'I updated the diff algorithm.',
+    'sentence-final head noun "permissions"' => 'I checked the file permissions.',
+    'sentence-final head noun "hunks"' => 'I read the diff hunks.',
+    // Fresh separators nobody enumerated. Under v5 nobody has to.
+    'quoted tail' => 'I read the output "the parser lowercases every key".',
+    'slash tail' => 'I checked the logs / the worker restarts on every deploy.',
+    'newline tail inside one sentence' => "I checked the logs\nthe worker restarts on every deploy.",
+    'no terminal punctuation at all' => 'I checked the logs and the worker restarts on every deploy',
+    'code path after the object' => 'I opened the file app/Services/Foo.php and the importer reads it at boot.',
+    'pt: bracket tail' => 'Li o diff [a migração corre concorrente].',
+    'pt: ASCII double-dash tail' => 'Corri os testes -- a base sqlite corrompe em paralelo.',
+    'pt: newline tail' => "Corri os testes\no seeder popula o tenant de demo.",
+    'pt: quoted tail' => 'Li o output "o parser normaliza cada chave".',
+    'pt: sentence-final head noun "formato"' => 'Atualizei o formato dos logs.',
+    'pt: sentence-final head noun "permissões"' => 'Verifiquei as permissões do ficheiro.',
+]);
+
 it('does not veto a first-person clause that opens a further finite clause', function (string $content) {
-    // Regression for review finding 1 (round 4): shape (b) always required the
-    // status phrase to be the WHOLE sentence, but shape (a) had no tail
-    // discipline at all, so a first-person narration clause swallowed the
-    // coordinated declarative clause that carried the actual knowledge. Every
+    // Regression for review finding 1 (round 4), kept as-is under the round-5
+    // inversion: a coordinated or subordinated clause is just one more kind of
+    // residual content after the object, and residual content escapes. Every
     // sentence below was hard-vetoed by v3 unless the tail's verb happened to be
     // in GENERAL_ASSERTION_MARKERS -- which made a hand-tuned word list the only
-    // thing between real knowledge and destruction. v4 escapes on the GRAMMAR:
-    // a further finite clause makes the sentence ambiguous, and ambiguous text
-    // escapes. Nothing was added to any lexicon to make these pass.
+    // thing between real knowledge and destruction. Nothing was added to any
+    // lexicon to make these pass.
     $evaluation = evaluateRules($content);
 
     expect($evaluation->vetoed)->toBeFalse(
@@ -223,9 +276,11 @@ it('does not veto a first-person clause whose object head is not a tooling artef
     // FIRST noun was a tooling word satisfied "tooling artefact object" -- and
     // the constraint failed at exactly its stated purpose. 'the file' is a
     // tooling artefact; 'the file naming convention' is a project convention.
-    // v4 anchors the keyword as the HEAD of the object: it may only be followed
-    // by end-of-clause, punctuation, a closed-class function word, or a code-like
-    // apposition -- never by another plain noun.
+    //
+    // v4 fixed this with a head-noun anchor whose trailing exclusion class was
+    // itself buggy. v5 deletes the anchor entirely: the second noun is residual
+    // content after the object, and residual content escapes. No noun-phrase
+    // analysis is performed anywhere any more.
     $evaluation = evaluateRules($content);
 
     expect($evaluation->vetoed)->toBeFalse(
@@ -329,10 +384,19 @@ it('does not veto knowledge that merely ends with a status line', function (stri
 ]);
 
 it('hard-vetoes agent narration with no knowledge assertion', function (string $content) {
-    // The unambiguous case the veto is FOR: a first-person operational subject
-    // over a tooling artefact, or a terse status phrase that is the whole
-    // sentence. Pins the rule from the other side, so a precision fix cannot
-    // silently delete the veto.
+    // The unambiguous case the veto is FOR, and its exact reach after the round-5
+    // inversion: a BARE first-person operational clause over a tooling artefact
+    // with nothing after the object, a terse status phrase that is the whole
+    // sentence, or content made entirely of those. Pins the rule from the other
+    // side, so a precision fix cannot silently turn it into dead code.
+    //
+    // Everything with a tail is GONE from this list on purpose -- see the report:
+    // "I have updated the file app/Services/Foo.php with the new signature.",
+    // "I will now run the test suite for the shipping module.", "I'm going to open
+    // the config file and check the retry limit." and their PT twins now escape to
+    // the judge, which scores them low. A missed veto costs one judge call; a false
+    // veto destroys knowledge forever, and every attempt to keep those inside the
+    // veto is what produced four rounds of false vetoes.
     $evaluation = evaluateRules($content);
 
     expect($evaluation->vetoed)->toBeTrue()
@@ -343,19 +407,21 @@ it('hard-vetoes agent narration with no knowledge assertion', function (string $
     'chain of terse status phrases' => 'Ran the tests, everything is green.',
     'subjectless past-tense tool run' => 'Ran the tests.',
     'bare first-person tool run' => 'I ran the tests.',
+    'bare first-person tool run, unterminated' => 'I ran the tests',
     'bare let-form over a tooling artefact' => 'Let me open the file.',
-    'first-person progressive over a tooling artefact' => "I'm checking the file now.",
-    'first-person mutation of a tooling artefact' => 'I have updated the file app/Services/Foo.php with the new signature.',
-    'announced intent' => 'I will now run the test suite for the shipping module.',
-    // 'and' here coordinates a second BARE infinitive under the same subject. A
-    // bare infinitive cannot state a fact, so it is not a further finite clause
-    // and the tail discipline correctly leaves this as narration.
-    'coordinated bare infinitive under an intent' => "I'm going to open the config file and check the retry limit.",
-    'coordinated bare infinitive under a let-form' => 'Let me read the RetryPolicy file and run the test suite for the shipping module now.',
+    "bare let's-form" => "Let's run the tests.",
+    'bare first-person progressive' => "I'm checking the file.",
+    'bare first-person mutation' => 'I updated the file.',
+    'bare announced intent' => 'I will run the tests.',
+    'auxiliary licensing a bare verb' => "I've run the test suite.",
+    'first-person-singular bare read' => 'I read the diff.',
     'every sentence is narration' => 'I ran the tests. All tests pass. Done.',
+    'bulleted status lines' => "- Ran the tests.\n- All tests pass.",
     'pt first-person past' => 'Executei os testes.',
     'pt bare first-person past' => 'Corri os testes.',
-    'pt coordinated bare infinitive' => 'Vou executar os testes e depois atualizar o ficheiro.',
+    'pt bare progressive' => 'Estou a ler o ficheiro.',
+    'pt bare announced intent' => 'Vou executar os testes.',
+    'pt bare let-form' => 'Deixa-me ler o ficheiro.',
 ]);
 
 it('rewards an explicit decision', function () {
@@ -482,7 +548,7 @@ it('exposes stable identifiers and concise public reasons for every triggered ru
         evaluateRules(''),
         evaluateRules('TODO. TBD. N/A. Placeholder.'),
         evaluateRules('How should we handle retries on the shipping API? Should the worker back off?'),
-        evaluateRules('Let me read the RetryPolicy file and run the test suite for the shipping module now.'),
+        evaluateRules('Let me open the file.'),
         evaluateRules(baselineContent()),
         evaluateRules('Maybe things are broken for now.'),
     ];
@@ -576,7 +642,7 @@ it('hard-vetoes every unambiguous agent-chatter probe', function () {
 });
 
 it('does not depend on the knowledge-assertion lexicon for its precision', function () {
-    // The round-4 invariant, and the one that keeps rounds 1-3 from repeating.
+    // The structural invariant, and the one that keeps rounds 1-4 from repeating.
     //
     // Before v4 the assertion lexicon was the LAST line of defence: a first-person
     // sentence that reported a fact was structurally "narration", and only a verb
@@ -585,11 +651,13 @@ it('does not depend on the knowledge-assertion lexicon for its precision', funct
     // Portuguese half of that list was materially thinner, so PT knowledge was
     // systematically more exposed than the identical EN sentence.
     //
-    // v4 makes the escape structural, which demotes the lexicon to a genuine
-    // SECOND net. This test asserts exactly that: the narration GRAMMAR alone,
-    // with the lexicon never consulted, already rejects every probe that must not
-    // be vetoed. If this fails, someone has re-introduced a structural hole and
-    // is relying on the word list to hide it -- fix the grammar, not the list.
+    // The v5 whitelist makes the escape purely structural, which demotes the
+    // lexicon to a genuine SECOND net. This test asserts exactly that: the
+    // narration GRAMMAR alone, with hasKnowledgeAssertion() never consulted,
+    // already rejects every probe that must not be vetoed AND every reviewed
+    // must-keep fixture. If this fails, someone has re-introduced a structural
+    // hole and is relying on the word list to hide it -- fix the grammar, never
+    // the list.
     $rules = new DeterministicImportanceRules;
 
     $isNarration = new ReflectionMethod($rules, 'isAgentOperationNarration');
@@ -602,11 +670,19 @@ it('does not depend on the knowledge-assertion lexicon for its precision', funct
             "Veto probe [{$probe['id']}] is structurally agent narration, so only the knowledge-assertion lexicon keeps it. The GRAMMAR must reject it -- do not widen the lexicon.",
         );
     }
+
+    foreach (mustKeepFixtures() as $fixture) {
+        $content = $haystack->invoke($rules, $fixture['candidate']['content']);
+
+        expect($isNarration->invoke($rules, $content))->toBeFalse(
+            "Must-keep fixture [{$fixture['id']}] is structurally agent narration, so only the knowledge-assertion lexicon keeps it. The GRAMMAR must reject it -- do not widen the lexicon.",
+        );
+    }
 });
 
 it('pins both directions of the agent-operation veto with enough probes', function () {
-    expect(count(vetoProbeKnowledge()))->toBeGreaterThanOrEqual(60)
-        ->and(count(vetoProbeChatter()))->toBeGreaterThanOrEqual(18);
+    expect(count(vetoProbeKnowledge()))->toBeGreaterThanOrEqual(80)
+        ->and(count(vetoProbeChatter()))->toBeGreaterThanOrEqual(24);
 
     foreach ([...vetoProbeKnowledge(), ...vetoProbeChatter()] as $probe) {
         expect(trim($probe['id']))->not->toBeEmpty()

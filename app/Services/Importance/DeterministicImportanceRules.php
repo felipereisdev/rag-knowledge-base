@@ -23,7 +23,7 @@ namespace App\Services\Importance;
  */
 final class DeterministicImportanceRules
 {
-    public const string VERSION = 'v4';
+    public const string VERSION = 'v5';
 
     /**
      * A hard veto forces the final score to zero. It is exactly the negative of
@@ -111,74 +111,69 @@ final class DeterministicImportanceRules
      * call on text the judge will score low anyway. The asymmetry is the whole
      * design constraint, so ambiguous text is deliberately allowed to escape.
      *
-     * v1 matched the markers as free substrings anywhere in the content. v2
-     * anchored them grammatically but still tried to read a progress report off
-     * the TAIL of a gerund-subject sentence. v3 deleted the gerund branch and
-     * the whole progress-tail machinery, because a gerund subject over the
-     * agent's own tooling is not separable from a statement about the system.
+     * v1..v4 all defined narration by enumerating what BREAKS it: a marker list,
+     * then a progress-tail reader, then a list of clause-opening separators
+     * (`,` `;` `:` en-dash, em-dash) plus a head-noun anchor. Every round, an
+     * adversarial reviewer found real facts hard-vetoed through the separator
+     * that had not been enumerated ("I checked the logs (the worker restarts on
+     * every deploy).", "I read the config file [the parser lowercases every
+     * key].", "I checked the logs -- the worker restarts on every deploy."), and
+     * the head-noun anchor had its own hole. A blacklist of the ways a sentence
+     * can carry a fact cannot be completed; the next round always finds `/`, `«`
+     * or a newline. The blacklist WAS the bug.
      *
-     * v4 removes the last two structural holes, and removes them by
-     * construction rather than by widening any word list:
+     * v5 inverts the predicate. Shape (a) is now a WHITELIST, and it is the same
+     * whole-sentence discipline shape (b) has always had:
      *
-     *   - TAIL DISCIPLINE. Shape (b) always required the status phrase to be the
-     *     WHOLE sentence. Shape (a) did not, so a narration clause could swallow
-     *     a coordinated declarative clause carrying the actual knowledge ("I read
-     *     the config file at boot and it is only parsed once."). In v4 shape (a)
-     *     is narration only when it is the BARE operational clause: any FURTHER
-     *     FINITE CLAUSE in the tail — opened by `,` `;` `:` `—`, by a coordinator
-     *     that is not coordinating another bare operational verb phrase, or by a
-     *     subordinator/relativiser — makes the sentence ambiguous, and ambiguous
-     *     text escapes (FURTHER_CLAUSE_PATTERN). "Let me read the file and run
-     *     the suite." is still narration: `and` there coordinates a second bare
-     *     infinitive under the same subject, which cannot state a fact.
+     *     ^ <first-person operational opener> <tooling-artefact object> <terminal punctuation only> $
      *
-     *   - HEAD-NOUN ANCHORING. TOOLING_OBJECT closed on a bare word boundary, so
-     *     any noun phrase whose FIRST noun was a tooling word counted as a
-     *     tooling artefact ("the file naming convention", "the test database
-     *     credentials"). In v4 the tooling keyword must be the HEAD of the
-     *     object: it may only be followed by end-of-clause, punctuation, a
-     *     closed-class function word (preposition / coordinator / adverb), or a
-     *     code-like apposition ("the file app/Services/Foo.php") — never by
-     *     another plain noun. `the file` / `the tests` / `the logs` qualify;
-     *     `the file naming convention` / `the log format` / `the diff algorithm`
-     *     do not, so they escape.
+     * NOTHING may follow the object. There is no separator class to enumerate and
+     * nothing to under-list. Any residual content whatsoever — a parenthetical, a
+     * bracket, a quote, an ASCII `--`, a slash, a coordinated clause, a
+     * preposition, a second noun, a code path, an adverb — means the sentence is
+     * not a bare operational clause, and it escapes to the semantic judge.
      *
-     * Together these make the safety net a genuine SECOND line of defence rather
-     * than the only one: a first-person sentence that carries a fact now escapes
-     * on its grammar, without any assertion verb having to be listed anywhere.
+     * That kills, by construction and identically in both languages, every tail
+     * class listed or unlisted, and the sentence-final head-noun bug too: in "I
+     * updated the log format." the object `the log` is followed by `format`, which
+     * is residual content, so the sentence escapes without any noun-phrase
+     * analysis at all.
      *
-     * `agent_operation_only` therefore fires only when ALL of the following hold:
+     * `agent_operation_only` fires only when ALL of the following hold:
      *
      *   1. the candidate asserts no knowledge anywhere (hasKnowledgeAssertion()
      *      over the whole text — kept deliberately broad; it can only ever WEAKEN
-     *      a veto, so widening it is the safe direction);
+     *      a veto, so widening it is the safe direction). Since v5 the grammar
+     *      alone already rejects every probe in the calibration corpus, so this is
+     *      a genuine SECOND net rather than the last line of defence;
      *   2. EVERY sentence of the content is agent narration, not merely some
-     *      sentence. A knowledge note with a trailing "All tests pass." keeps
-     *      its knowledge, which kills the whole class of poisoning-by-one-line;
-     *   3. a sentence is narration only in one of two shapes:
-     *      (a) a SENTENCE-INITIAL first-person operational clause over a TOOLING
-     *          artefact, WITH NO FURTHER FINITE CLAUSE — "I ran the tests.",
-     *          "I'm checking the file now.", "Let me open the file."
+     *      sentence. A knowledge note with a trailing "All tests pass." keeps its
+     *      knowledge, which kills the whole class of poisoning-by-one-line;
+     *   3. a sentence is narration only in one of two shapes, and both are now
+     *      whole-sentence shapes:
+     *      (a) a first-person operational clause over a tooling artefact and
+     *          NOTHING ELSE — "I ran the tests.", "I'm checking the file.",
+     *          "Let me open the file.", "Corri os testes."
      *          (FIRST_PERSON_OPERATION_PATTERN, PT_FIRST_PERSON_OPERATION_PATTERN,
-     *          LET_NARRATION_PATTERN, PT_LET_NARRATION_PATTERN + the tail check).
-     *          The object constraint lets first-person narration about a SYSTEM
-     *          thing escape ("I added a unique index on chunks.hash"); the tail
-     *          check lets first-person narration that REPORTS something escape
-     *          ("I checked the logs and the worker restarts on every deploy.");
-     *      (b) a terse status phrase that is the ENTIRE sentence, with no
-     *          declarative tail — "All tests pass.", "Done.", "Ran the tests."
+     *          LET_NARRATION_PATTERN, PT_LET_NARRATION_PATTERN);
+     *      (b) a terse status phrase, or a comma/and-joined chain of them, that is
+     *          the ENTIRE sentence — "All tests pass.", "Done.", "Ran the tests."
      *          (AGENT_STATUS_PHRASES).
      *
+     * The accepted, deliberate recall loss: the veto now reaches only BARE
+     * operational clauses and content made entirely of them. Chatter with any tail
+     * at all ("I ran the tests and all tests pass now.", "I read the diff (nothing
+     * changed).") escapes to the judge, which scores it low. That is the correct
+     * trade for a hard veto and it is the end state of this rule, not a gap to be
+     * closed later.
+     *
      * Tense discipline inside shape (a): the convention voice is first-person
-     * PLURAL present ("We run model-backed jobs on the classification queue.",
-     * "We read the config file at boot."), so bare present-tense `we run` / `we
-     * read` are NOT narration. `we ran`, `we're reading`, `we've run` are. Bare
-     * `I read the diff.` IS narration: English `read` is a present/past homograph
-     * and no project convention is ever authored in the first-person singular, so
-     * the singular license is the only way that past tense is recoverable. With
-     * the tail discipline in place that license can no longer destroy a fact —
-     * any `I read …` sentence that reports something has a further finite clause
-     * and escapes.
+     * PLURAL present ("We run model-backed jobs on the classification queue."), so
+     * bare present-tense `we run` / `we read` are NOT narration; `we ran`, `we're
+     * reading`, `we've run` are. Bare `I read the diff.` IS narration: English
+     * `read` is a present/past homograph and no project convention is ever authored
+     * in the first-person singular. Under the whitelist that license is harmless —
+     * an `I read …` sentence that reports anything has residual content and escapes.
      */
     private const string TOOLING_OBJECT = '
         (?:(?:the|a|an|this|that|these|those|our|my|its)\s+)?
@@ -186,77 +181,17 @@ final class DeterministicImportanceRules
         (?:files?|tests?|test\s+suite|suite|diff|patch|stub|snippet|logs?|output|codebase
            |linter|command|script|pest|phpstan|pint|phpunit)
         (?![\p{L}\p{N}])
-        '.self::HEAD_NOUN_ANCHOR_EN.'
     ';
 
     /**
-     * The head-noun anchor. The tooling keyword only counts when nothing that
-     * looks like a further NOUN follows it: the next token must be punctuation,
-     * end of sentence, a closed-class function word, or a code-like apposition
-     * (a token carrying `/`, `.`, `_` or `-`, i.e. a path or an identifier).
-     *
-     * These are closed function-word classes (prepositions, coordinators,
-     * subordinators, a handful of manner/time adverbs), not a semantic lexicon:
-     * nothing here says what a sentence MEANS, only where its object stops.
-     * Under-listing a follower can only make the object fail to match, which
-     * makes the sentence escape — the safe direction.
+     * The end of a shape-(a) sentence. Only whitespace and punctuation may follow
+     * the tooling object: no letter and no digit, in any script. This single class
+     * replaces the whole v4 tail apparatus (FURTHER_CLAUSE_PATTERN plus the two
+     * head-noun anchors and their closed-class follower lists) and cannot be
+     * defeated by an unlisted separator, because it lists nothing — it requires
+     * the sentence to be OVER.
      */
-    private const string OBJECT_HEAD_FOLLOWERS_EN = '
-        (?:in|on|at|to|from|for|with|without|by|of|about|after|before|under|over|into|onto
-           |against|between|during|per|via|through|across|until|within|above|below|around
-           |and|or|but|so|then|that|which|who|whose|where|when|while|because|since|if|unless
-           |though|although|as|than
-           |now|again|already|first|next|finally|quickly|just|twice|once|locally|successfully)
-    ';
-
-    private const string HEAD_NOUN_ANCHOR_EN = '
-        (?!\s+(?!'.self::OBJECT_HEAD_FOLLOWERS_EN.'(?![\p{L}\p{N}]))\p{L}+(?![\p{L}\p{N}.\/_-]))
-    ';
-
-    /** The Portuguese head-noun anchor. Same closed-class discipline. */
-    private const string PT_OBJECT_HEAD_FOLLOWERS = '
-        (?:de|do|da|dos|das|em|no|na|nos|nas|num|numa|para|com|por|pelo|pela|a|ao|aos|à|às
-           |sem|sob|sobre|entre|até|desde|antes|depois|contra
-           |e|ou|mas|que|se|quando|enquanto|porque|onde|cujo|cuja|pois
-           |agora|já|novamente|primeiro|também|outra|localmente)
-    ';
-
-    private const string PT_HEAD_NOUN_ANCHOR = '
-        (?!\s+(?!'.self::PT_OBJECT_HEAD_FOLLOWERS.'(?![\p{L}\p{N}]))\p{L}+(?![\p{L}\p{N}.\/_-]))
-    ';
-
-    /**
-     * A FURTHER FINITE CLAUSE in the tail of a shape-(a) sentence. Its presence
-     * makes the sentence ambiguous between narration and a report that carries a
-     * fact, so it escapes the veto.
-     *
-     * A further clause is opened by clause punctuation (`,` `;` `:` `—`), by a
-     * subordinator / relativiser, or by a coordinator — EXCEPT when the
-     * coordinator is coordinating another BARE operational verb phrase under the
-     * same subject ("Let me read the file and run the suite.", "I'm going to open
-     * the config file and check the retry limit.", "Vou executar os testes e
-     * depois atualizar o ficheiro."). A bare infinitive cannot state a fact, so
-     * that coordination stays narration; anything else is let go.
-     */
-    private const string FURTHER_CLAUSE_PATTERN = '/
-        [,;:\x{2013}\x{2014}]
-        |
-        (?<![\p{L}\p{N}])
-        (?:
-            (?:and|e)
-            (?!\s+
-                (?:(?:then|now|also|first|next|finally|quickly|just|again
-                     |depois|também|agora|já|primeiro|novamente|logo|então)\s+)*
-                (?:'.self::OPERATION_VERBS_BARE.'|'.self::PT_OPERATION_VERBS_INFINITIVE.')
-                (?![\p{L}\p{N}])
-            )
-            |
-            (?:but|or|nor|so|yet|which|who|whom|whose|where|when|while|because|since|if
-               |unless|though|although|whereas|that|as|than|after|before|until|once
-               |mas|ou|que|porque|quando|enquanto|embora|pois|onde|cujo|cuja|se|assim)
-        )
-        (?![\p{L}\p{N}])
-    /xu';
+    private const string NOTHING_FOLLOWS = '[\s\p{P}\p{S}]*$';
 
     /** Bare verb forms. They only signal narration behind an auxiliary, a modal, or a let-form. */
     private const string OPERATION_VERBS_BARE = '
@@ -279,19 +214,19 @@ final class DeterministicImportanceRules
     ';
 
     /**
-     * Shape (a), English: a SENTENCE-INITIAL first-person subject in front of an
-     * operational verb whose object is a tooling artefact. The `^` anchor is part
-     * of the tail discipline: a narration clause that is not the start of its
-     * sentence has something in front of it, and that something is a clause we
-     * did not read — so it escapes.
+     * Shape (a), English: the WHOLE sentence is a first-person subject, an
+     * operational verb, and a tooling artefact. `^` and NOTHING_FOLLOWS are the
+     * two halves of the same discipline — a narration clause with anything in
+     * front of it or anything behind it is not a bare operational clause, and
+     * escapes.
      *
      *   (1) narration morphology, no auxiliary needed ("I ran the tests",
      *       "I'm checking the file", "we were running the suite");
      *   (2) an auxiliary / modal / announced intent licenses a bare verb form
-     *       ("I have run the tests", "I'll run the suite", "I'm going to open
-     *       the config file", "we've run the tests"). The auxiliary is REQUIRED
-     *       here, so the plain present tense of a convention ("We run the tests
-     *       on every push.") never reaches this branch;
+     *       ("I have run the tests", "I'll run the suite", "we've run the
+     *       tests"). The auxiliary is REQUIRED here, so the plain present tense
+     *       of a convention ("We run the tests on every push.") never reaches
+     *       this branch;
      *   (3) bare "I read the diff" — licensed for the first-person SINGULAR
      *       only, because a convention is never written as "I".
      */
@@ -312,7 +247,7 @@ final class DeterministicImportanceRules
             |
             i(?:\s+(?:just|already|then|also|first))*\s+read
         )
-        \s+'.self::TOOLING_OBJECT.'
+        \s+'.self::TOOLING_OBJECT.self::NOTHING_FOLLOWS.'
     /xu';
 
     /**
@@ -325,7 +260,7 @@ final class DeterministicImportanceRules
         let(?:\s+me|\s+us|\'s)
         (?:\s+(?:now|first|then|just|quickly|also))*
         \s+'.self::OPERATION_VERBS_BARE.'
-        \s+'.self::TOOLING_OBJECT.'
+        \s+'.self::TOOLING_OBJECT.self::NOTHING_FOLLOWS.'
     /xu';
 
     /**
@@ -347,14 +282,14 @@ final class DeterministicImportanceRules
             |
             '.self::PT_OPERATION_VERBS_FIRST_PERSON_PAST.'
         )
-        \s+'.self::PT_TOOLING_OBJECT.'
+        \s+'.self::PT_TOOLING_OBJECT.self::NOTHING_FOLLOWS.'
     /xu';
 
     /** Shape (a), Portuguese let-form ("Deixa-me ler o ficheiro."). */
     private const string PT_LET_NARRATION_PATTERN = '/^
         deix[ae](?:-|\s+)(?:me|nos)
         \s+'.self::PT_OPERATION_VERBS_INFINITIVE.'
-        \s+'.self::PT_TOOLING_OBJECT.'
+        \s+'.self::PT_TOOLING_OBJECT.self::NOTHING_FOLLOWS.'
     /xu';
 
     private const string PT_OPERATION_VERBS_INFINITIVE = '
@@ -384,7 +319,6 @@ final class DeterministicImportanceRules
                |ao|aos|à|às|e|ou)(?![\p{L}\p{N}]))[\w.\/-]+\s+){0,2}
         (?:ficheiros?|arquivos?|testes?|su[ií]tes?|diffs?|patch|logs?|comando|linter|c[óo]digo)
         (?![\p{L}\p{N}])
-        '.self::PT_HEAD_NOUN_ANCHOR.'
     ';
 
     /**
@@ -577,12 +511,10 @@ final class DeterministicImportanceRules
     }
 
     /**
-     * Shape (b) is checked first because it is already whole-sentence by
-     * construction. Shape (a) is a sentence-initial narration clause AND a tail
-     * that opens no further finite clause: the two disciplines are now the same,
-     * which is the whole point of v4. A shape-(a) clause that swallowed a
-     * coordinated declarative clause ("I checked the logs and the worker restarts
-     * on every deploy.") is exactly how real knowledge was being hard-vetoed.
+     * Both shapes are whole-sentence matches: every pattern is anchored at `^`
+     * and ends at `$` with nothing but punctuation allowed in between the object
+     * and the end. A sentence that carries anything else is not narration, and no
+     * separator, clause type or noun phrase has to be recognised to know that.
      */
     private function isNarrationSentence(string $sentence): bool
     {
@@ -598,24 +530,12 @@ final class DeterministicImportanceRules
         ];
 
         foreach ($patterns as $pattern) {
-            if (preg_match($pattern, $sentence, $matches) !== 1) {
-                continue;
+            if (preg_match($pattern, $sentence) === 1) {
+                return true;
             }
-
-            if ($this->opensFurtherClause(substr($sentence, strlen($matches[0])))) {
-                continue;
-            }
-
-            return true;
         }
 
         return false;
-    }
-
-    /** True when the tail of a narration clause opens a further finite clause. */
-    private function opensFurtherClause(string $tail): bool
-    {
-        return preg_match(self::FURTHER_CLAUSE_PATTERN, $tail) === 1;
     }
 
     /**

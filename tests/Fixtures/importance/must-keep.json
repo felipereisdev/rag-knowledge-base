@@ -2,12 +2,13 @@
   "_meta": {
     "purpose": "Reviewed calibration corpus of knowledge that MUST survive the importance classifier. Every entry here is knowledge a human reviewer confirmed is worth keeping. The deterministic rules may never hard-veto any of them: a veto here means the rule is too aggressive and the RULE must be fixed, never the fixture.",
     "content": "All examples are synthetic or anonymized. No real credentials, hostnames, customer names, or private repository content.",
-    "rules_version_reviewed": "v4",
+    "rules_version_reviewed": "v5",
     "reviewed_on": "2026-07-13",
     "adversarial_block": "Fixtures with an 'adv-' id prefix are adversarial: they deliberately use vocabulary the veto rules key on (exit codes, tool calls, test outcomes, very short normative rules) so a green run is evidence the rules generalize, not that they were co-fitted to the rest of the corpus. Added after review found the agent_operation_only and empty_content vetoes false-vetoed real knowledge that happened to mention this vocabulary.",
     "veto_probes": "Every entry under `fixtures` carries at least one positive knowledge signal, and the agent_operation_only veto only fires when NO knowledge assertion is present — so no fixture in `fixtures` can ever exercise that veto. `veto_probes` exists to close that blind spot and pins the rule from BOTH directions. `veto_probes.must_not_be_vetoed` is real, durable knowledge that carries NO positive knowledge-assertion marker and yet uses the exact vocabulary the veto keys on ('task completed', 'let us', 'a executar', 'here is a summary', 'running the tests', 'reading the file', 'all tests pass'); it must never be vetoed AND must trigger no positive signal, so a green run proves the ANCHORING is right rather than that a positive phrase was bolted on. `veto_probes.must_be_vetoed` is unambiguous agent chatter that must be vetoed by agent_operation_only. If an entry under must_not_be_vetoed fails, the RULE is wrong, never the fixture.",
     "v3_reach": "v3 deleted the gerund-subject narration branch and the progress-tail machinery: a sentence whose subject is a gerund over the agent's own tooling ('Running the tests now, 3 failed.', 'Reading the file config/rag.php…') is inherently ambiguous with a statement about the system ('Running the tests in parallel corrupts the sqlite database.'), and three rounds of tail-tuning failed to separate them. Those gerund progress reports were therefore REMOVED from must_be_vetoed: they now escape to the semantic judge, which scores them low. That is a deliberate, accepted recall loss — a missed veto costs one judge call, a false veto destroys knowledge forever.",
-    "v4_reach": "v4 closed the last two structural holes, WITHOUT adding a single word to any marker list. (1) TAIL DISCIPLINE: shape (a) — a first-person operational clause over a tooling artefact — now has the same whole-sentence discipline shape (b) always had. A shape-(a) sentence that opens a FURTHER FINITE CLAUSE (',' ';' ':' '—', a subordinator/relativiser, or a coordinator that is not coordinating another bare infinitive) is ambiguous and escapes: 'I checked the logs and the worker restarts on every deploy.' is a fact, and v3 destroyed it. (2) HEAD-NOUN ANCHORING: the tooling keyword must now be the HEAD of the object, not merely its first noun, so 'the file naming convention', 'the test database credentials', 'the log format' and 'the diff algorithm' are no longer tooling artefacts and escape. TRUE REACH OF THE VETO AFTER v4: a sentence is narration only when it is (a) a SENTENCE-INITIAL first-person operational clause over a tooling artefact with NO further finite clause ('I ran the tests.', \"I'm checking the file now.\", 'Let me open the file.', 'Corri os testes.'), or (b) a terse status phrase that is the WHOLE sentence ('All tests pass.', 'Done.'), and EVERY sentence of the candidate is one of those, and the candidate asserts no knowledge anywhere. CHATTER MOVED OUT OF must_be_vetoed IN v4: 'chatter-i-ran-the-tests' ('I ran the tests and all tests pass now, the tool call returned successfully.') now ESCAPES, because the coordinated clause after 'and' is a further finite clause and the rule can no longer tell it apart from 'I ran the tests and the seeder populates the demo tenant.' — which is knowledge. That is a deliberate, accepted recall loss. The bare form ('I ran the tests.') is still vetoed and is pinned by 'chatter-i-ran-the-tests-bare'."
+    "v4_reach": "v4 closed the last two structural holes, WITHOUT adding a single word to any marker list. (1) TAIL DISCIPLINE: shape (a) — a first-person operational clause over a tooling artefact — now has the same whole-sentence discipline shape (b) always had. A shape-(a) sentence that opens a FURTHER FINITE CLAUSE (',' ';' ':' '—', a subordinator/relativiser, or a coordinator that is not coordinating another bare infinitive) is ambiguous and escapes: 'I checked the logs and the worker restarts on every deploy.' is a fact, and v3 destroyed it. (2) HEAD-NOUN ANCHORING: the tooling keyword must now be the HEAD of the object, not merely its first noun, so 'the file naming convention', 'the test database credentials', 'the log format' and 'the diff algorithm' are no longer tooling artefacts and escape. TRUE REACH OF THE VETO AFTER v4: a sentence is narration only when it is (a) a SENTENCE-INITIAL first-person operational clause over a tooling artefact with NO further finite clause ('I ran the tests.', \"I'm checking the file now.\", 'Let me open the file.', 'Corri os testes.'), or (b) a terse status phrase that is the WHOLE sentence ('All tests pass.', 'Done.'), and EVERY sentence of the candidate is one of those, and the candidate asserts no knowledge anywhere. CHATTER MOVED OUT OF must_be_vetoed IN v4: 'chatter-i-ran-the-tests' ('I ran the tests and all tests pass now, the tool call returned successfully.') now ESCAPES, because the coordinated clause after 'and' is a further finite clause and the rule can no longer tell it apart from 'I ran the tests and the seeder populates the demo tenant.' — which is knowledge. That is a deliberate, accepted recall loss. The bare form ('I ran the tests.') is still vetoed and is pinned by 'chatter-i-ran-the-tests-bare'.",
+    "v5_reach": "v5 INVERTS the shape-(a) predicate. Rounds 1-4 all defined agent narration by enumerating what BREAKS it: a marker list, then a progress-tail reader, then a class of clause-opening separators (',' ';' ':' en-dash, em-dash) plus a head-noun anchor. Every round, an adversarial reviewer found real facts hard-vetoed through the separator that had NOT been enumerated -- '(', '[', a quote, the ASCII '--', '/', a newline -- and the head-noun anchor additionally failed whenever the true head noun ended the sentence ('I updated the log format.'). A blacklist of the ways a sentence can carry a fact cannot be completed; the next round always finds one more. The blacklist WAS the bug. In v5, shape (a) is a WHITELIST carrying exactly the whole-sentence discipline shape (b) always had: ^ <first-person operational opener> <tooling-artefact object> <terminal punctuation only> $. NOTHING may follow the object -- no parenthetical, bracket, quote, dash, slash, newline, coordinated clause, preposition, second noun, code path or adverb. There is no separator class to under-list, because nothing is listed: the sentence must simply be OVER. ACCEPTED, DELIBERATE RECALL LOSS: the veto now reaches only BARE operational clauses ('I ran the tests.', \"I'm checking the file.\", 'Let me open the file.', 'Corri os testes.'), terse status phrases ('All tests pass.', 'Done.'), and content made entirely of those. Chatter with ANY tail ('I ran the tests and all tests pass now.', 'I read the diff (nothing changed).', 'I have updated the file app/Services/Foo.php with the new signature.') escapes to the semantic judge, which scores it low. A missed veto costs one judge call; a false veto destroys knowledge forever. must_be_vetoed has therefore been PRUNED to only what the rule still reaches: the corpus states the truth about the rule, it does not assert a reach the rule does not have."
   },
   "fixtures": [
     {
@@ -1049,6 +1050,126 @@
           "content": "Atualizei o formato dos logs para JSON por linha.",
           "entities": []
         }
+      },
+      {
+        "id": "veto-tail-parenthetical-worker-restarts",
+        "why": "Round-4 false veto: the tail opens with '(', which the v4 separator class did not enumerate. v5 needs no separator class -- anything at all after the object means the sentence is not a bare operational clause, so it escapes.",
+        "candidate": {
+          "title": "The worker restarts on every deploy",
+          "content": "I checked the logs (the worker restarts on every deploy).",
+          "entities": []
+        }
+      },
+      {
+        "id": "veto-tail-parenthetical-migration-concurrent",
+        "why": "Round-4 false veto: parenthetical tail after 'the diff'.",
+        "candidate": {"title": "The migration runs concurrently", "content": "I read the diff (the migration runs concurrently).", "entities": []}
+      },
+      {
+        "id": "veto-tail-bracket-parser-lowercases",
+        "why": "Round-4 false veto: the tail opens with '[', unlisted in v4.",
+        "candidate": {"title": "The parser lowercases every key", "content": "I read the config file [the parser lowercases every key].", "entities": []}
+      },
+      {
+        "id": "veto-tail-ascii-dash-worker-restarts",
+        "why": "Round-4 false veto: v4 listed the en-dash and the em-dash, but not the ASCII '--'.",
+        "candidate": {
+          "title": "The worker restarts on every deploy",
+          "content": "I checked the logs -- the worker restarts on every deploy.",
+          "entities": []
+        }
+      },
+      {
+        "id": "veto-pt-tail-parenthetical-worker-reinicia",
+        "why": "Round-4 false veto, PT twin: parenthetical tail. The PT half must reach exactly as far as the EN half.",
+        "candidate": {"title": "O worker reinicia a cada deploy", "content": "Verifiquei os logs (o worker reinicia a cada deploy).", "entities": []}
+      },
+      {
+        "id": "veto-pt-tail-parenthetical-parser",
+        "why": "Round-4 false veto, PT twin: parenthetical tail after 'o ficheiro'.",
+        "candidate": {"title": "O parser normaliza cada chave", "content": "Li o ficheiro (o parser normaliza cada chave).", "entities": []}
+      },
+      {
+        "id": "veto-head-noun-final-log-format",
+        "why": "Round-4 head-noun bug: the '.' inside the anchor's trailing exclusion class also matched the sentence-final period, so the 'another noun follows' test could never fire when the true head noun ENDED the sentence, and the anchor wrongly held. v5 has no anchor -- 'format' is simply residual content after the object 'the log', so the sentence escapes.",
+        "candidate": {"title": "The log format", "content": "I updated the log format.", "entities": []}
+      },
+      {
+        "id": "veto-head-noun-final-diff-algorithm",
+        "why": "Round-4 head-noun bug: sentence-final head noun 'algorithm'.",
+        "candidate": {"title": "The diff algorithm", "content": "I updated the diff algorithm.", "entities": []}
+      },
+      {
+        "id": "veto-head-noun-final-file-permissions",
+        "why": "Round-4 head-noun bug: sentence-final head noun 'permissions'.",
+        "candidate": {"title": "The file permissions", "content": "I checked the file permissions.", "entities": []}
+      },
+      {
+        "id": "veto-head-noun-final-diff-hunks",
+        "why": "Round-4 head-noun bug: sentence-final head noun 'hunks'.",
+        "candidate": {"title": "The diff hunks", "content": "I read the diff hunks.", "entities": []}
+      },
+      {
+        "id": "veto-tail-quoted-clause",
+        "why": "A quoted tail. Unlisted in v4, and unlistable in principle -- v5 escapes it structurally.",
+        "candidate": {"title": "The parser lowercases every key", "content": "I read the output \"the parser lowercases every key\".", "entities": []}
+      },
+      {
+        "id": "veto-tail-slash-separator",
+        "why": "A '/' separator. Round 6 of the blacklist game would have had to add it; v5 has no blacklist.",
+        "candidate": {
+          "title": "The worker restarts on every deploy",
+          "content": "I checked the logs / the worker restarts on every deploy.",
+          "entities": []
+        }
+      },
+      {
+        "id": "veto-tail-newline-continuation",
+        "why": "A newline continuation inside one sentence: neither punctuation nor a coordinator, so unreachable by any separator class.",
+        "candidate": {
+          "title": "The worker restarts on every deploy",
+          "content": "I checked the logs\nthe worker restarts on every deploy.",
+          "entities": []
+        }
+      },
+      {
+        "id": "veto-tail-no-terminal-punctuation",
+        "why": "The same fact with no terminal punctuation at all. The whitelist ends the sentence at the object, so an unterminated tail is still residual content.",
+        "candidate": {
+          "title": "The worker restarts on every deploy",
+          "content": "I checked the logs and the worker restarts on every deploy",
+          "entities": []
+        }
+      },
+      {
+        "id": "veto-pt-tail-bracket-migracao",
+        "why": "PT twin: bracket tail.",
+        "candidate": {"title": "A migração corre concorrente", "content": "Li o diff [a migração corre concorrente].", "entities": []}
+      },
+      {
+        "id": "veto-pt-tail-ascii-dash-sqlite",
+        "why": "PT twin: ASCII '--' tail.",
+        "candidate": {"title": "A base sqlite corrompe em paralelo", "content": "Corri os testes -- a base sqlite corrompe em paralelo.", "entities": []}
+      },
+      {
+        "id": "veto-pt-tail-newline-continuation",
+        "why": "PT twin: newline continuation.",
+        "candidate": {"title": "O seeder popula o tenant de demo", "content": "Corri os testes\no seeder popula o tenant de demo.", "entities": []}
+      },
+      {
+        "id": "veto-pt-tail-quoted-clause",
+        "why": "PT twin: quoted tail.",
+        "candidate": {"title": "O parser normaliza cada chave", "content": "Li o output \"o parser normaliza cada chave\".", "entities": []}
+      },
+      {
+        "id": "veto-pt-head-noun-final-formato",
+        "why": "PT twin of the sentence-final head-noun bug: the head is 'formato', not 'logs'.",
+        "candidate": {"title": "O formato dos logs", "content": "Atualizei o formato dos logs.", "entities": []}
+      },
+      {
+        "id": "veto-pt-head-noun-final-permissoes",
+        "why": "PT twin of the sentence-final head-noun bug: the head is 'permissões', not 'ficheiro'.",
+        "candidate": {"title": "As permissões do ficheiro", "content": "Verifiquei as permissões do ficheiro.", "entities": []}
       }
     ],
     "must_be_vetoed": [
@@ -1061,11 +1182,6 @@
         "id": "chatter-ran-the-tests",
         "why": "Sentence-initial subjectless past-tense tool run.",
         "candidate": {"title": "Note", "content": "Ran the tests, everything is green.", "entities": []}
-      },
-      {
-        "id": "chatter-let-me",
-        "why": "Sentence-initial 'Let me' narration.",
-        "candidate": {"title": "Note", "content": "Let me read the RetryPolicy file and run the test suite for the shipping module now.", "entities": []}
       },
       {
         "id": "chatter-i-ran-the-tests-bare",
@@ -1088,26 +1204,6 @@
         "candidate": {"title": "Nota", "content": "Corri os testes.", "entities": []}
       },
       {
-        "id": "chatter-i-am-going-to",
-        "why": "First-person announced intent.",
-        "candidate": {"title": "Note", "content": "I'm going to open the config file and check the retry limit.", "entities": []}
-      },
-      {
-        "id": "chatter-i-updated-the-file",
-        "why": "First-person mutation of a tooling artefact (the file), no assertion.",
-        "candidate": {"title": "Note", "content": "I have updated the file app/Services/Foo.php with the new signature.", "entities": []}
-      },
-      {
-        "id": "chatter-pt-vou-executar",
-        "why": "Portuguese first-person narration.",
-        "candidate": {"title": "Nota", "content": "Vou executar os testes e depois atualizar o ficheiro.", "entities": []}
-      },
-      {
-        "id": "chatter-pt-estou-a-ler",
-        "why": "Portuguese first-person progressive narration.",
-        "candidate": {"title": "Nota", "content": "Estou a ler o ficheiro config/rag.php.", "entities": []}
-      },
-      {
         "id": "chatter-task-completed",
         "why": "Terse status report, whole sentence.",
         "candidate": {"title": "Note", "content": "Task completed.", "entities": []}
@@ -1118,24 +1214,9 @@
         "candidate": {"title": "Nota", "content": "Tarefa concluída.", "entities": []}
       },
       {
-        "id": "chatter-lets-run",
-        "why": "Sentence-initial let-form followed by an operational verb (the counterpart of the Let's Encrypt probe).",
-        "candidate": {"title": "Note", "content": "Let's run the test suite for the shipping module.", "entities": []}
-      },
-      {
         "id": "chatter-bulleted-status",
         "why": "A bulleted status report is still a whole sentence once the bullet is stripped, and every sentence here is one.",
         "candidate": {"title": "Note", "content": "- Ran the tests.\n- All tests pass.", "entities": []}
-      },
-      {
-        "id": "chatter-i-will-now",
-        "why": "First-person announced intent over the test suite.",
-        "candidate": {"title": "Note", "content": "I will now run the test suite for the shipping module.", "entities": []}
-      },
-      {
-        "id": "chatter-i-am-checking-the-file",
-        "why": "First-person progressive inspection of a tooling artefact.",
-        "candidate": {"title": "Note", "content": "I'm checking the file now.", "entities": []}
       },
       {
         "id": "chatter-pt-executei-os-testes",
@@ -1146,6 +1227,76 @@
         "id": "chatter-multi-sentence-all-narration",
         "why": "Every sentence is narration, so the whole-candidate veto is correct here — the counterpart of the must_not_be_vetoed probes that mix knowledge with a trailing status line.",
         "candidate": {"title": "Note", "content": "I ran the tests. All tests pass. Done.", "entities": []}
+      },
+      {
+        "id": "chatter-let-me-read-the-file",
+        "why": "Bare let-form over a tooling artefact. Replaces the pruned 'chatter-let-me', whose coordinated tail now escapes.",
+        "candidate": {"title": "Note", "content": "Let me read the file.", "entities": []}
+      },
+      {
+        "id": "chatter-lets-run-the-tests",
+        "why": "Bare let's-form. Replaces the pruned 'chatter-lets-run', whose PP tail now escapes.",
+        "candidate": {"title": "Note", "content": "Let's run the tests.", "entities": []}
+      },
+      {
+        "id": "chatter-i-am-checking-the-file-bare",
+        "why": "Bare first-person progressive. Replaces the pruned 'chatter-i-am-checking-the-file': under v5 even a trailing adverb ('now') is residual content.",
+        "candidate": {"title": "Note", "content": "I'm checking the file.", "entities": []}
+      },
+      {
+        "id": "chatter-i-will-run-the-tests",
+        "why": "Bare announced intent. Replaces the pruned 'chatter-i-will-now'.",
+        "candidate": {"title": "Note", "content": "I will run the tests.", "entities": []}
+      },
+      {
+        "id": "chatter-i-updated-the-file-bare",
+        "why": "Bare first-person mutation. Replaces the pruned 'chatter-i-updated-the-file', whose code path is residual content under v5.",
+        "candidate": {"title": "Note", "content": "I updated the file.", "entities": []}
+      },
+      {
+        "id": "chatter-i-have-run-the-suite",
+        "why": "An auxiliary licensing a bare verb form, with nothing after the object.",
+        "candidate": {"title": "Note", "content": "I've run the test suite.", "entities": []}
+      },
+      {
+        "id": "chatter-i-read-the-diff",
+        "why": "The first-person-singular bare-'read' license. It is only safe because nothing may follow the object: any 'I read ...' sentence that REPORTS something has residual content and escapes.",
+        "candidate": {"title": "Note", "content": "I read the diff.", "entities": []}
+      },
+      {
+        "id": "chatter-i-am-running-the-tests",
+        "why": "First-person progressive over the tests.",
+        "candidate": {"title": "Note", "content": "I'm running the tests.", "entities": []}
+      },
+      {
+        "id": "chatter-no-terminal-punctuation",
+        "why": "A bare operational clause with no terminal punctuation is still narration.",
+        "candidate": {"title": "Note", "content": "I ran the tests", "entities": []}
+      },
+      {
+        "id": "chatter-pt-estou-a-ler-bare",
+        "why": "Bare PT progressive. Replaces the pruned 'chatter-pt-estou-a-ler', whose code path is residual content under v5.",
+        "candidate": {"title": "Nota", "content": "Estou a ler o ficheiro.", "entities": []}
+      },
+      {
+        "id": "chatter-pt-vou-executar-bare",
+        "why": "Bare PT announced intent. Replaces the pruned 'chatter-pt-vou-executar', whose coordinated tail now escapes.",
+        "candidate": {"title": "Nota", "content": "Vou executar os testes.", "entities": []}
+      },
+      {
+        "id": "chatter-pt-deixa-me-ler",
+        "why": "Bare PT let-form.",
+        "candidate": {"title": "Nota", "content": "Deixa-me ler o ficheiro.", "entities": []}
+      },
+      {
+        "id": "chatter-pt-li-o-ficheiro",
+        "why": "Bare PT first-person past over a tooling artefact.",
+        "candidate": {"title": "Nota", "content": "Li o ficheiro.", "entities": []}
+      },
+      {
+        "id": "chatter-pt-verifiquei-os-logs",
+        "why": "Bare PT first-person past over the logs.",
+        "candidate": {"title": "Nota", "content": "Verifiquei os logs.", "entities": []}
       }
     ]
   }
