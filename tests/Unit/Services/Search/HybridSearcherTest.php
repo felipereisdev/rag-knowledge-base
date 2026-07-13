@@ -6,6 +6,7 @@ use App\Models\Project;
 use App\Models\Relation;
 use App\Services\Search\HybridSearcher;
 use Illuminate\Database\Events\QueryExecuted;
+use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
 use Laravel\Ai\Embeddings;
@@ -747,6 +748,47 @@ describe('HybridSearcher', function () {
             $after = DB::selectOne("SELECT current_setting('hnsw.iterative_scan') AS value")->value;
 
             expect($before)->toBe('off')
+                ->and($after)->toBe('off');
+        });
+    });
+
+    it('preserves the original hnsw database error after rolling back a nested search', function () {
+        $invalidQueryVector = [1.0, 0.0];
+        Embeddings::fake([[$invalidQueryVector]]);
+
+        $entry = KnowledgeEntry::create([
+            'project_id' => $this->project->id,
+            'title' => 'Invalid query dimension',
+            'content' => 'The stored vector still has the configured dimension.',
+            'status' => 'approved',
+        ]);
+        DB::table('chunk_embeddings')->insert([
+            'entry_id' => $entry->id,
+            'project_id' => $this->project->id,
+            'chunk_index' => 0,
+            'content' => 'The stored vector still has the configured dimension.',
+            'embedding' => '['.implode(',', $this->fakeVector).']',
+        ]);
+
+        DB::transaction(function (): void {
+            DB::statement('SET LOCAL hnsw.iterative_scan = off');
+
+            $exception = null;
+            try {
+                (new HybridSearcher(
+                    minScore: 0.3,
+                    expandGraph: false,
+                    vectorTopK: 1,
+                ))->search('vectoronlyterm', $this->project->id);
+            } catch (QueryException $caught) {
+                $exception = $caught;
+            }
+
+            $after = DB::selectOne("SELECT current_setting('hnsw.iterative_scan') AS value")->value;
+
+            expect($exception)->not->toBeNull()
+                ->and($exception->getMessage())->toContain('different vector dimensions')
+                ->and($exception->getMessage())->not->toContain('25P02')
                 ->and($after)->toBe('off');
         });
     });
