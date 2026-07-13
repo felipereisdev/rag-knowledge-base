@@ -2,9 +2,10 @@
   "_meta": {
     "purpose": "Reviewed calibration corpus of knowledge that MUST survive the importance classifier. Every entry here is knowledge a human reviewer confirmed is worth keeping. The deterministic rules may never hard-veto any of them: a veto here means the rule is too aggressive and the RULE must be fixed, never the fixture.",
     "content": "All examples are synthetic or anonymized. No real credentials, hostnames, customer names, or private repository content.",
-    "rules_version_reviewed": "v1",
+    "rules_version_reviewed": "v2",
     "reviewed_on": "2026-07-13",
-    "adversarial_block": "Fixtures with an 'adv-' id prefix are adversarial: they deliberately use vocabulary the veto rules key on (exit codes, tool calls, test outcomes, very short normative rules) so a green run is evidence the rules generalize, not that they were co-fitted to the rest of the corpus. Added after review found the agent_operation_only and empty_content vetoes false-vetoed real knowledge that happened to mention this vocabulary."
+    "adversarial_block": "Fixtures with an 'adv-' id prefix are adversarial: they deliberately use vocabulary the veto rules key on (exit codes, tool calls, test outcomes, very short normative rules) so a green run is evidence the rules generalize, not that they were co-fitted to the rest of the corpus. Added after review found the agent_operation_only and empty_content vetoes false-vetoed real knowledge that happened to mention this vocabulary.",
+    "veto_probes": "Every entry under `fixtures` carries at least one positive knowledge signal, and the agent_operation_only veto only fires when NO knowledge assertion is present — so no fixture in `fixtures` can ever exercise that veto. `veto_probes` exists to close that blind spot and pins the rule from BOTH directions. `veto_probes.must_not_be_vetoed` is real, durable knowledge that carries NO positive knowledge-assertion marker and yet uses the exact vocabulary the veto keys on ('task completed', 'let us', 'a executar', 'here is a summary', 'running the tests', 'reading the file', 'all tests pass'); it must never be vetoed AND must trigger no positive signal, so a green run proves the ANCHORING is right rather than that a positive phrase was bolted on. `veto_probes.must_be_vetoed` is unambiguous agent chatter that must be vetoed by agent_operation_only. If an entry under must_not_be_vetoed fails, the RULE is wrong, never the fixture."
   },
   "fixtures": [
     {
@@ -458,5 +459,289 @@
         "relations": []
       }
     }
-  ]
+  ],
+  "veto_probes": {
+    "must_not_be_vetoed": [
+      {
+        "id": "veto-task-completed-declarative",
+        "why": "'task completed' inside a declarative sentence about the worker. v1 vetoed it as agent narration.",
+        "candidate": {
+          "title": "Worker runs are recorded in job_runs",
+          "content": "Every task completed by the worker writes a row to job_runs.",
+          "entities": []
+        }
+      },
+      {
+        "id": "veto-task-completed-passive",
+        "why": "Same marker in a passive-voice scheduling rule. v1 vetoed it.",
+        "candidate": {
+          "title": "Late tasks are discarded",
+          "content": "A task completed after its deadline is discarded by the scheduler queue.",
+          "entities": []
+        }
+      },
+      {
+        "id": "veto-let-us-allowed-us",
+        "why": "'let us' in its 'allowed us' sense, mid-sentence. v1 vetoed it.",
+        "candidate": {
+          "title": "pgvector replaced Pinecone",
+          "content": "Moving to pgvector let us drop the Pinecone dependency from the stack.",
+          "entities": []
+        }
+      },
+      {
+        "id": "veto-pt-progressive-verb",
+        "why": "Portuguese: 'a executar' as an ordinary progressive verb about the worker, not first-person narration. v1 vetoed it.",
+        "candidate": {
+          "title": "Lotes do worker de embeddings",
+          "content": "O worker de embeddings está a executar em lotes de 32 vetores.",
+          "entities": []
+        }
+      },
+      {
+        "id": "veto-summary-opener",
+        "why": "'here is a summary' is a legitimate condensation opener over durable content. v1 vetoed it.",
+        "candidate": {
+          "title": "Retry policy of the job runner",
+          "content": "Here is a summary of the retry policy: 3 attempts, then the job is parked.",
+          "entities": []
+        }
+      },
+      {
+        "id": "veto-gerund-subject-tests",
+        "why": "Sentence-initial gerund over the agent's own tooling, but the gerund is the SUBJECT of a declarative sentence, not a progress report.",
+        "candidate": {
+          "title": "Parallel test runs leak shared memory",
+          "content": "Running the test suite twice in the same container leaks 400 MB of shared memory.",
+          "entities": []
+        }
+      },
+      {
+        "id": "veto-gerund-subject-parallel",
+        "why": "Same shape, phrased around a test outcome that a reviewer would expect the veto to over-trigger on.",
+        "candidate": {
+          "title": "Parallel tests corrupt the sqlite database",
+          "content": "Running the tests in parallel corrupts the shared sqlite database.",
+          "entities": []
+        }
+      },
+      {
+        "id": "veto-gerund-subject-reading",
+        "why": "'reading the file' opener whose tail is a declarative comparison, not a progress tail.",
+        "candidate": {
+          "title": "fgets() is slower per chunk",
+          "content": "Reading the file through fgets() adds 40 ms per chunk compared with file_get_contents().",
+          "entities": []
+        }
+      },
+      {
+        "id": "veto-all-tests-pass-clause",
+        "why": "'all tests pass' as a clause inside a longer CI statement, not a terse status report.",
+        "candidate": {
+          "title": "Release branch needs the seeder first",
+          "content": "All tests pass on the release branch only after the seeder has populated the demo tenant.",
+          "entities": []
+        }
+      },
+      {
+        "id": "veto-we-run-convention",
+        "why": "'we run' in the present tense is the canonical voice of a convention, not agent narration.",
+        "candidate": {
+          "title": "Model-backed jobs run on their own queue",
+          "content": "We run model-backed jobs on the classification queue, away from the default queue.",
+          "entities": []
+        }
+      },
+      {
+        "id": "veto-we-read-quota",
+        "why": "'we read' with a system object; the veto must only key on first-person narration of a tool run.",
+        "candidate": {
+          "title": "Shipping quota per account",
+          "content": "We read the shipping quota from the provider dashboard: 60 requests per minute per account.",
+          "entities": []
+        }
+      },
+      {
+        "id": "veto-passive-test-suite",
+        "why": "Passive voice over the exact vocabulary the veto keys on (test suite, run, CI).",
+        "candidate": {
+          "title": "CI runs the suite on every push",
+          "content": "The test suite is run in CI on every push, and a red run blocks the merge.",
+          "entities": []
+        }
+      },
+      {
+        "id": "veto-exit-code-137",
+        "why": "Error-code knowledge with no positive marker at all.",
+        "candidate": {
+          "title": "Exit code 137 is an OOM kill",
+          "content": "Exit code 137 marks an OOM kill by the container runtime.",
+          "entities": []
+        }
+      },
+      {
+        "id": "veto-deploy-lock",
+        "why": "Deploy knowledge in the passive voice, no positive marker.",
+        "candidate": {
+          "title": "Deploys queue behind the migration lock",
+          "content": "Deploys to production are queued while a migration holds the advisory lock.",
+          "entities": []
+        }
+      },
+      {
+        "id": "veto-pt-tarefa-concluida",
+        "why": "Portuguese: 'tarefa concluída' mid-sentence in a passive scheduling rule.",
+        "candidate": {
+          "title": "Tarefas fora do prazo",
+          "content": "A tarefa concluída fora do prazo é descartada pela fila do scheduler.",
+          "entities": []
+        }
+      },
+      {
+        "id": "veto-pt-corre-os-testes",
+        "why": "Portuguese: third-person 'corre os testes' describing the deploy command, not the agent.",
+        "candidate": {
+          "title": "O deploy corre os testes",
+          "content": "O comando de deploy corre os testes antes de publicar a imagem.",
+          "entities": []
+        }
+      },
+      {
+        "id": "veto-i-ran-into",
+        "why": "'I ran into' is a phrasal verb, not a tool run; the first-person anchor must not fire on it.",
+        "candidate": {
+          "title": "Concurrent updates deadlock on the same row",
+          "content": "I ran into a deadlock when two workers updated the same row.",
+          "entities": []
+        }
+      },
+      {
+        "id": "veto-i-added-index",
+        "why": "First-person, but it asserts a durable fact about the schema; a mutation of a SYSTEM thing must escape to the judge, not be vetoed.",
+        "candidate": {
+          "title": "Unique index on chunks.hash",
+          "content": "I added a unique index on chunks.hash after the duplicate rows appeared.",
+          "entities": []
+        }
+      },
+      {
+        "id": "veto-done-means",
+        "why": "'done' as the subject of a definition, not a terse status report.",
+        "candidate": {
+          "title": "What done means for a job row",
+          "content": "Done means the job row carries a finished_at timestamp.",
+          "entities": []
+        }
+      },
+      {
+        "id": "veto-lets-encrypt",
+        "why": "'Let's Encrypt' is a certificate authority, not an agent saying \"let's\". Found by adversarial probing: a bare let-opener false-vetoed it, so the let-form now requires a following operational verb.",
+        "candidate": {
+          "title": "Certificate renewal window",
+          "content": "Let's Encrypt certificates renew 30 days before expiry.",
+          "entities": []
+        }
+      },
+      {
+        "id": "veto-checking-the-file-declarative",
+        "why": "'checking the file' opener whose tail is a declarative clause about the importer.",
+        "candidate": {
+          "title": "The importer compares content hashes",
+          "content": "Checking the file mtime is not enough; the importer compares content hashes.",
+          "entities": []
+        }
+      },
+      {
+        "id": "veto-tool-call-contract",
+        "why": "'the tool call' as an API contract fact; v1 keyed on this phrase.",
+        "candidate": {
+          "title": "Tool call response envelope",
+          "content": "The tool call returns a JSON envelope with a content array.",
+          "entities": []
+        }
+      }
+    ],
+    "must_be_vetoed": [
+      {
+        "id": "chatter-running-tests-now",
+        "why": "Sentence-initial gerund progress report with a result tail.",
+        "candidate": {"title": "Note", "content": "Running the tests now, 3 failed and 2 passed.", "entities": []}
+      },
+      {
+        "id": "chatter-reading-file",
+        "why": "Sentence-initial progress report whose tail is a single path token.",
+        "candidate": {"title": "Note", "content": "Reading the file config/rag.php…", "entities": []}
+      },
+      {
+        "id": "chatter-writing-file",
+        "why": "Same shape, write side.",
+        "candidate": {"title": "Note", "content": "Writing the file app/Foo.php…", "entities": []}
+      },
+      {
+        "id": "chatter-all-tests-pass",
+        "why": "Terse status report that is the whole sentence.",
+        "candidate": {"title": "Note", "content": "All tests pass.", "entities": []}
+      },
+      {
+        "id": "chatter-ran-the-tests",
+        "why": "Sentence-initial subjectless past-tense tool run.",
+        "candidate": {"title": "Note", "content": "Ran the tests, everything is green.", "entities": []}
+      },
+      {
+        "id": "chatter-let-me",
+        "why": "Sentence-initial 'Let me' narration.",
+        "candidate": {"title": "Note", "content": "Let me read the RetryPolicy file and run the test suite for the shipping module now.", "entities": []}
+      },
+      {
+        "id": "chatter-i-ran-the-tests",
+        "why": "First-person tool run plus a status report.",
+        "candidate": {"title": "Note", "content": "I ran the tests and all tests pass now, the tool call returned successfully.", "entities": []}
+      },
+      {
+        "id": "chatter-i-am-going-to",
+        "why": "First-person announced intent.",
+        "candidate": {"title": "Note", "content": "I'm going to open the config file and check the retry limit.", "entities": []}
+      },
+      {
+        "id": "chatter-i-updated-the-file",
+        "why": "First-person mutation of a tooling artefact (the file), no assertion.",
+        "candidate": {"title": "Note", "content": "I have updated the file app/Services/Foo.php with the new signature.", "entities": []}
+      },
+      {
+        "id": "chatter-pt-vou-executar",
+        "why": "Portuguese first-person narration.",
+        "candidate": {"title": "Nota", "content": "Vou executar os testes e depois atualizar o ficheiro.", "entities": []}
+      },
+      {
+        "id": "chatter-pt-estou-a-ler",
+        "why": "Portuguese first-person progressive narration.",
+        "candidate": {"title": "Nota", "content": "Estou a ler o ficheiro config/rag.php.", "entities": []}
+      },
+      {
+        "id": "chatter-task-completed",
+        "why": "Terse status report, whole sentence.",
+        "candidate": {"title": "Note", "content": "Task completed.", "entities": []}
+      },
+      {
+        "id": "chatter-pt-tarefa-concluida",
+        "why": "Portuguese terse status report, whole sentence.",
+        "candidate": {"title": "Nota", "content": "Tarefa concluída.", "entities": []}
+      },
+      {
+        "id": "chatter-lets-run",
+        "why": "Sentence-initial let-form followed by an operational verb (the counterpart of the Let's Encrypt probe).",
+        "candidate": {"title": "Note", "content": "Let's run the test suite for the shipping module.", "entities": []}
+      },
+      {
+        "id": "chatter-bulleted-progress",
+        "why": "A bulleted progress report is still sentence-initial once the bullet is stripped.",
+        "candidate": {"title": "Note", "content": "- Running the tests now.", "entities": []}
+      },
+      {
+        "id": "chatter-i-will-now",
+        "why": "First-person announced intent over the test suite.",
+        "candidate": {"title": "Note", "content": "I will now run the test suite for the shipping module.", "entities": []}
+      }
+    ]
+  }
 }

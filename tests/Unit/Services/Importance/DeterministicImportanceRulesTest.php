@@ -50,6 +50,37 @@ function mustKeepFixtures(): array
 }
 
 /**
+ * Real, durable knowledge that carries NO positive knowledge-assertion marker and
+ * yet uses the vocabulary `agent_operation_only` keys on. Nothing in `fixtures`
+ * can exercise that veto (every fixture there carries a positive signal, and the
+ * veto only fires when none is present), so this block is the only regression
+ * test the highest-cost rule has.
+ *
+ * @return list<array{id:string, why:string, candidate:array{title:string, content:string, entities:list<array{name:string, type:string}>}}>
+ */
+function vetoProbeKnowledge(): array
+{
+    $path = base_path('tests/Fixtures/importance/must-keep.json');
+    $corpus = json_decode((string) file_get_contents($path), true, flags: JSON_THROW_ON_ERROR);
+
+    return $corpus['veto_probes']['must_not_be_vetoed'];
+}
+
+/**
+ * Unambiguous agent chatter: the case `agent_operation_only` exists for. Pins the
+ * rule from the other direction, so a precision fix cannot silently delete it.
+ *
+ * @return list<array{id:string, why:string, candidate:array{title:string, content:string, entities:list<array{name:string, type:string}>}}>
+ */
+function vetoProbeChatter(): array
+{
+    $path = base_path('tests/Fixtures/importance/must-keep.json');
+    $corpus = json_decode((string) file_get_contents($path), true, flags: JSON_THROW_ON_ERROR);
+
+    return $corpus['veto_probes']['must_be_vetoed'];
+}
+
+/**
  * A concrete, decision-bearing baseline that triggers no penalty and no veto.
  */
 function baselineContent(): string
@@ -139,6 +170,45 @@ it('still hard-vetoes genuine agent-operation narration about tests and tool cal
     expect($evaluation->vetoed)->toBeTrue()
         ->and(triggeredRuleIds($evaluation))->toContain('agent_operation_only');
 });
+
+it('does not veto agent vocabulary used inside a declarative statement', function (string $content) {
+    // Regression for review finding A (round 2): v1 matched the agent-operation
+    // markers as free substrings anywhere in the content, so a phrase that
+    // signals narration in one grammatical position also matched in the middle
+    // of a declarative sentence about the system. v2 anchors every marker to a
+    // first-person subject or to a sentence-initial progress-report shape.
+    $evaluation = evaluateRules($content);
+
+    expect($evaluation->vetoed)->toBeFalse(
+        'False-vetoed real knowledge by: '.implode(', ', triggeredRuleIds($evaluation)),
+    );
+})->with([
+    'task completed, mid-sentence' => 'Every task completed by the worker writes a row to job_runs.',
+    'task completed, passive' => 'A task completed after its deadline is discarded by the scheduler queue.',
+    'let us, in its "allowed us" sense' => 'Moving to pgvector let us drop the Pinecone dependency from the stack.',
+    'pt progressive verb' => 'O worker de embeddings está a executar em lotes de 32 vetores.',
+    'summary opener over durable content' => 'Here is a summary of the retry policy: 3 attempts, then the job is parked.',
+    'gerund as the subject of a fact' => 'Running the tests in parallel corrupts the shared sqlite database.',
+    'all tests pass as a clause' => 'All tests pass on the release branch only after the seeder has populated the demo tenant.',
+    'present-tense "we run" convention' => 'We run model-backed jobs on the classification queue, away from the default queue.',
+    'phrasal "I ran into"' => 'I ran into a deadlock when two workers updated the same row.',
+]);
+
+it('hard-vetoes a sentence-initial progress report with no knowledge assertion', function (string $content) {
+    // Regression for review finding B (round 2): keying the markers to literal
+    // first-person forms let the gerund/imperative progress-report register sail
+    // through. These are the unambiguous case the veto is FOR.
+    $evaluation = evaluateRules($content);
+
+    expect($evaluation->vetoed)->toBeTrue()
+        ->and(triggeredRuleIds($evaluation))->toContain('agent_operation_only');
+})->with([
+    'gerund + result tail' => 'Running the tests now, 3 failed and 2 passed.',
+    'gerund + path tail' => 'Reading the file config/rag.php…',
+    'gerund + path tail, write side' => 'Writing the file app/Foo.php…',
+    'terse status sentence' => 'All tests pass.',
+    'subjectless past-tense tool run' => 'Ran the tests, everything is green.',
+]);
 
 it('rewards an explicit decision', function () {
     $evaluation = evaluateRules('We decided to serve reporting endpoints from the report_daily_totals projection instead of the write model, since one dashboard request issued 400 queries.');
@@ -312,6 +382,59 @@ it('recognizes a knowledge signal in every reviewed must-keep candidate', functi
         expect(array_intersect(triggeredRuleIds($evaluation), $positiveRuleIds))->not->toBeEmpty(
             "Must-keep fixture [{$fixture['id']}] triggered no positive signal.",
         );
+    }
+});
+
+it('never hard-vetoes signal-free knowledge that uses agent vocabulary', function () {
+    // The corpus invariant above ("every must-keep fixture triggers a positive
+    // signal") plus the veto predicate ("marker AND NOT knowledge assertion")
+    // means no `fixtures` entry can ever exercise agent_operation_only. This
+    // block closes that blind spot: real knowledge, no positive signal, and the
+    // exact vocabulary the veto keys on. A failure here is a bug in the RULE --
+    // never bolt a positive phrase onto a fixture to make it pass.
+    $rules = new DeterministicImportanceRules;
+    $positiveRuleIds = ['explicit_decision', 'normative_restriction', 'causal_rationale', 'actionable_consequence'];
+
+    foreach (vetoProbeKnowledge() as $probe) {
+        $evaluation = $rules->evaluate(ruleCandidate(
+            content: $probe['candidate']['content'],
+            title: $probe['candidate']['title'],
+            entities: $probe['candidate']['entities'],
+        ));
+
+        expect($evaluation->vetoed)->toBeFalse(
+            "Veto probe [{$probe['id']}] was hard-vetoed by: ".implode(', ', triggeredRuleIds($evaluation)),
+        )->and(array_intersect(triggeredRuleIds($evaluation), $positiveRuleIds))->toBeEmpty(
+            "Veto probe [{$probe['id']}] triggered a positive signal, so it no longer proves the veto is anchored correctly.",
+        );
+    }
+});
+
+it('hard-vetoes every unambiguous agent-chatter probe', function () {
+    $rules = new DeterministicImportanceRules;
+
+    foreach (vetoProbeChatter() as $probe) {
+        $evaluation = $rules->evaluate(ruleCandidate(
+            content: $probe['candidate']['content'],
+            title: $probe['candidate']['title'],
+            entities: $probe['candidate']['entities'],
+        ));
+
+        expect($evaluation->vetoed)->toBeTrue("Chatter probe [{$probe['id']}] escaped the veto.")
+            ->and(in_array('agent_operation_only', triggeredRuleIds($evaluation), true))->toBeTrue(
+                "Chatter probe [{$probe['id']}] was vetoed by another rule, not by agent_operation_only.",
+            );
+    }
+});
+
+it('pins both directions of the agent-operation veto with enough probes', function () {
+    expect(count(vetoProbeKnowledge()))->toBeGreaterThanOrEqual(15)
+        ->and(count(vetoProbeChatter()))->toBeGreaterThanOrEqual(10);
+
+    foreach ([...vetoProbeKnowledge(), ...vetoProbeChatter()] as $probe) {
+        expect(trim($probe['id']))->not->toBeEmpty()
+            ->and(trim($probe['why']))->not->toBeEmpty()
+            ->and(trim($probe['candidate']['content']))->not->toBeEmpty();
     }
 });
 

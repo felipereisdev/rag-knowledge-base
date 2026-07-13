@@ -263,11 +263,15 @@ it('misses the cache when the model, the prompt version, or the rules version ch
     importanceClassifier($judge)->classify('classifier', $candidate);
     importanceClassifier($judge, model: 'claude-other')->classify('classifier', $candidate);
     importanceClassifier($judge, promptVersion: 'v2')->classify('classifier', $candidate);
-    importanceClassifier($judge, rules: new DeterministicImportanceRules('v2'))->classify('classifier', $candidate);
+    // 'rules-other' is a sentinel that must never equal DeterministicImportanceRules::VERSION,
+    // otherwise this run would be a cache HIT on the first one and the assertion below would
+    // silently stop testing the rules-version dimension of the cache key.
+    importanceClassifier($judge, rules: new DeterministicImportanceRules('rules-other'))->classify('classifier', $candidate);
 
-    expect($judge->calls)->toBe(4)
+    expect(DeterministicImportanceRules::VERSION)->not->toBe('rules-other')
+        ->and($judge->calls)->toBe(4)
         ->and(ImportanceAssessment::query()->count())->toBe(4)
-        ->and(ImportanceAssessment::query()->pluck('rules_version')->all())->toContain('v2');
+        ->and(ImportanceAssessment::query()->pluck('rules_version')->all())->toContain('rules-other');
 });
 
 it('retries a failed assessment instead of treating it as a cache hit', function () {
