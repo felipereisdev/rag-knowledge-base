@@ -10,5 +10,5 @@ class EmbeddingModelState extends Model
 
     protected $table = 'embedding_model_state';
 
-    protected $fillable = ['id', 'model_name', 'model_dim', 'embedded_at'];
+    protected $fillable = ['id', 'provider_name', 'model_name', 'model_dim', 'embedded_at'];
 }

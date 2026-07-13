@@ -10,6 +10,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Route;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\ServiceProvider;
 
 class AppServiceProvider extends ServiceProvider
@@ -25,6 +26,12 @@ class AppServiceProvider extends ServiceProvider
     public function register(): void
     {
         $this->app->bind(ClientInstaller::class, fn () => new ClientInstaller(base_path('stubs/client')));
+
+        $embeddingProvider = (string) config('rag.embeddings.provider', 'local-embedder');
+        config([
+            "ai.providers.{$embeddingProvider}.models.embeddings.default" => (string) config('rag.embeddings.model', 'paraphrase-multilingual-mpnet-base-v2'),
+            "ai.providers.{$embeddingProvider}.models.embeddings.dimensions" => (int) config('rag.embeddings.dimension', 768),
+        ]);
 
         Route::get('/martis/graph', function () {
             return view('martis.graph-explorer');
@@ -76,8 +83,9 @@ class AppServiceProvider extends ServiceProvider
             return;
         }
 
-        $configuredModel = config('app.rag_embedding_model', 'paraphrase-multilingual-mpnet-base-v2');
-        $configuredDim = (int) config('app.rag_embedding_dim', 768);
+        $configuredProvider = (string) config('rag.embeddings.provider', 'local-embedder');
+        $configuredModel = (string) config('rag.embeddings.model', 'paraphrase-multilingual-mpnet-base-v2');
+        $configuredDim = (int) config('rag.embeddings.dimension', 768);
 
         try {
             $state = DB::table('embedding_model_state')->where('id', 1)->first();
@@ -85,9 +93,14 @@ class AppServiceProvider extends ServiceProvider
             return;
         }
 
+        if (! Schema::hasColumn('embedding_model_state', 'provider_name')) {
+            return;
+        }
+
         if (! $state) {
             DB::table('embedding_model_state')->insert([
                 'id' => 1,
+                'provider_name' => $configuredProvider,
                 'model_name' => $configuredModel,
                 'model_dim' => $configuredDim,
                 'embedded_at' => now(),
@@ -96,16 +109,25 @@ class AppServiceProvider extends ServiceProvider
             return;
         }
 
-        if ($state->model_name !== $configuredModel || $state->model_dim !== $configuredDim) {
-            Log::warning('Embedding model changed, marking all chunks for re-embedding', [
-                'old' => $state->model_name,
-                'new' => $configuredModel,
+        if ($state->provider_name !== $configuredProvider || $state->model_name !== $configuredModel || $state->model_dim !== $configuredDim) {
+            Log::warning('Embedding configuration changed, marking all chunks for re-embedding', [
+                'old' => [
+                    'provider' => $state->provider_name,
+                    'model' => $state->model_name,
+                    'dimension' => $state->model_dim,
+                ],
+                'new' => [
+                    'provider' => $configuredProvider,
+                    'model' => $configuredModel,
+                    'dimension' => $configuredDim,
+                ],
             ]);
 
             DB::table('chunk_embeddings')->truncate();
             DB::table('embedding_model_state')
                 ->where('id', 1)
                 ->update([
+                    'provider_name' => $configuredProvider,
                     'model_name' => $configuredModel,
                     'model_dim' => $configuredDim,
                     'embedded_at' => now(),

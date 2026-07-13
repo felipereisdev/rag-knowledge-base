@@ -136,12 +136,6 @@ return [
             'driver' => 'openai',
             'url' => env('RAG_EMBED_URL', 'http://localhost:8001/v1'),
             'key' => env('RAG_EMBED_KEY', 'rag-local'),
-            'models' => [
-                'embeddings' => [
-                    'default' => env('RAG_EMBEDDING_MODEL', 'paraphrase-multilingual-mpnet-base-v2'),
-                    'dimensions' => env('RAG_EMBEDDING_DIMENSIONS', 768),
-                ],
-            ],
         ],
 
         'openrouter' => [

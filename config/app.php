@@ -123,24 +123,4 @@ return [
         'store' => env('APP_MAINTENANCE_STORE', 'database'),
     ],
 
-    /*
-    |--------------------------------------------------------------------------
-    | RAG Configuration
-    |--------------------------------------------------------------------------
-    |
-    | Settings for the local RAG knowledge base.
-    |
-    */
-
-    'rag_embedding_model' => env('RAG_EMBEDDING_MODEL', 'paraphrase-multilingual-mpnet-base-v2'),
-    'rag_embedding_dim' => (int) env('RAG_EMBEDDING_DIM', 768),
-
-    'rag_search_min_score' => (float) env('RAG_SEARCH_MIN_SCORE', 0.30),
-    'rag_search_limit' => (int) env('RAG_SEARCH_LIMIT', 10),
-    'rag_search_rrf_k' => (int) env('RAG_SEARCH_RRF_K', 60),
-    'rag_search_graph_expand' => (bool) env('RAG_SEARCH_GRAPH_EXPAND', true),
-    'rag_search_graph_weight' => (float) env('RAG_SEARCH_GRAPH_WEIGHT', 0.3),
-    'rag_search_vector_top_k' => (int) env('RAG_SEARCH_VECTOR_TOP_K', 20),
-    'rag_search_fts_top_k' => (int) env('RAG_SEARCH_FTS_TOP_K', 20),
-
 ];
