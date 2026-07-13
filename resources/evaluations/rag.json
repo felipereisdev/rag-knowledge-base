@@ -1,0 +1,29 @@
+{
+  "project_id": "rag",
+  "queries": [
+    {
+      "query": "What is the single source of truth for the project's technology stack catalog?",
+      "expected_titles": [
+        "ProjectTechnology is the single source of truth for the project tech-stack catalog"
+      ]
+    },
+    {
+      "query": "How can an assistant update a project's language through MCP?",
+      "expected_titles": [
+        "rag_update_project MCP tool: how the LLM sets project languages"
+      ]
+    },
+    {
+      "query": "Why must the web container be restarted together with the app container?",
+      "expected_titles": [
+        "Restarting only the app container 502s the stack — rag-web (nginx) caches the app upstream IP; restart web too"
+      ]
+    },
+    {
+      "query": "When is project_paths used to resolve a project from cwd?",
+      "expected_titles": [
+        "project_paths is only read for cwd-based project resolution on the bare /mcp/rag route — dormant under the scoped /mcp/rag/{project} URL"
+      ]
+    }
+  ]
+}
