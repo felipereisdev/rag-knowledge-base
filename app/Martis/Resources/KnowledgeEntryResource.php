@@ -110,7 +110,7 @@ class KnowledgeEntryResource extends Resource
                 ->rules(['required', 'exists:projects,id'])
                 ->span(6),
             Select::make('category', __('rag.fields.category'))
-                ->options(KnowledgeCategory::options())
+                ->optionsFromMap(KnowledgeCategory::options())
                 ->default(KnowledgeCategory::Insight->value)
                 ->required()
                 ->rules(['sometimes', Rule::in(KnowledgeCategory::values())])
@@ -126,7 +126,7 @@ class KnowledgeEntryResource extends Resource
                 ->span(12),
 
             Select::make('status', __('rag.fields.status'))
-                ->options(KnowledgeStatus::options())
+                ->optionsFromMap(KnowledgeStatus::options())
                 ->default(KnowledgeStatus::Pending->value)
                 ->required()
                 ->rules(['sometimes', Rule::in(KnowledgeStatus::values())])
@@ -166,9 +166,9 @@ class KnowledgeEntryResource extends Resource
                 ->sortable()
                 ->searchable(),
             Select::make('category', __('rag.fields.category'))
-                ->options(KnowledgeCategory::options()),
+                ->optionsFromMap(KnowledgeCategory::options()),
             Select::make('status', __('rag.fields.status'))
-                ->options(KnowledgeStatus::options()),
+                ->optionsFromMap(KnowledgeStatus::options()),
             DateTime::make('created_at', __('rag.fields.created_at'))
                 ->sortable(),
         ];

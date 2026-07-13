@@ -66,7 +66,7 @@ class ProjectResource extends Resource
                 ->help('Programming languages, frameworks and databases used in the project.'),
 
             Select::make('language', __('rag.fields.language'))
-                ->options(ProjectLanguage::options())
+                ->optionsFromMap(ProjectLanguage::options())
                 ->rules(['sometimes', Rule::in(ProjectLanguage::values())])
                 ->help(__('rag.fields.language_help')),
         ];

@@ -15,6 +15,7 @@ class MainDashboard extends Dashboard
     public function __construct(?string $name = null, ?string $uriKey = null)
     {
         parent::__construct($name ?? __('rag.dashboard.main'), $uriKey ?? 'main');
+        $this->withIcon('chart-line-up');
     }
 
     /**

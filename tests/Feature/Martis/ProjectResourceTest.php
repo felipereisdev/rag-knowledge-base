@@ -1,5 +1,6 @@
 <?php
 
+use App\Martis\Resources\ProjectResource;
 use App\Models\Project;
 
 describe('ProjectResource', function () {
@@ -32,6 +33,17 @@ describe('ProjectResource', function () {
         ]);
 
         $response->assertUnprocessable();
+    });
+
+    it('serializes translated language options with machine values', function () {
+        $language = collect((new ProjectResource)->fields(request()))
+            ->map(fn ($field): array => $field->toArray())
+            ->firstWhere('attribute', 'language');
+
+        expect($language['options'][0])->toBe([
+            'label' => 'English',
+            'value' => 'en',
+        ]);
     });
 
     it('can update a project', function () {

@@ -1,5 +1,6 @@
 <?php
 
+use App\Martis\Resources\KnowledgeEntryResource;
 use App\Models\KnowledgeEntry;
 use App\Models\Project;
 
@@ -32,6 +33,30 @@ describe('KnowledgeEntryResource', function () {
         ]);
 
         $response->assertUnprocessable();
+    });
+
+    it('serializes translated category and status options with machine values', function () {
+        $resource = new KnowledgeEntryResource;
+        $formFields = collect($resource->fields(request()))
+            ->map(fn ($field): array => $field->toArray())
+            ->keyBy('attribute');
+        $indexFields = collect($resource->fieldsForIndex(request()))
+            ->map(fn ($field): array => $field->toArray())
+            ->keyBy('attribute');
+
+        expect($formFields['category']['options'][0])->toBe([
+            'label' => 'Business Rule',
+            'value' => 'business-rule',
+        ])->and($formFields['status']['options'][0])->toBe([
+            'label' => 'Pending',
+            'value' => 'pending',
+        ])->and($indexFields['category']['options'][0])->toBe([
+            'label' => 'Business Rule',
+            'value' => 'business-rule',
+        ])->and($indexFields['status']['options'][0])->toBe([
+            'label' => 'Pending',
+            'value' => 'pending',
+        ]);
     });
 
     it('can list entries', function () {
