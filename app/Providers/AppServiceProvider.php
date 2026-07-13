@@ -5,6 +5,9 @@ namespace App\Providers;
 use App\Models\Entity;
 use App\Models\Relation;
 use App\Services\Importance\ClaudeImportanceJudge;
+use App\Services\Importance\DeterministicImportanceRules;
+use App\Services\Importance\HybridImportanceClassifier;
+use App\Services\Importance\ImportanceCandidateNormalizer;
 use App\Services\Importance\ImportancePrompt;
 use App\Services\Importance\ImportanceResponseParser;
 use App\Services\Importance\SemanticImportanceJudge;
@@ -39,6 +42,14 @@ class AppServiceProvider extends ServiceProvider
             ),
             model: (string) config('rag.importance.model'),
             timeoutSeconds: (int) config('rag.importance.timeout'),
+        ));
+
+        $this->app->bind(HybridImportanceClassifier::class, fn ($app) => new HybridImportanceClassifier(
+            $app->make(ImportanceCandidateNormalizer::class),
+            new DeterministicImportanceRules((string) config('rag.importance.rules_version')),
+            $app->make(SemanticImportanceJudge::class),
+            model: (string) config('rag.importance.model'),
+            promptVersion: (string) config('rag.importance.prompt_version'),
         ));
 
         $embeddingProvider = (string) config('rag.embeddings.provider', 'local-embedder');

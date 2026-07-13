@@ -1,0 +1,397 @@
+{
+  "_meta": {
+    "purpose": "Reviewed calibration corpus of knowledge that MUST survive the importance classifier. Every entry here is knowledge a human reviewer confirmed is worth keeping. The deterministic rules may never hard-veto any of them: a veto here means the rule is too aggressive and the RULE must be fixed, never the fixture.",
+    "content": "All examples are synthetic or anonymized. No real credentials, hostnames, customer names, or private repository content.",
+    "rules_version_reviewed": "v1",
+    "reviewed_on": "2026-07-13"
+  },
+  "fixtures": [
+    {
+      "id": "arch-outbox-pattern",
+      "kind": "architectural-decision",
+      "retention_reason": "Explains the durable architecture of event publishing; a future agent that adds an event would otherwise publish inside the transaction and lose events on rollback.",
+      "candidate": {
+        "title": "Domain events are published through an outbox table, never inline",
+        "content": "We publish domain events by writing them to the `event_outbox` table inside the same transaction as the aggregate write, and a relay worker ships them to the broker afterwards. Publishing inline from the service was dropped because a broker timeout rolled back an order that had already been charged. Any new event must go through OutboxWriter::append(); direct calls to the broker client from application code are rejected in review.",
+        "category": "architecture",
+        "source": "condense",
+        "tags": ["events", "outbox", "transactions"],
+        "entities": [
+          {"name": "OutboxWriter", "type": "class"},
+          {"name": "event_outbox", "type": "table"}
+        ],
+        "relations": [
+          {"subject": "OutboxWriter", "predicate": "writes_to", "object": "event_outbox"}
+        ]
+      }
+    },
+    {
+      "id": "arch-read-model-projection",
+      "kind": "architectural-decision",
+      "retention_reason": "Records why reads bypass the ORM; without it someone will 'simplify' the reporting endpoints back into eager-loaded relations and reintroduce the N+1 blowup.",
+      "candidate": {
+        "title": "Reporting endpoints read from projections, not from the write model",
+        "content": "Reporting queries are served from the `report_daily_totals` projection, which the nightly job rebuilds. The write-model aggregates are not eager-loaded for reports because a single dashboard request previously issued more than 400 queries. The rule is: no reporting controller may touch an Eloquent aggregate root directly; it must query a projection table.",
+        "category": "architecture",
+        "source": "condense",
+        "tags": ["reporting", "projections", "performance"],
+        "entities": [
+          {"name": "report_daily_totals", "type": "table"}
+        ],
+        "relations": []
+      }
+    },
+    {
+      "id": "arch-single-writer-service",
+      "kind": "architectural-decision",
+      "retention_reason": "Single-writer invariant is invisible in the code; an agent adding a second write path would silently break idempotency.",
+      "candidate": {
+        "title": "KnowledgeWriter is the single write path for knowledge entries",
+        "content": "Every ingestion source (condense, MCP, CLI, import) goes through KnowledgeWriter. We centralized this after two sources drifted apart and one of them stopped attaching tags. Because the writer owns the transaction boundary, any post-commit side effect must be registered there and never scheduled from a controller.",
+        "category": "architecture",
+        "source": "condense",
+        "tags": ["ingestion", "write-path"],
+        "entities": [
+          {"name": "KnowledgeWriter", "type": "class"}
+        ],
+        "relations": []
+      }
+    },
+    {
+      "id": "arch-queue-isolation",
+      "kind": "architectural-decision",
+      "retention_reason": "Explains why a dedicated queue exists; merging it back into the default queue would starve interactive jobs behind slow model calls.",
+      "candidate": {
+        "title": "Model-backed jobs run on their own queue",
+        "content": "Jobs that call an external model run on the `classification` queue, isolated from `default`. They were moved off the default queue because a 90-second model timeout blocked notification delivery for every other job on the worker. New model-backed jobs must declare their queue explicitly; relying on the default connection is a review failure.",
+        "category": "architecture",
+        "source": "condense",
+        "tags": ["queues", "isolation"],
+        "entities": [
+          {"name": "classification", "type": "queue"}
+        ],
+        "relations": []
+      }
+    },
+    {
+      "id": "rule-refund-window",
+      "kind": "business-rule",
+      "retention_reason": "Hard business rule with a boundary condition that is easy to get wrong and is not written anywhere else.",
+      "candidate": {
+        "title": "Refunds are allowed within 14 days of delivery, not of purchase",
+        "content": "A refund request is accepted when it arrives within 14 days of the delivery timestamp. Purchase date is irrelevant, because slow shipments used to consume the whole window before the customer even received the parcel. Orders without a delivery timestamp are never auto-refundable and must be routed to manual review.",
+        "category": "business-rule",
+        "source": "mcp",
+        "tags": ["refunds", "orders"],
+        "entities": [
+          {"name": "RefundPolicy", "type": "class"}
+        ],
+        "relations": []
+      }
+    },
+    {
+      "id": "rule-invoice-numbering",
+      "kind": "business-rule",
+      "retention_reason": "Legal numbering constraint; violating it produces invalid invoices and is not enforced by the schema.",
+      "candidate": {
+        "title": "Invoice numbers are gapless per fiscal year and never reused",
+        "content": "Invoice numbers must be sequential and gapless within a fiscal year. A cancelled invoice keeps its number and is offset by a credit note; the number is never recycled, because tax audits treat a missing number as a deleted invoice. The sequence is allocated by `InvoiceNumberAllocator` under a row lock, so no code may compute the next number with max(id) + 1.",
+        "category": "business-rule",
+        "source": "mcp",
+        "tags": ["invoicing", "compliance"],
+        "entities": [
+          {"name": "InvoiceNumberAllocator", "type": "class"}
+        ],
+        "relations": []
+      }
+    },
+    {
+      "id": "rule-trial-downgrade",
+      "kind": "business-rule",
+      "retention_reason": "Non-obvious lifecycle rule with a data-retention consequence; a wrong implementation deletes customer data.",
+      "candidate": {
+        "title": "An expired trial downgrades to the free plan and never deletes data",
+        "content": "When a trial expires the account moves to the `free` plan with read-only access to anything above the free quota. Data is never deleted on downgrade, because a customer who upgrades later expects their projects back. Deletion only happens after an explicit account-closure request plus the 30-day grace period.",
+        "category": "business-rule",
+        "source": "mcp",
+        "tags": ["billing", "plans", "retention"],
+        "entities": [
+          {"name": "free", "type": "plan"}
+        ],
+        "relations": []
+      }
+    },
+    {
+      "id": "rule-vat-reverse-charge",
+      "kind": "business-rule",
+      "retention_reason": "Tax rule with an exact condition set; getting it wrong produces incorrect invoices in a whole market.",
+      "candidate": {
+        "title": "Reverse-charge VAT applies only to validated EU business customers outside the seller country",
+        "content": "We must apply reverse charge only when the customer is a business, holds a VAT number validated by VIES, and is established in an EU country other than the seller's. If VIES validation is unavailable we charge domestic VAT instead of assuming reverse charge, because an unverified exemption is our liability, not the customer's.",
+        "category": "business-rule",
+        "source": "mcp",
+        "tags": ["vat", "tax", "eu"],
+        "entities": [
+          {"name": "VIES", "type": "service"}
+        ],
+        "relations": []
+      }
+    },
+    {
+      "id": "ops-embedding-dimension-lock",
+      "kind": "operational-constraint",
+      "retention_reason": "Operational constraint tied to a database column type; changing the model without this knowledge corrupts the vector index.",
+      "candidate": {
+        "title": "The embedding dimension is locked to 768 by the vector column",
+        "content": "`chunk_embeddings.embedding` is declared as vector(768), so the embedding model must produce 768 dimensions. Changing RAG_EMBEDDING_DIM alone will fail at insert time and leaves the index half-populated. Switching models requires a migration of the column plus a full re-embed of every chunk, in that order.",
+        "category": "constraint",
+        "source": "condense",
+        "tags": ["embeddings", "pgvector", "migrations"],
+        "entities": [
+          {"name": "chunk_embeddings", "type": "table"}
+        ],
+        "relations": []
+      }
+    },
+    {
+      "id": "ops-migration-lock-timeout",
+      "kind": "operational-constraint",
+      "retention_reason": "Prevents a production outage; the reason (ACCESS EXCLUSIVE lock queueing) is invisible from the migration file.",
+      "candidate": {
+        "title": "Production migrations must set a lock_timeout before altering hot tables",
+        "content": "Any ALTER TABLE on `orders` or `sessions` must run with `SET lock_timeout = '3s'`. Without it, the migration waits for an ACCESS EXCLUSIVE lock and every subsequent query queues behind it, which is how the checkout outage happened. If the migration times out, retry it during the low-traffic window rather than raising the timeout.",
+        "category": "constraint",
+        "source": "condense",
+        "tags": ["postgres", "migrations", "locking"],
+        "entities": [
+          {"name": "orders", "type": "table"}
+        ],
+        "relations": []
+      }
+    },
+    {
+      "id": "ops-rate-limit-budget",
+      "kind": "operational-constraint",
+      "retention_reason": "Encodes an external quota and the concrete backoff that keeps us inside it; rediscovering it costs a day of throttled traffic.",
+      "candidate": {
+        "title": "The shipping provider allows 60 requests per minute per account",
+        "content": "The shipping API rejects everything above 60 requests per minute per account with HTTP 429 and a 10-minute cooldown penalty. The sync worker must therefore stay at a maximum concurrency of 4 with a 1-second delay between batches. Never raise concurrency to speed up a backlog: the cooldown makes the backlog worse, not better.",
+        "category": "constraint",
+        "source": "condense",
+        "tags": ["rate-limit", "integrations"],
+        "entities": [
+          {"name": "ShippingClient", "type": "class"}
+        ],
+        "relations": []
+      }
+    },
+    {
+      "id": "ops-worker-memory-ceiling",
+      "kind": "operational-constraint",
+      "retention_reason": "Non-obvious deployment constraint linking worker memory to an OOM killer; without it the next tuning attempt reintroduces silent job loss.",
+      "candidate": {
+        "title": "Queue workers run with --memory=256 because the container limit is 512Mi",
+        "content": "Workers are started with `--memory=256` so PHP restarts the worker gracefully before the container's 512Mi limit triggers the OOM killer. An OOM-killed worker loses the job it was reserving, and the job is only recovered after the visibility timeout. Raising the worker memory flag requires raising the container limit in the same change.",
+        "category": "constraint",
+        "source": "condense",
+        "tags": ["queues", "kubernetes", "memory"],
+        "entities": [
+          {"name": "queue-worker", "type": "deployment"}
+        ],
+        "relations": []
+      }
+    },
+    {
+      "id": "conv-config-no-closures",
+      "kind": "convention",
+      "retention_reason": "Convention with a hard failure mode (config:cache) that an agent will otherwise break on the first custom resolver.",
+      "candidate": {
+        "title": "Never put closures in config files",
+        "content": "Config values must be var_export-safe: use a class-method array such as [MyResolver::class, 'resolve'] instead of a closure. A closure in any config file breaks `php artisan config:cache`, and setting it from a service provider does not help because config:cache boots providers before it snapshots the config.",
+        "category": "convention",
+        "source": "condense",
+        "tags": ["config", "laravel"],
+        "entities": [
+          {"name": "config:cache", "type": "command"}
+        ],
+        "relations": []
+      }
+    },
+    {
+      "id": "conv-enum-over-string",
+      "kind": "convention",
+      "retention_reason": "Project-wide convention that keeps DB check constraints and PHP in sync; a hand-typed option list silently drifts.",
+      "candidate": {
+        "title": "Finite value sets are PHP enums, and the enum is the only source of options",
+        "content": "Every finite value set is a backed PHP enum, and select options must come from `SomeEnum::values()` rather than a hand-written array. We adopted this after a status option list drifted from the database check constraint and produced rows the application refused to read back. A new value must be added to the enum and to the check constraint in the same migration.",
+        "category": "convention",
+        "source": "condense",
+        "tags": ["enums", "conventions"],
+        "entities": [
+          {"name": "KnowledgeStatus", "type": "enum"}
+        ],
+        "relations": []
+      }
+    },
+    {
+      "id": "conv-test-database-isolation",
+      "kind": "convention",
+      "retention_reason": "Convention that prevents flaky tests and accidental network calls; the reason is not discoverable from the test file.",
+      "candidate": {
+        "title": "The test suite fakes the queue globally so no test reaches the embedder",
+        "content": "The base TestCase calls Queue::fake() in setUp, because under the sync queue connection creating a knowledge entry would dispatch the index job and hit the real embedder on localhost. A test that needs to assert real indexing must dispatch the job explicitly instead of removing the global fake.",
+        "category": "convention",
+        "source": "condense",
+        "tags": ["testing", "queues"],
+        "entities": [
+          {"name": "TestCase", "type": "class"}
+        ],
+        "relations": []
+      }
+    },
+    {
+      "id": "conv-translations-three-locales",
+      "kind": "convention",
+      "retention_reason": "Convention with an exact key-parity requirement that is enforced nowhere in code.",
+      "candidate": {
+        "title": "Every user-facing string ships in en, pt_PT and pt_BR with identical keys",
+        "content": "User-visible copy must go through __() and exist in all three locale files with the same key set. A key present in one locale only renders as the raw key in the others, which is how the billing modal shipped showing `edgeflow.gates.pro.title` to Brazilian users. Placeholders such as :plan must be passed as arguments and never concatenated.",
+        "category": "convention",
+        "source": "condense",
+        "tags": ["i18n", "conventions"],
+        "entities": [
+          {"name": "lang", "type": "directory"}
+        ],
+        "relations": []
+      }
+    },
+    {
+      "id": "fix-uuid-index-cast",
+      "kind": "non-obvious-fix",
+      "retention_reason": "A fix whose cause (implicit cast disabling an index) is genuinely non-obvious and will be reintroduced by anyone writing a raw query.",
+      "candidate": {
+        "title": "Comparing a uuid column to a string literal disables the index",
+        "content": "The slow lookup on `sessions.uuid` was caused by comparing the uuid column with a text parameter, which forces a cast and skips the btree index. Binding the parameter as uuid (or casting explicitly with ::uuid) restored the index scan and cut the query from 900ms to 3ms. Any raw query against a uuid column must bind the parameter with the correct type.",
+        "category": "insight",
+        "source": "condense",
+        "tags": ["postgres", "indexes", "performance"],
+        "entities": [
+          {"name": "sessions", "type": "table"}
+        ],
+        "relations": []
+      }
+    },
+    {
+      "id": "fix-timezone-double-conversion",
+      "kind": "non-obvious-fix",
+      "retention_reason": "Subtle data bug with a precise root cause; the wrong fix (shifting the value) hides it instead of solving it.",
+      "candidate": {
+        "title": "Daily aggregates were off by one day because timestamps were converted twice",
+        "content": "The daily totals job grouped by a timestamp that had already been converted to the application timezone, and then converted it again on render, which shifted every row before 01:00 into the previous day. The fix is to keep all stored timestamps in UTC and convert only at the presentation boundary. Never call setTimezone() inside a query builder expression.",
+        "category": "insight",
+        "source": "condense",
+        "tags": ["timezones", "reporting", "bugs"],
+        "entities": [
+          {"name": "DailyTotalsJob", "type": "class"}
+        ],
+        "relations": []
+      }
+    },
+    {
+      "id": "fix-unique-violation-not-all-query-exceptions",
+      "kind": "non-obvious-fix",
+      "retention_reason": "A correctness rule about error handling that a broad catch block will violate again; the failure it prevents is silent data loss.",
+      "candidate": {
+        "title": "Catch SQLSTATE 23505 specifically, not every QueryException",
+        "content": "The idempotent upsert used to catch QueryException wholesale and treat it as a lost race, which swallowed a not-null violation and left the row unwritten for hours. Only SQLSTATE 23505 means a unique-key race; every other QueryException must be rethrown so it surfaces as a real failure.",
+        "category": "insight",
+        "source": "condense",
+        "tags": ["postgres", "error-handling", "idempotency"],
+        "entities": [
+          {"name": "QueryException", "type": "class"}
+        ],
+        "relations": []
+      }
+    },
+    {
+      "id": "dec-http-client-over-sdk",
+      "kind": "decision-with-rationale",
+      "retention_reason": "Records a rejected alternative and why; without it the vendor SDK gets reintroduced on the next integration.",
+      "candidate": {
+        "title": "We call the payment provider over plain HTTP instead of its official SDK",
+        "content": "We decided to talk to the payment provider through the framework HTTP client rather than the vendor SDK. The SDK pins an old guzzle constraint and swallows the idempotency key on retries, which produced a double charge in staging. The cost is that we maintain our own request signing, which lives in PaymentSigner and is covered by contract tests.",
+        "category": "design-decision",
+        "source": "condense",
+        "tags": ["payments", "http", "sdk"],
+        "entities": [
+          {"name": "PaymentSigner", "type": "class"}
+        ],
+        "relations": []
+      }
+    },
+    {
+      "id": "dec-soft-delete-rejected",
+      "kind": "decision-with-rationale",
+      "retention_reason": "Explicitly rejected approach with its rationale; the alternative looks attractive and would be re-proposed otherwise.",
+      "candidate": {
+        "title": "Rejected knowledge entries are kept as rejected instead of being deleted",
+        "content": "We chose to keep rejected entries in the table with status `rejected` rather than deleting them, because a rejected entry is our only evidence when we tune the classifier and want to measure false rejections. Rejected entries are excluded from search and from the approval queue, so they cost visibility nothing.",
+        "category": "design-decision",
+        "source": "condense",
+        "tags": ["knowledge", "lifecycle"],
+        "entities": [
+          {"name": "KnowledgeStatus", "type": "enum"}
+        ],
+        "relations": []
+      }
+    },
+    {
+      "id": "dec-shadow-mode-first",
+      "kind": "decision-with-rationale",
+      "retention_reason": "Rollout decision with exit criteria; skipping shadow mode would silently reject real knowledge.",
+      "candidate": {
+        "title": "The importance classifier ships in shadow mode before it may reject anything",
+        "content": "The classifier is deployed with mode `shadow` first: it records a verdict but never rejects an entry. We will only switch to `enforce` after at least 50 reviewed entries show zero false rejections on the must-keep corpus, because an automatic rejection is invisible to the person who wrote the knowledge. Rolling back is a mode change, not a deployment.",
+        "category": "design-decision",
+        "source": "condense",
+        "tags": ["classifier", "rollout"],
+        "entities": [
+          {"name": "ImportanceClassifierSetting", "type": "model"}
+        ],
+        "relations": []
+      }
+    },
+    {
+      "id": "dec-mcp-async-response",
+      "kind": "decision-with-rationale",
+      "retention_reason": "Interface contract with a latency rationale; a synchronous implementation would time out the MCP client.",
+      "candidate": {
+        "title": "The MCP store tool answers immediately and classifies asynchronously",
+        "content": "rag_store_knowledge must return as soon as the entry is persisted and report that classification was scheduled. It must not wait for the model call, because a 90-second judge call exceeds the MCP client timeout and the agent retries the whole tool call, creating duplicates. The entry is created as `classifying` and the job transitions it afterwards.",
+        "category": "design-decision",
+        "source": "condense",
+        "tags": ["mcp", "async", "latency"],
+        "entities": [
+          {"name": "rag_store_knowledge", "type": "tool"}
+        ],
+        "relations": []
+      }
+    },
+    {
+      "id": "conv-no-vendor-edits",
+      "kind": "convention",
+      "retention_reason": "Convention whose violation is silently erased by composer install; the reason must be stated once and remembered.",
+      "candidate": {
+        "title": "Never edit files under vendor/",
+        "content": "Changes under `vendor/` are erased by the next composer install, so a fix applied there is lost and the bug returns in production while it stays fixed on the developer machine. Extend the package through its documented hooks instead, and if no hook exists, open an upstream issue and keep a local override in the host application.",
+        "category": "convention",
+        "source": "condense",
+        "tags": ["composer", "conventions"],
+        "entities": [
+          {"name": "vendor", "type": "directory"}
+        ],
+        "relations": []
+      }
+    }
+  ]
+}
