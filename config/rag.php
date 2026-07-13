@@ -1,5 +1,7 @@
 <?php
 
+use App\Services\Importance\ImportancePrompt;
+
 return [
     'embeddings' => [
         'provider' => env('RAG_EMBEDDING_PROVIDER', 'local-embedder'),
@@ -17,5 +19,21 @@ return [
     ],
     'hooks' => [
         'token' => env('RAG_HOOK_TOKEN', ''),
+    ],
+
+    // Fixed, code-owned defaults for the hybrid importance classifier's
+    // semantic judge. Only `mode` and `threshold` are administrator-editable
+    // (via the ImportanceClassifierSetting singleton, added in Task 4/7);
+    // everything below is versioned in code so historical assessments stay
+    // attributable to the exact model/prompt/rules that produced them.
+    'importance' => [
+        'model' => env('RAG_IMPORTANCE_MODEL', 'claude-haiku-4-5-20251001'),
+        'timeout' => (int) env('RAG_IMPORTANCE_TIMEOUT', 90),
+        'prompt_version' => ImportancePrompt::VERSION,
+        'rules_version' => 'v1',
+        'max_reason_count' => (int) env('RAG_IMPORTANCE_MAX_REASON_COUNT', 5),
+        'max_reason_length' => (int) env('RAG_IMPORTANCE_MAX_REASON_LENGTH', 280),
+        'stale_after_minutes' => (int) env('RAG_IMPORTANCE_STALE_AFTER_MINUTES', 15),
+        'queue' => env('RAG_IMPORTANCE_QUEUE', 'classification'),
     ],
 ];
