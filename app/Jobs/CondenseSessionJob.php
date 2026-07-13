@@ -28,7 +28,9 @@ final class CondenseSessionJob implements ShouldQueue
         public readonly string $projectId,
         public readonly string $transcriptPath,
         public readonly string $sessionId,
-    ) {}
+    ) {
+        $this->onQueue('condense');
+    }
 
     public function handle(
         TranscriptParser $parser,

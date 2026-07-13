@@ -20,7 +20,7 @@ it('indexes pending entries on create', function () {
         'category' => 'insight', 'source' => 'condense', 'status' => 'pending',
     ]);
 
-    Queue::assertPushed(IndexEntryJob::class, fn ($job) => $job->entryId === (string) $entry->id);
+    Queue::assertPushed(IndexEntryJob::class, fn ($job) => $job->entryId === (int) $entry->id);
 });
 
 it('still indexes approved entries on create', function () {
@@ -47,7 +47,7 @@ it('queues writer-created entries for indexing after commit', function () {
 
     Queue::assertPushed(
         IndexEntryJob::class,
-        fn (IndexEntryJob $job) => $job->entryId === (string) $entry->id
+        fn (IndexEntryJob $job) => $job->entryId === (int) $entry->id
             && $job->afterCommit === true,
     );
 });
@@ -64,7 +64,7 @@ it('queues updated entries for indexing after commit', function () {
 
     Queue::assertPushed(
         IndexEntryJob::class,
-        fn (IndexEntryJob $job) => $job->entryId === (string) $entry->id
+        fn (IndexEntryJob $job) => $job->entryId === (int) $entry->id
             && $job->afterCommit === true,
     );
 });

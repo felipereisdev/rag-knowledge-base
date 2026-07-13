@@ -20,8 +20,10 @@ class IndexEntryJob implements ShouldQueue
     public int $backoff = 10;
 
     public function __construct(
-        public readonly string $entryId,
-    ) {}
+        public readonly int $entryId,
+    ) {
+        $this->onQueue('indexing');
+    }
 
     public function handle(EntryIndexer $indexer): void
     {
