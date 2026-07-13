@@ -113,14 +113,16 @@ describe('KnowledgeEntryResource', function () {
         ]);
     });
 
-    it('keeps the detail layout and omits only relationship labels', function () {
-        $detailFields = (new KnowledgeEntryResource)->fieldsForDetail(request());
-
-        $fields = collect($detailFields)
-            ->map(fn ($field): array => $field->toArray())
+    it('renders relationship fields full width without changing the scalar detail layout', function () {
+        $detailItems = collect((new KnowledgeEntryResource)->fieldsForDetail(request()))
+            ->map(fn ($item): array => $item->toArray());
+        $fields = $detailItems
+            ->filter(fn (array $item): bool => $item['type'] !== 'section')
             ->keyBy('attribute');
+        $section = $detailItems->firstWhere('type', 'section');
+        $relationships = collect($section['fields'] ?? [])->keyBy('attribute');
 
-        expect($detailFields)->toHaveCount(10)
+        expect($detailItems)->toHaveCount(9)
             ->and($fields->keys()->all())->toBe([
                 'project_id',
                 'category',
@@ -129,15 +131,15 @@ describe('KnowledgeEntryResource', function () {
                 'status',
                 'source',
                 'author',
-                'tags',
-                'entities',
                 'metadata',
             ])
             ->and($fields['content']['label'])->toBe('Content')
-            ->and($fields['tags']['label'])->toBe('')
-            ->and($fields['tags']['colSpan'])->toBe(12)
-            ->and($fields['entities']['label'])->toBe('')
-            ->and($fields['entities']['colSpan'])->toBe(12);
+            ->and($section['title'])->toBeNull()
+            ->and($relationships->keys()->all())->toBe(['tags', 'entities'])
+            ->and($relationships['tags']['label'])->toBe('')
+            ->and($relationships['tags']['colSpan'])->toBe(12)
+            ->and($relationships['entities']['label'])->toBe('')
+            ->and($relationships['entities']['colSpan'])->toBe(12);
     });
 
     it('can list entries', function () {

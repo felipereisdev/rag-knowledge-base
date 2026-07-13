@@ -26,6 +26,7 @@ use Martis\Fields\Select;
 use Martis\Fields\Text;
 use Martis\Filters\DateRangeFilter;
 use Martis\Filters\Filter;
+use Martis\Layout\Section;
 use Martis\Resource;
 
 class KnowledgeEntryResource extends Resource
@@ -186,19 +187,28 @@ class KnowledgeEntryResource extends Resource
     }
 
     /**
-     * Keep the default drawer layout while omitting the redundant headings on
-     * the Tags and Entities relationship panels. Create/update keep the labels.
+     * Keep scalar fields in the default drawer layout. Wrap the relationship
+     * panels in a headerless section so they render at full width instead of
+     * passing through the drawer's scalar label/value grid.
      */
     public function fieldsForDetail(Request $request): array
     {
-        $fields = $this->fields($request);
+        $detailFields = [];
+        $relationshipFields = [];
 
-        foreach ($fields as $field) {
+        foreach ($this->fields($request) as $field) {
             if ($field instanceof Field && in_array($field->attribute(), ['tags', 'entities'], true)) {
                 $field->withLabel('');
+                $relationshipFields[] = $field;
+
+                continue;
             }
+
+            $detailFields[] = $field;
         }
 
-        return $fields;
+        $detailFields[] = Section::make(null, $relationshipFields)->columns(12);
+
+        return $detailFields;
     }
 }
