@@ -16,6 +16,9 @@ use Throwable;
  *    a shell string, so it cannot smuggle extra CLI flags or shell syntax;
  *  - the process runs with no tools, no slash commands, and safe mode, so it
  *    cannot act on the untrusted candidate content it is asked to judge;
+ *  - the process runs from an isolated working directory (the system temp
+ *    dir, never the project root), so it has no project access and cannot
+ *    auto-load this repo's CLAUDE.md or other project context;
  *  - the timeout is bounded and configured, never "forever";
  *  - every failure mode (non-zero exit, timeout, unexpected exception,
  *    invalid response) maps to `ImportanceClassificationException` with a
@@ -42,6 +45,7 @@ final class ClaudeImportanceJudge implements SemanticImportanceJudge
             '',
             '--output-format',
             'json',
+            '-p',
             '--model',
             $this->model,
             '--append-system-prompt',
@@ -50,6 +54,10 @@ final class ClaudeImportanceJudge implements SemanticImportanceJudge
 
         try {
             $result = Process::timeout($this->timeoutSeconds)
+                // Run from an isolated cwd (never the project root) so Claude
+                // Code cannot auto-load CLAUDE.md or other project context
+                // into a session that is judging untrusted candidate text.
+                ->path(sys_get_temp_dir())
                 ->input($candidate->json())
                 ->run($command);
         } catch (ProcessTimedOutException) {

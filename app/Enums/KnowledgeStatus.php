@@ -4,10 +4,10 @@ namespace App\Enums;
 
 enum KnowledgeStatus: string
 {
-    case Classifying = 'classifying';
     case Pending = 'pending';
     case Approved = 'approved';
     case Rejected = 'rejected';
+    case Classifying = 'classifying';
 
     /**
      * @return list<string>

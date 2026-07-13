@@ -45,10 +45,13 @@ final class ImportanceClassificationException extends RuntimeException
     }
 
     /**
-     * Also covers a missing/unresolvable `claude` binary: without a shell,
-     * an unresolvable executable surfaces as a non-zero exit (conventionally
-     * 127) rather than a distinct PHP exception, so there is no separate
-     * "binary unavailable" case to model here.
+     * Also covers a missing/unresolvable `claude` binary: Symfony's Process
+     * runs the array command through `/bin/sh -c 'exec ...'` on non-Windows
+     * (each argument is still escaped individually, so no shell
+     * interpolation of untrusted content is possible), and that wrapping
+     * shell is what surfaces an unresolvable executable as a non-zero exit
+     * (conventionally 127) rather than a distinct PHP exception. So there is
+     * no separate "binary unavailable" case to model here.
      */
     public static function processFailed(int $exitCode): self
     {

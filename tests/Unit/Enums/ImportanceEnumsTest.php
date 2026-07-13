@@ -29,9 +29,9 @@ it('exposes every supported knowledge source and status', function () {
         'import',
         'manual',
     ])->and(KnowledgeStatus::values())->toBe([
-        'classifying',
         'pending',
         'approved',
         'rejected',
+        'classifying',
     ])->and(KnowledgeStatus::options()['classifying'])->toBe('Classifying');
 });

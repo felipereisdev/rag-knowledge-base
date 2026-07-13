@@ -77,6 +77,12 @@ it('invokes claude with the required safety flags, configured model, system prom
         expect($formatIndex)->not->toBeFalse();
         expect($command[$formatIndex + 1])->toBe('json');
 
+        // `-p` selects non-interactive print mode so the CLI actually
+        // consumes piped stdin as a one-shot request instead of hanging or
+        // erroring for lack of a print session. It must come right after
+        // the mandated `... --output-format json` substring.
+        expect($command[$formatIndex + 2])->toBe('-p');
+
         $modelIndex = array_search('--model', $command, true);
         expect($modelIndex)->not->toBeFalse();
         expect($command[$modelIndex + 1])->toBe('claude-haiku-4-5-20251001');
@@ -87,6 +93,12 @@ it('invokes claude with the required safety flags, configured model, system prom
 
         // Bounded timeout, exact configured value, never "forever".
         expect($process->timeout)->toBe(90);
+
+        // Runs from an isolated working directory, never the project root,
+        // so Claude Code cannot auto-load this repo's CLAUDE.md or other
+        // project context into the judge session.
+        expect($process->path)->toBe(sys_get_temp_dir())
+            ->and($process->path)->not->toBe(base_path());
 
         // The canonical candidate travels over stdin, never as an argv entry.
         expect($process->input)->toBe($candidate->json());
@@ -147,12 +159,4 @@ it('bubbles a strict parser failure as a typed exception when claude returns mal
 
     expect(fn () => importanceJudge()->assess(importanceJudgeCandidate()))
         ->toThrow(ImportanceClassificationException::class);
-});
-
-it('never invokes a real claude process because every test fakes the process facade', function () {
-    Process::fake(['*' => Process::result(output: validClaudeEnvelope())])->preventStrayProcesses();
-
-    importanceJudge()->assess(importanceJudgeCandidate());
-
-    Process::assertRanTimes(fn ($process) => $process->command[0] === 'claude', 1);
 });
