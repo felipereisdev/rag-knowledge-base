@@ -86,63 +86,81 @@ class HybridSearcher
     }
 
     /**
-     * @param  array<float>  $queryVector
-     * @return array<string, array{score: float, rank: int}>
+     * @param  list<float>  $queryVector
+     * @return array<int, array{
+     *     score: float,
+     *     rank: int,
+     *     chunkIndex: int,
+     *     chunkContent: string
+     * }>
      */
     private function vectorSearch(array $queryVector, ?string $projectId, ?string $category): array
     {
-        $vectorStr = '['.implode(',', $queryVector).']';
+        $vector = '['.implode(',', $queryVector).']';
 
-        // Use raw query for pgvector cosine distance
-        $sql = 'SELECT entry_id, 1 - (embedding <=> ?::vector) as score
-                FROM chunk_embeddings
-                WHERE 1 - (embedding <=> ?::vector) >= ?';
+        $sql = 'WITH ranked_chunks AS (
+                SELECT
+                    ce.entry_id,
+                    ce.chunk_index,
+                    ce.content,
+                    1 - (ce.embedding <=> ?::vector) AS semantic_similarity,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY ce.entry_id
+                        ORDER BY ce.embedding <=> ?::vector
+                    ) AS chunk_rank
+                FROM chunk_embeddings ce
+                JOIN knowledge_entries ke ON ke.id = ce.entry_id
+                WHERE ke.status = \'approved\'';
 
-        $bindings = [$vectorStr, $vectorStr, $this->minScore];
+        $bindings = [$vector, $vector];
 
-        if ($projectId) {
-            $sql .= ' AND project_id = ?';
+        if ($projectId !== null) {
+            $sql .= ' AND ke.project_id = ?';
             $bindings[] = $projectId;
         }
 
-        if ($category) {
-            $sql .= ' AND entry_id IN (SELECT id FROM knowledge_entries WHERE category = ?)';
+        if ($category !== null) {
+            $sql .= ' AND ke.category = ?';
             $bindings[] = $category;
         }
 
-        $sql .= ' ORDER BY embedding <=> ?::vector LIMIT ?';
-        $bindings[] = $vectorStr;
+        $sql .= ')
+             SELECT entry_id, chunk_index, content, semantic_similarity
+             FROM ranked_chunks
+             WHERE chunk_rank = 1
+               AND semantic_similarity >= ?
+             ORDER BY semantic_similarity DESC, entry_id ASC
+             LIMIT ?';
+
+        $bindings[] = $this->minScore;
         $bindings[] = $this->vectorTopK;
 
-        $results = DB::select($sql, $bindings);
+        $rows = DB::select($sql, $bindings);
+        $results = [];
 
-        // Aggregate by entry_id (max score).
-        // Filter out non-finite scores: pgvector returns NaN for cosine
-        // distance against a zero-norm vector, and Postgres treats NaN as
-        // greater than any number (so it slips through the >= minScore filter).
-        // PDO returns the score as the string "NaN", which PHP's (float) cast
-        // silently converts to 0.0, so we must inspect the raw value.
-        $aggregated = [];
-        $rank = 0;
-        foreach ($results as $row) {
-            $rawScore = is_string($row->score) ? strtoupper($row->score) : (string) $row->score;
-            if ($rawScore === 'NAN' || $rawScore === 'INF' || $rawScore === '-INF') {
+        foreach ($rows as $rank => $row) {
+            $rawScore = is_string($row->semantic_similarity)
+                ? strtoupper($row->semantic_similarity)
+                : (string) $row->semantic_similarity;
+
+            if (in_array($rawScore, ['NAN', 'INF', '-INF'], true)) {
                 continue;
             }
 
-            $score = (float) $row->score;
+            $score = (float) $row->semantic_similarity;
             if (! is_finite($score)) {
                 continue;
             }
 
-            if (! isset($aggregated[$row->entry_id])) {
-                $aggregated[$row->entry_id] = ['score' => $score, 'rank' => $rank++];
-            } else {
-                $aggregated[$row->entry_id]['score'] = max($aggregated[$row->entry_id]['score'], $score);
-            }
+            $results[(int) $row->entry_id] = [
+                'score' => $score,
+                'rank' => $rank,
+                'chunkIndex' => (int) $row->chunk_index,
+                'chunkContent' => (string) $row->content,
+            ];
         }
 
-        return $aggregated;
+        return $results;
     }
 
     /**

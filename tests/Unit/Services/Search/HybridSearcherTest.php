@@ -339,4 +339,114 @@ describe('HybridSearcher', function () {
         expect($entryIds)->toContain($entry1->id)
             ->and($entryIds)->not->toContain($entry2->id);
     });
+
+    it('filters non-approved entries before applying vector top k', function () {
+        $queryVector = array_fill(0, 768, 0.0);
+        $queryVector[0] = 1.0;
+        Embeddings::fake([[$queryVector]]);
+
+        $pending = KnowledgeEntry::create([
+            'project_id' => $this->project->id,
+            'title' => 'Pending nearest entry',
+            'content' => 'Pending content.',
+            'status' => 'pending',
+        ]);
+        $approved = KnowledgeEntry::create([
+            'project_id' => $this->project->id,
+            'title' => 'Approved second-nearest entry',
+            'content' => 'Approved content.',
+            'status' => 'approved',
+        ]);
+
+        $approvedVector = array_fill(0, 768, 0.0);
+        $approvedVector[0] = 0.8;
+        $approvedVector[1] = 0.6;
+
+        DB::table('chunk_embeddings')->insert([
+            [
+                'entry_id' => $pending->id,
+                'project_id' => $this->project->id,
+                'chunk_index' => 0,
+                'content' => 'Pending content.',
+                'embedding' => '['.implode(',', $queryVector).']',
+            ],
+            [
+                'entry_id' => $approved->id,
+                'project_id' => $this->project->id,
+                'chunk_index' => 0,
+                'content' => 'Approved content.',
+                'embedding' => '['.implode(',', $approvedVector).']',
+            ],
+        ]);
+
+        $results = (new HybridSearcher(
+            limit: 1,
+            minScore: 0.3,
+            expandGraph: false,
+            vectorTopK: 1,
+        ))->search('vectoronlyterm', $this->project->id);
+
+        expect($results)->toHaveCount(1)
+            ->and($results[0]->entryId)->toBe($approved->id);
+    });
+
+    it('applies vector top k to entries rather than chunks', function () {
+        $queryVector = array_fill(0, 768, 0.0);
+        $queryVector[0] = 1.0;
+        Embeddings::fake([[$queryVector]]);
+
+        $first = KnowledgeEntry::create([
+            'project_id' => $this->project->id,
+            'title' => 'Entry with two close chunks',
+            'content' => 'First entry.',
+            'status' => 'approved',
+        ]);
+        $second = KnowledgeEntry::create([
+            'project_id' => $this->project->id,
+            'title' => 'Entry with one useful chunk',
+            'content' => 'Second entry.',
+            'status' => 'approved',
+        ]);
+
+        $almostIdentical = array_fill(0, 768, 0.0);
+        $almostIdentical[0] = 0.99;
+        $almostIdentical[1] = 0.1;
+        $secondVector = array_fill(0, 768, 0.0);
+        $secondVector[0] = 0.8;
+        $secondVector[1] = 0.6;
+
+        DB::table('chunk_embeddings')->insert([
+            [
+                'entry_id' => $first->id,
+                'project_id' => $this->project->id,
+                'chunk_index' => 0,
+                'content' => 'Closest chunk.',
+                'embedding' => '['.implode(',', $queryVector).']',
+            ],
+            [
+                'entry_id' => $first->id,
+                'project_id' => $this->project->id,
+                'chunk_index' => 1,
+                'content' => 'Almost closest chunk.',
+                'embedding' => '['.implode(',', $almostIdentical).']',
+            ],
+            [
+                'entry_id' => $second->id,
+                'project_id' => $this->project->id,
+                'chunk_index' => 0,
+                'content' => 'Useful chunk from a different entry.',
+                'embedding' => '['.implode(',', $secondVector).']',
+            ],
+        ]);
+
+        $results = (new HybridSearcher(
+            limit: 2,
+            minScore: 0.3,
+            expandGraph: false,
+            vectorTopK: 2,
+        ))->search('vectoronlyterm', $this->project->id);
+
+        expect(array_map(fn ($result) => $result->entryId, $results))
+            ->toBe([$first->id, $second->id]);
+    });
 });
