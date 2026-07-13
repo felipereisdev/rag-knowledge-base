@@ -14,11 +14,11 @@ Key features:
 
 ### Retrieval scores and evaluation
 
-Search results expose separate signals:
+The `SearchResult` contract carries separate retrieval signals; each consuming surface may choose which ones to display:
 
-- `semantic` is the best approved chunk's cosine similarity to the query.
-- `keyword` is PostgreSQL's full-text rank when the entry matches FTS.
-- `fusion` is the raw reciprocal-rank-fusion score used for ordering. It is not a probability or semantic confidence.
+- `semantic` is the best approved chunk's cosine similarity for a vector-matched result, and is `null` otherwise.
+- `keyword` is PostgreSQL's full-text rank when the result matches FTS, and is `null` otherwise.
+- `fusion` is the ordering score. It is raw reciprocal-rank fusion for direct vector/FTS matches; for graph-expanded candidates, it is the parent result's `fusionScore` multiplied by `graphWeight`. It is not a probability or confidence score.
 
 Run the checked-in golden-query evaluation against the `rag` project:
 
