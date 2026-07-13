@@ -379,7 +379,7 @@ class HybridSearcher
             $bindings[] = $category;
         }
 
-        $sql .= ' ORDER BY score DESC LIMIT ?';
+        $sql .= ' ORDER BY score DESC, entry_id ASC LIMIT ?';
         $bindings[] = $this->ftsTopK;
 
         $results = DB::select($sql, $bindings);

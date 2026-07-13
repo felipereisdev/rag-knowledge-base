@@ -328,6 +328,41 @@ describe('HybridSearcher', function () {
             ->and($results[0]->fusionScore)->toBe($results[1]->fusionScore);
     });
 
+    it('orders equal keyword scores by entry id before assigning rrf ranks', function () {
+        $lowerId = KnowledgeEntry::create([
+            'project_id' => $this->project->id,
+            'title' => 'Temporary candidate',
+            'content' => 'Temporary content.',
+            'status' => 'approved',
+        ]);
+        $higherId = KnowledgeEntry::create([
+            'project_id' => $this->project->id,
+            'title' => 'Equal keyword candidate',
+            'content' => 'deterministicfts',
+            'status' => 'approved',
+        ]);
+
+        // Move the lower-ID row behind the higher-ID row in heap order. The
+        // retrieval result must not depend on PostgreSQL's implicit row order.
+        $lowerId->update([
+            'title' => 'Equal keyword candidate',
+            'content' => 'deterministicfts',
+        ]);
+
+        $results = (new HybridSearcher(
+            limit: 2,
+            expandGraph: false,
+            vectorTopK: 0,
+            ftsTopK: 2,
+            rrfK: 60,
+        ))->search('deterministicfts', $this->project->id);
+
+        expect(array_map(fn ($result) => $result->entryId, $results))
+            ->toBe([$lowerId->id, $higherId->id])
+            ->and($results[0]->keywordScore)->toBe($results[1]->keywordScore)
+            ->and($results[0]->fusionScore)->toBeGreaterThan($results[1]->fusionScore);
+    });
+
     it('returns empty results for no matches', function () {
         $searcher = new HybridSearcher;
         $results = $searcher->search('nonexistent query xyz', $this->project->id);
