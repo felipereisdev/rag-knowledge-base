@@ -113,33 +113,72 @@ describe('KnowledgeEntryResource', function () {
         ]);
     });
 
-    it('renders relationship fields full width without changing the scalar detail layout', function () {
-        $detailItems = collect((new KnowledgeEntryResource)->fieldsForDetail(request()))
+    it('organizes detail fields into content-first tabs', function () {
+        $detail = collect((new KnowledgeEntryResource)->fieldsForDetail(request()))
             ->map(fn ($item): array => $item->toArray());
-        $fields = $detailItems
-            ->filter(fn (array $item): bool => $item['type'] !== 'section')
-            ->keyBy('attribute');
-        $section = $detailItems->firstWhere('type', 'section');
-        $relationships = collect($section['fields'] ?? [])->keyBy('attribute');
+        $tabGroup = $detail->sole();
+        $tabs = collect($tabGroup['tabs'])->keyBy('title');
 
-        expect($detailItems)->toHaveCount(9)
-            ->and($fields->keys()->all())->toBe([
-                'project_id',
-                'category',
-                'title',
-                'content',
-                'status',
-                'source',
-                'author',
-                'metadata',
+        expect($tabGroup['type'])->toBe('tab_group')
+            ->and($tabs->keys()->all())->toBe([
+                __('rag.detail.content'),
+                __('rag.detail.context'),
+                __('rag.detail.relationships'),
+                __('rag.detail.metadata'),
             ])
-            ->and($fields['content']['label'])->toBe('Content')
-            ->and($section['title'])->toBeNull()
-            ->and($relationships->keys()->all())->toBe(['tags', 'entities'])
-            ->and($relationships['tags']['label'])->toBe(__('rag.fields.tags'))
-            ->and($relationships['tags']['colSpan'])->toBe(12)
-            ->and($relationships['entities']['label'])->toBe(__('rag.fields.entities'))
-            ->and($relationships['entities']['colSpan'])->toBe(12);
+            ->and(collect($tabs[__('rag.detail.content')]['fields'])->pluck('attribute')->all())
+            ->toBe(['status', 'content'])
+            ->and(collect($tabs[__('rag.detail.context')]['fields'])->pluck('attribute')->all())
+            ->toBe(['project_id', 'category', 'source', 'author', 'created_at'])
+            ->and(collect($tabs[__('rag.detail.relationships')]['fields'])->pluck('attribute')->all())
+            ->toBe(['tags', 'entities'])
+            ->and(collect($tabs[__('rag.detail.metadata')]['fields'])->pluck('attribute')->all())
+            ->toBe(['metadata']);
+    });
+
+    it('uses the entry title in the Martis detail payload', function () {
+        $project = Project::create(['id' => 'rag', 'name' => 'RAG', 'root_path' => '/rag']);
+        $entry = KnowledgeEntry::create([
+            'project_id' => $project->id,
+            'title' => 'Readable knowledge title',
+        ]);
+
+        $this->getJson("/martis/api/resources/knowledge-entries/{$entry->id}")
+            ->assertOk()
+            ->assertJsonPath('data._title', 'Readable knowledge title')
+            ->assertJsonPath('data._resource.titleAttribute', 'title');
+    });
+
+    it('translates knowledge detail tabs for every supported locale', function () {
+        $expected = [
+            'en' => ['Content', 'Context', 'Relationships', 'Metadata'],
+            'pt_PT' => ['Conteúdo', 'Contexto', 'Relações', 'Metadados'],
+            'pt_BR' => ['Conteúdo', 'Contexto', 'Relacionamentos', 'Metadados'],
+        ];
+
+        $original = app()->getLocale();
+
+        foreach ($expected as $locale => $labels) {
+            app()->setLocale($locale);
+
+            expect([
+                __('rag.detail.content'),
+                __('rag.detail.context'),
+                __('rag.detail.relationships'),
+                __('rag.detail.metadata'),
+            ])->toBe($labels);
+        }
+
+        app()->setLocale($original);
+    });
+
+    it('keeps the created date out of the create and update forms', function () {
+        $formAttributes = collect((new KnowledgeEntryResource)->fields(request()))
+            ->map(fn ($field): array => $field->toArray())
+            ->pluck('attribute')
+            ->all();
+
+        expect($formAttributes)->not->toContain('created_at');
     });
 
     it('can list entries', function () {

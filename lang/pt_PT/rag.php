@@ -48,6 +48,12 @@ return [
         'source_help' => 'manual, mcp, importação ou cli.',
         'language_help' => 'Afeta a lematização da pesquisa de texto integral.',
     ],
+    'detail' => [
+        'content' => 'Conteúdo',
+        'context' => 'Contexto',
+        'relationships' => 'Relações',
+        'metadata' => 'Metadados',
+    ],
     'filters' => [
         'project' => 'Projeto',
         'category' => 'Categoria',

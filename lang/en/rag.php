@@ -48,6 +48,12 @@ return [
         'source_help' => 'manual, mcp, import, or cli.',
         'language_help' => 'Affects FTS stemming.',
     ],
+    'detail' => [
+        'content' => 'Content',
+        'context' => 'Context',
+        'relationships' => 'Relationships',
+        'metadata' => 'Metadata',
+    ],
     'filters' => [
         'project' => 'Project',
         'category' => 'Category',

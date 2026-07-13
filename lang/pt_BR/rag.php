@@ -48,6 +48,12 @@ return [
         'source_help' => 'manual, mcp, importação ou cli.',
         'language_help' => 'Afeta a derivação de palavras na busca de texto completo.',
     ],
+    'detail' => [
+        'content' => 'Conteúdo',
+        'context' => 'Contexto',
+        'relationships' => 'Relacionamentos',
+        'metadata' => 'Metadados',
+    ],
     'filters' => [
         'project' => 'Projeto',
         'category' => 'Categoria',
