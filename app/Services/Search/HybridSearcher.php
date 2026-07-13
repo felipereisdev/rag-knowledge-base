@@ -538,7 +538,8 @@ class HybridSearcher
                 continue;
             }
 
-            $snippet = $this->highlight($entry->content, $query, $textSearchConfig);
+            $snippetSource = $data['matchedChunkContent'] ?? $entry->content;
+            $snippet = $this->highlight($snippetSource, $query, $textSearchConfig);
 
             $results[] = new SearchResult(
                 entryId: (int) $entryId,

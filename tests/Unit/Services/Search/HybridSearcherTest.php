@@ -867,4 +867,47 @@ describe('HybridSearcher', function () {
                 ->and($after)->toBe('off');
         });
     });
+
+    it('builds vector snippets from the best matching chunk', function () {
+        $queryVector = array_fill(0, 768, 0.0);
+        $queryVector[0] = 1.0;
+        Embeddings::fake([[$queryVector]]);
+
+        $entry = KnowledgeEntry::create([
+            'project_id' => $this->project->id,
+            'title' => 'Two-part entry',
+            'content' => 'Unrelated introduction. The decisive answer is in the second section.',
+            'status' => 'approved',
+        ]);
+
+        $unrelatedVector = array_fill(0, 768, 0.0);
+        $unrelatedVector[1] = 1.0;
+
+        DB::table('chunk_embeddings')->insert([
+            [
+                'entry_id' => $entry->id,
+                'project_id' => $this->project->id,
+                'chunk_index' => 0,
+                'content' => 'Unrelated introduction.',
+                'embedding' => '['.implode(',', $unrelatedVector).']',
+            ],
+            [
+                'entry_id' => $entry->id,
+                'project_id' => $this->project->id,
+                'chunk_index' => 1,
+                'content' => 'The decisive answer is in the second section.',
+                'embedding' => '['.implode(',', $queryVector).']',
+            ],
+        ]);
+
+        $results = (new HybridSearcher(expandGraph: false))->search(
+            'decisive answer',
+            $this->project->id,
+        );
+
+        expect($results)->toHaveCount(1)
+            ->and($results[0]->matchedChunkIndex)->toBe(1)
+            ->and(strip_tags($results[0]->snippet))->toContain('decisive answer')
+            ->and(strip_tags($results[0]->snippet))->not->toContain('Unrelated introduction');
+    });
 });
