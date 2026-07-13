@@ -27,6 +27,14 @@ services:
       embedder:
         condition: service_healthy
 
+  indexer:
+    environment:
+      - RAG_EMBED_URL=http://embedder:8000/v1
+      - RAG_EMBED_KEY=rag-local
+    depends_on:
+      embedder:
+        condition: service_healthy
+
   worker:
     environment:
       - RAG_EMBED_URL=http://embedder:8000/v1
