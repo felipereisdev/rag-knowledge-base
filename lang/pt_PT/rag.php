@@ -74,7 +74,7 @@ return [
         'graph_expanded' => 'expandido pelo grafo',
     ],
     'health' => [
-        'index_queue' => 'Fila de indexação: :pending pendentes, :failed falhados, :missing aprovados sem chunks',
+        'index_queue' => 'Fila de indexação (global): :pending pendentes, :failed falhados; projeto: :missing aprovados sem chunks',
     ],
     'evaluation' => [
         'description' => 'Avalia a recuperação RAG com um conjunto versionado de consultas de referência.',

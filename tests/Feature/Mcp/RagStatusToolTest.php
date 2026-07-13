@@ -50,7 +50,7 @@ it('returns status for an existing project', function () {
     $response->assertSee('Total: 2');
     $response->assertSee('Approved: 1');
     $response->assertSee('Pending: 1');
-    $response->assertSee('Index queue: 0 pending, 0 failed, 1 approved without chunks');
+    $response->assertSee('Index queue (global): 0 pending, 0 failed; project: 1 approved without chunks');
 });
 
 it('reports pending and failed indexing jobs', function () {
@@ -76,7 +76,7 @@ it('reports pending and failed indexing jobs', function () {
     ]);
 
     $response->assertOk();
-    $response->assertSee('Index queue: 1 pending, 1 failed, 0 approved without chunks');
+    $response->assertSee('Index queue (global): 1 pending, 1 failed; project: 0 approved without chunks');
 });
 
 it('returns a not-found message for an unknown project', function () {

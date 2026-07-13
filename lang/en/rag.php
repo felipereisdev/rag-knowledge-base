@@ -74,7 +74,7 @@ return [
         'graph_expanded' => 'graph expanded',
     ],
     'health' => [
-        'index_queue' => 'Index queue: :pending pending, :failed failed, :missing approved without chunks',
+        'index_queue' => 'Index queue (global): :pending pending, :failed failed; project: :missing approved without chunks',
     ],
     'evaluation' => [
         'description' => 'Evaluate RAG retrieval against a versioned golden-query dataset.',
