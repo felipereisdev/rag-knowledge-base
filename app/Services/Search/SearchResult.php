@@ -4,12 +4,12 @@ namespace App\Services\Search;
 
 class SearchResult
 {
+    public readonly float $fusionScore;
+
     /**
      * @param  list<string>  $tags
      * @param  list<string>  $matchedBy  vector, keyword, and/or graph
      */
-    public readonly float $fusionScore;
-
     public function __construct(
         public readonly int $entryId,
         public readonly string $title,
