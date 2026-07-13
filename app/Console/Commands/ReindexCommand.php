@@ -56,7 +56,7 @@ class ReindexCommand extends Command
 
         $bar->finish();
         $this->newLine();
-        $this->info("Dispatched {$count} indexing jobs. Run 'php artisan queue:work' to process them.");
+        $this->info("Dispatched {$count} indexing jobs. Run 'php artisan queue:work --queue=indexing' to process them.");
 
         return self::SUCCESS;
     }

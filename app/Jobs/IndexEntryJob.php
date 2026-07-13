@@ -20,15 +20,17 @@ class IndexEntryJob implements ShouldBeUniqueUntilProcessing, ShouldQueue
 
     public int $backoff = 10;
 
-    public function __construct(
-        public readonly int $entryId,
-    ) {
+    public readonly int|string $entryId;
+
+    public function __construct(int|string $entryId)
+    {
+        $this->entryId = (int) $entryId;
         $this->onQueue('indexing');
     }
 
     public function handle(EntryIndexer $indexer): void
     {
-        $entry = KnowledgeEntry::find($this->entryId);
+        $entry = KnowledgeEntry::find((int) $this->entryId);
 
         if (! $entry) {
             Log::warning('IndexEntryJob: entry not found', ['entry_id' => $this->entryId]);
