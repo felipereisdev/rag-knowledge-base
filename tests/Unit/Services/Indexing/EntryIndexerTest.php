@@ -136,4 +136,59 @@ describe('EntryIndexer', function () {
         $chunks = DB::table('chunk_embeddings')->where('entry_id', $entry->id)->get();
         expect($chunks)->toBeEmpty();
     });
+
+    it('does not persist chunks when the entry is rejected during embedding', function () {
+        Queue::fake();
+
+        $project = Project::create(['id' => 'r1', 'name' => 'R1', 'root_path' => '/p']);
+        $entry = KnowledgeEntry::create([
+            'project_id' => $project->id,
+            'title' => 'Test',
+            'content' => 'One paragraph.',
+            'status' => 'pending',
+        ]);
+
+        $fakeVector = array_fill(0, 768, 0.1);
+        Embeddings::fake(function () use ($entry, $fakeVector): array {
+            $entry->update(['status' => 'rejected']);
+
+            return [$fakeVector];
+        });
+
+        (new EntryIndexer(new ParagraphChunker))->index($entry);
+
+        expect(DB::table('chunk_embeddings')->where('entry_id', $entry->id)->exists())->toBeFalse();
+    });
+
+    it('does not let older embedding work overwrite chunks for newer content', function () {
+        Queue::fake();
+
+        $project = Project::create(['id' => 'r1', 'name' => 'R1', 'root_path' => '/p']);
+        $entry = KnowledgeEntry::create([
+            'project_id' => $project->id,
+            'title' => 'Test',
+            'content' => 'Old content.',
+            'status' => 'pending',
+        ]);
+
+        $fakeVector = array_fill(0, 768, 0.1);
+        Embeddings::fake(function () use ($entry, $project, $fakeVector): array {
+            $entry->update(['content' => 'New content.']);
+            DB::table('chunk_embeddings')->insert([
+                'entry_id' => $entry->id,
+                'project_id' => $project->id,
+                'chunk_index' => 0,
+                'content' => 'New content.',
+                'embedding' => '['.implode(',', $fakeVector).']',
+            ]);
+
+            return [$fakeVector];
+        });
+
+        (new EntryIndexer(new ParagraphChunker))->index($entry);
+
+        $chunks = DB::table('chunk_embeddings')->where('entry_id', $entry->id)->get();
+        expect($chunks)->toHaveCount(1)
+            ->and($chunks[0]->content)->toBe('New content.');
+    });
 });

@@ -28,29 +28,37 @@ class EntryIndexer
      */
     public function index(KnowledgeEntry $entry): void
     {
-        $chunks = $this->chunker->chunk($entry->content);
+        $embeddedContent = $entry->content;
+        $embeddedProjectId = $entry->project_id;
+        $chunks = $this->chunker->chunk($embeddedContent);
+        $vectors = [];
 
-        if ($chunks === []) {
-            DB::table('chunk_embeddings')->where('entry_id', $entry->id)->delete();
+        if ($chunks !== []) {
+            $texts = array_map(fn ($c) => $c->content, $chunks);
 
-            return;
+            try {
+                $response = Embeddings::for($texts)->generate((string) config('rag.embeddings.provider', self::PROVIDER));
+                $vectors = $response->embeddings;
+            } catch (Throwable $e) {
+                Log::error('EntryIndexer: embedding generation failed', [
+                    'entry_id' => $entry->id,
+                    'error' => $e->getMessage(),
+                ]);
+
+                throw $e;
+            }
         }
 
-        $texts = array_map(fn ($c) => $c->content, $chunks);
+        DB::transaction(function () use ($entry, $embeddedContent, $embeddedProjectId, $chunks, $vectors): void {
+            $currentEntry = KnowledgeEntry::query()->whereKey($entry->id)->lockForUpdate()->first();
 
-        try {
-            $response = Embeddings::for($texts)->generate((string) config('rag.embeddings.provider', self::PROVIDER));
-            $vectors = $response->embeddings;
-        } catch (Throwable $e) {
-            Log::error('EntryIndexer: embedding generation failed', [
-                'entry_id' => $entry->id,
-                'error' => $e->getMessage(),
-            ]);
+            if ($currentEntry === null
+                || ! in_array($currentEntry->status, ['approved', 'pending'], true)
+                || $currentEntry->content !== $embeddedContent
+                || $currentEntry->project_id !== $embeddedProjectId) {
+                return;
+            }
 
-            throw $e;
-        }
-
-        DB::transaction(function () use ($entry, $chunks, $vectors): void {
             DB::table('chunk_embeddings')->where('entry_id', $entry->id)->delete();
 
             $rows = [];
@@ -65,7 +73,9 @@ class EntryIndexer
                 ];
             }
 
-            DB::table('chunk_embeddings')->insert($rows);
+            if ($rows !== []) {
+                DB::table('chunk_embeddings')->insert($rows);
+            }
         });
     }
 }
