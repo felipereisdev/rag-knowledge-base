@@ -42,6 +42,7 @@ it('returns search results for a matching query', function () {
         '--project' => 'test-project',
     ])
         ->assertSuccessful()
+        ->expectsOutputToContain('Fusion | Semantic')
         ->expectsOutputToContain('Auth uses JWT');
 });
 

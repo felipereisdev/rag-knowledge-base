@@ -4,8 +4,6 @@ namespace App\Services\Search;
 
 class SearchResult
 {
-    public readonly float $fusionScore;
-
     /**
      * @param  list<string>  $tags
      * @param  list<string>  $matchedBy  vector, keyword, and/or graph
@@ -14,15 +12,13 @@ class SearchResult
         public readonly int $entryId,
         public readonly string $title,
         public readonly string $snippet,
-        public readonly float $score,
+        public readonly float $fusionScore,
+        public readonly ?float $semanticSimilarity,
+        public readonly ?float $keywordScore,
+        public readonly ?int $matchedChunkIndex,
         public readonly string $category,
         public readonly array $tags,
         public readonly array $matchedBy,
         public readonly bool $graphExpanded,
-        public readonly ?float $semanticSimilarity = null,
-        public readonly ?float $keywordScore = null,
-        public readonly ?int $matchedChunkIndex = null,
-    ) {
-        $this->fusionScore = $score;
-    }
+    ) {}
 }

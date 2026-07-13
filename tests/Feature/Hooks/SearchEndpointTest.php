@@ -29,8 +29,15 @@ it('formats results from the searcher', function () {
 
     $mock = Mockery::mock(HybridSearcher::class);
     $mock->shouldReceive('search')->andReturn([
-        (object) ['title' => 'Owner scoping', 'category' => 'architecture',
-            'tags' => ['auth'], 'matchedBy' => ['vector'], 'score' => 0.91,
+        (object) [
+            'title' => 'Owner scoping',
+            'category' => 'architecture',
+            'tags' => ['auth'],
+            'matchedBy' => ['vector'],
+            'fusionScore' => 1 / 60,
+            'semanticSimilarity' => 0.91,
+            'keywordScore' => null,
+            'matchedChunkIndex' => 0,
             'snippet' => 'Scope by owner_id.'],
     ]);
     app()->bind(HybridSearcher::class, fn () => $mock);
@@ -40,5 +47,6 @@ it('formats results from the searcher', function () {
 
     $res->assertOk();
     expect($res->getContent())->toContain('Owner scoping')
-        ->and($res->getContent())->toContain('score: 0.91');
+        ->and($res->getContent())->toContain('Fusion:')
+        ->and($res->getContent())->toContain('Semantic: 0.91');
 });

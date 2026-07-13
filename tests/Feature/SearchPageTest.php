@@ -46,8 +46,10 @@ describe('Search page', function () {
 
         $response = $this->get('/search?q=routing');
 
-        $response->assertOk();
-        $response->assertSee('Laravel routing');
+        $response->assertOk()
+            ->assertSee('Laravel routing')
+            ->assertSee('Fusion score')
+            ->assertSee('Semantic similarity');
     });
 
     it('shows empty state when no results', function () {

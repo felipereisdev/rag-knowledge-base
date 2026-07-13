@@ -101,7 +101,15 @@ class HookController extends Controller
         $lines = [];
         foreach ($results as $i => $r) {
             $tags = $r->tags !== [] ? ' ['.implode(', ', $r->tags).']' : '';
-            $lines[] = '  ['.($i + 1)."] {$r->title} ({$r->category}){$tags} (score: {$r->score})";
+            $signals = __('rag.search.fusion').': '.number_format($r->fusionScore, 4);
+            if ($r->semanticSimilarity !== null) {
+                $signals .= ', '.__('rag.search.semantic').': '.number_format($r->semanticSimilarity, 4);
+            }
+            if ($r->keywordScore !== null) {
+                $signals .= ', '.__('rag.search.keyword').': '.number_format($r->keywordScore, 4);
+            }
+
+            $lines[] = '  ['.($i + 1)."] {$r->title} ({$r->category}){$tags} ({$signals})";
             $lines[] = "      {$r->snippet}";
         }
 

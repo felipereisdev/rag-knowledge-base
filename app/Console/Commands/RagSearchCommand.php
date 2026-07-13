@@ -13,7 +13,7 @@ class RagSearchCommand extends Command
         {query : The search query}
         {--project= : Project ID (defaults to slugified cwd)}
         {--limit=5 : Maximum number of results}
-        {--min-score=0.30 : Minimum similarity score}
+        {--min-score=0.30 : Minimum vector similarity score}
         {--category= : Filter by category}
         {--no-graph : Disable knowledge graph expansion}';
 
@@ -50,17 +50,30 @@ class RagSearchCommand extends Command
             return self::SUCCESS;
         }
 
-        $rows = array_map(fn ($r) => [
-            'title' => $r->title,
-            'category' => $r->category,
-            'score' => number_format($r->score, 4),
-            'matched_by' => implode('|', $r->matchedBy),
-            'id' => $r->entryId,
+        $rows = array_map(fn ($result) => [
+            'title' => $result->title,
+            'category' => $result->category,
+            'fusion' => number_format($result->fusionScore, 4),
+            'semantic' => $result->semanticSimilarity !== null
+                ? number_format($result->semanticSimilarity, 4)
+                : '—',
+            'matched_by' => implode('|', $result->matchedBy),
+            'id' => $result->entryId,
         ], $results);
 
         $this->info("Search: '{$query}' in '{$project->name}'");
         $this->newLine();
-        $this->table(['Title', 'Category', 'Score', 'Matched By', 'ID'], $rows);
+        $this->table(
+            [
+                __('rag.search.title'),
+                __('rag.search.category'),
+                __('rag.search.fusion'),
+                __('rag.search.semantic'),
+                __('rag.search.matched_by'),
+                'ID',
+            ],
+            $rows,
+        );
 
         return self::SUCCESS;
     }

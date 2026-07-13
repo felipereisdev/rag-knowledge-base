@@ -69,7 +69,15 @@ class RagSearchTool extends Tool
             $num = $i + 1;
             $tagsStr = $r->tags !== [] ? ' ['.implode(', ', $r->tags).']' : '';
             $matchedStr = ' ['.implode('|', $r->matchedBy).']';
-            $lines[] = "  [{$num}] {$r->title} ({$r->category}){$tagsStr}{$matchedStr} (score: {$r->score})";
+            $signals = __('rag.search.fusion').': '.number_format($r->fusionScore, 4);
+            if ($r->semanticSimilarity !== null) {
+                $signals .= ', '.__('rag.search.semantic').': '.number_format($r->semanticSimilarity, 4);
+            }
+            if ($r->keywordScore !== null) {
+                $signals .= ', '.__('rag.search.keyword').': '.number_format($r->keywordScore, 4);
+            }
+
+            $lines[] = "  [{$num}] {$r->title} ({$r->category}){$tagsStr}{$matchedStr} ({$signals})";
             $lines[] = "      {$r->snippet}";
             $lines[] = '';
         }
@@ -92,7 +100,7 @@ class RagSearchTool extends Tool
                 ->description('Maximum number of results to return.')
                 ->default(5),
             'min_score' => $schema->number()
-                ->description('Minimum similarity score (0.0 to 1.0).')
+                ->description('Minimum vector cosine similarity required for a vector candidate (0.0 to 1.0).')
                 ->default(0.30),
             'expand_graph' => $schema->boolean()
                 ->description('Whether to expand results via the knowledge graph.')

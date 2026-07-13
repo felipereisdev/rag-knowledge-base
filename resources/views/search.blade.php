@@ -45,10 +45,13 @@
                     <a href="/martis/resources/knowledge-entries/{{ $result->entryId }}">{{ $result->title }}</a>
                 </h3>
                 <div class="meta">
-                    Score: {{ number_format($result->score, 4) }} ·
-                    Category: {{ $result->category }}
+                    {{ __('rag.search.fusion_score') }}:
+                    {{ number_format($result->fusionScore, 4) }} ·
+                    {{ __('rag.search.semantic_similarity') }}:
+                    {{ $result->semanticSimilarity !== null ? number_format($result->semanticSimilarity, 4) : '—' }} ·
+                    {{ __('rag.search.category') }}: {{ $result->category }}
                     @if ($result->graphExpanded)
-                        · <span class="matched-by">graph expanded</span>
+                        · <span class="matched-by">{{ __('rag.search.graph_expanded') }}</span>
                     @endif
                     @foreach ($result->matchedBy as $matched)
                         <span class="matched-by">{{ $matched }}</span>

@@ -545,7 +545,7 @@ class HybridSearcher
                 entryId: (int) $entryId,
                 title: $entry->title,
                 snippet: $snippet,
-                score: $data['fusionScore'],
+                fusionScore: $data['fusionScore'],
                 category: $entry->category,
                 tags: $entry->tags->pluck('name')->values()->all(),
                 matchedBy: $data['matchedBy'],

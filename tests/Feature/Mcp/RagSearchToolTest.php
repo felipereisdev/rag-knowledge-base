@@ -56,6 +56,8 @@ it('returns search results for a matching query', function () {
     $response->assertOk();
     $response->assertSee('Auth uses JWT');
     $response->assertSee('architecture');
+    $response->assertSee('Fusion:');
+    $response->assertSee('Semantic:');
 });
 
 it('returns no-results message when project has no indexed entries', function () {

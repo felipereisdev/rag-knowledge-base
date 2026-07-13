@@ -2,12 +2,12 @@
 
 use App\Services\Search\SearchResult;
 
-it('keeps fusion and source scores distinct during the consumer migration', function () {
+it('keeps fusion and source scores distinct', function () {
     $result = new SearchResult(
         entryId: 42,
         title: 'Owner scoping',
         snippet: 'Scope entries by owner.',
-        score: 2 / 60,
+        fusionScore: 2 / 60,
         category: 'architecture',
         tags: ['search'],
         matchedBy: ['vector', 'keyword'],
@@ -18,8 +18,8 @@ it('keeps fusion and source scores distinct during the consumer migration', func
     );
 
     expect($result->fusionScore)->toBe(2 / 60)
-        ->and($result->score)->toBe(2 / 60)
         ->and($result->semanticSimilarity)->toBe(0.84)
         ->and($result->keywordScore)->toBe(0.12)
-        ->and($result->matchedChunkIndex)->toBe(3);
+        ->and($result->matchedChunkIndex)->toBe(3)
+        ->and(property_exists($result, 'score'))->toBeFalse();
 });
