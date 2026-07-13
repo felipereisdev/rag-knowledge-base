@@ -19,7 +19,7 @@ Key features:
 ```
 ┌─────────────────────┐         MCP (HTTP)          ┌──────────────────────────┐
 │  Your AI assistant  │  ────  POST /mcp/rag  ────▶  │  RAG Knowledge Base      │
-│  (any harness)      │                              │  (Docker: app+web+worker │
+│  (any harness)      │                              │  (Docker: app+web        │
 │  any language       │  ◀──  JSON-RPC response ───  │   +postgres+embedder)    │
 └─────────────────────┘                              └──────────────────────────┘
         │                                                       │
@@ -35,7 +35,7 @@ The RAG server is **independent** of your project. Your project only needs one e
 
 The only hard requirement for running the server:
 
-- **Docker** + **Docker Compose** (to run the 5-service stack)
+- **Docker** + **Docker Compose** (to run the four-service default stack)
 
 That's it. No PHP, no Composer, no Python needed on your host — everything runs inside containers.
 
@@ -48,7 +48,7 @@ That's it. No PHP, no Composer, no Python needed on your host — everything run
 git clone <repo-url> rag-kb
 cd rag-kb
 
-# 2. Start all services (app, web, worker, postgres, embedder)
+# 2. Start the default local stack (app, web, postgres, embedder)
 docker compose up -d --build
 ```
 
@@ -267,7 +267,7 @@ RAG_EMBEDDING_DIM=768
 
 ### Alternative: configured embedding provider
 
-You may configure another Laravel AI embedding provider instead of the sidecar. Its selected model must emit exactly 768-dimensional vectors. Set the same provider and model for the `app` and `worker` services:
+You may configure another Laravel AI embedding provider instead of the sidecar. Its selected model must emit exactly 768-dimensional vectors. Put the embedding settings and any credential/configuration variables expected by the provider's existing `config/ai.php` entry in the host `.env`:
 
 ```env
 RAG_EMBEDDING_PROVIDER=<configured-provider>
@@ -275,13 +275,24 @@ RAG_EMBEDDING_MODEL=<a-model-configured-to-return-768-dimension-vectors>
 RAG_EMBEDDING_DIM=768
 ```
 
+Start the external-provider stack with only the base Compose file. Supplying `-f` prevents Compose from auto-loading `docker-compose.override.yml`, so the local sidecar is neither created nor required:
+
+```bash
+docker compose -f docker-compose.yml up -d --build
+
+# Include the optional queue worker when needed
+docker compose -f docker-compose.yml --profile condense up -d --build
+```
+
+The base file loads `.env` into `app`, `worker`, and `app-dev` when the file exists, allowing the selected provider's standard Laravel AI environment variables to flow through without Compose-specific credential entries.
+
 > Embedding persistence currently supports 768 dimensions only. The application rejects other dimensions at boot until variable-dimension storage is implemented. A provider or model identity change removes stored chunk embeddings; run `php artisan rag:reindex` to regenerate them.
 
 ---
 
 ## Configuration
 
-Environment variables are set in `docker-compose.yml` (they override anything in `.env`). The relevant ones:
+The embedding identity variables are interpolated from the host environment or `.env`, with defaults matching `config/rag.php`. Explicit Compose environment values override values loaded through `env_file`. The relevant variables are:
 
 | Variable | Default | Meaning |
 |---|---|---|
@@ -290,7 +301,7 @@ Environment variables are set in `docker-compose.yml` (they override anything in
 | `DB_DATABASE` | `rag` | Database name |
 | `DB_USERNAME` / `DB_PASSWORD` | `rag` / `secret` | Database credentials |
 | `RAG_EMBEDDING_PROVIDER` | `local-embedder` | Laravel AI embedding provider |
-| `RAG_EMBED_URL` | `http://embedder:8000/v1` | Local sidecar embedding endpoint |
+| `RAG_EMBED_URL` | `http://embedder:8000/v1` in local mode | Local sidecar endpoint; not set by the external-safe base file |
 | `RAG_EMBEDDING_MODEL` | `paraphrase-multilingual-mpnet-base-v2` | Embedding model name |
 | `RAG_EMBEDDING_DIM` | `768` | Embedding dimension; persistence currently requires 768 |
 | `RAG_SEARCH_MIN_SCORE` | `0.30` | Minimum score cutoff for search results |
@@ -307,9 +318,9 @@ Environment variables are set in `docker-compose.yml` (they override anything in
 |---|---|---|---|
 | `app` | `Dockerfile.app` (PHP-FPM 8.3) | — | Laravel application |
 | `web` | `nginx:alpine` | `8090:80` | nginx reverse proxy |
-| `worker` | `Dockerfile.app` | — | Queue worker (embedding + indexing jobs) |
+| `worker` | `Dockerfile.app` | — | Optional `condense` profile queue worker (embedding + indexing jobs) |
 | `postgres` | `pgvector/pgvector:pg16` | `5433:5432` | Postgres + pgvector |
-| `embedder` | `services/embedder/` (FastAPI) | `8001:8000` | Embedding sidecar (optional when another provider is configured) |
+| `embedder` | `services/embedder/` (FastAPI) | `8001:8000` | Local-default sidecar from `docker-compose.override.yml`; absent in external mode |
 
 ### Common commands
 
@@ -318,6 +329,10 @@ Environment variables are set in `docker-compose.yml` (they override anything in
 docker compose up -d --build
 docker compose down
 docker compose down -v          # fresh start (wipes data)
+
+# External provider (reads provider settings/credentials from host .env)
+docker compose -f docker-compose.yml up -d --build
+docker compose -f docker-compose.yml down
 
 # Inspect
 docker compose ps
@@ -333,6 +348,8 @@ docker compose --profile dev exec app-dev vendor/bin/pest
 docker compose --profile dev exec app-dev vendor/bin/phpstan analyse --memory-limit=2G
 docker compose --profile dev exec app-dev vendor/bin/pint --test
 ```
+
+> **Maintenance window:** migrations that rebuild full-text search vectors, and project language changes that rebuild a project's full-text vectors, run synchronously. Schedule these operations during a maintenance window for large knowledge bases.
 
 ---
 
@@ -355,8 +372,8 @@ Start it with the helper — it reads the driver and places the worker for you:
 - **claude_sdk:** requires `claude` on PATH + authenticated, and this host's
   `.env` pointing at the exposed services (`DB_HOST=127.0.0.1`, `DB_PORT=5433`,
   embedder at `http://localhost:8001/v1`).
-- **api:** requires the provider key (e.g. `ANTHROPIC_API_KEY`) in the worker's
-  environment.
+- **api:** requires the selected provider's standard Laravel AI credential
+  variables in the worker's environment (the Compose `.env` pass-through handles these).
 
 > **Note:** the Docker `worker` service is now behind the `condense` compose
 > profile, so a bare `docker compose up` no longer starts it. Use

@@ -17,26 +17,6 @@ services:
       retries: 5
     restart: unless-stopped
 
-  embedder:
-    build:
-      context: services/embedder
-      dockerfile: Dockerfile
-    container_name: rag-embedder
-    ports:
-      - "8001:8000"
-    environment:
-      - RAG_EMBEDDING_MODEL=paraphrase-multilingual-mpnet-base-v2
-      - RAG_EMBEDDING_DIM=768
-    volumes:
-      - hf-cache:/root/.cache/huggingface
-    healthcheck:
-      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health')\" || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-      start_period: 60s
-    restart: unless-stopped
-
   app:
     build:
       context: .
@@ -46,6 +26,9 @@ services:
     volumes:
       - storage:/var/www/html/storage
       - bootstrap-cache:/var/www/html/bootstrap/cache
+    env_file:
+      - path: .env
+        required: false
     environment:
       - APP_ENV=production
       - APP_DEBUG=false
@@ -56,17 +39,14 @@ services:
       - DB_DATABASE=rag
       - DB_USERNAME=rag
       - DB_PASSWORD=secret
-      - RAG_EMBED_URL=http://embedder:8000/v1
-      - RAG_EMBED_KEY=rag-local
-      - RAG_EMBEDDING_MODEL=paraphrase-multilingual-mpnet-base-v2
-      - RAG_EMBEDDING_DIM=768
+      - RAG_EMBEDDING_PROVIDER=${RAG_EMBEDDING_PROVIDER:-local-embedder}
+      - RAG_EMBEDDING_MODEL=${RAG_EMBEDDING_MODEL:-paraphrase-multilingual-mpnet-base-v2}
+      - RAG_EMBEDDING_DIM=${RAG_EMBEDDING_DIM:-768}
       - QUEUE_CONNECTION=database
       - SESSION_DRIVER=database
       - CACHE_STORE=database
     depends_on:
       postgres:
-        condition: service_healthy
-      embedder:
         condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "php -r \"new PDO('pgsql:host=postgres;dbname=rag','rag','secret');\""]
@@ -108,6 +88,9 @@ services:
     volumes:
       - storage:/var/www/html/storage
       - bootstrap-cache:/var/www/html/bootstrap/cache
+    env_file:
+      - path: .env
+        required: false
     environment:
       - APP_ENV=production
       - APP_DEBUG=false
@@ -117,15 +100,12 @@ services:
       - DB_DATABASE=rag
       - DB_USERNAME=rag
       - DB_PASSWORD=secret
-      - RAG_EMBED_URL=http://embedder:8000/v1
-      - RAG_EMBED_KEY=rag-local
-      - RAG_EMBEDDING_MODEL=paraphrase-multilingual-mpnet-base-v2
-      - RAG_EMBEDDING_DIM=768
+      - RAG_EMBEDDING_PROVIDER=${RAG_EMBEDDING_PROVIDER:-local-embedder}
+      - RAG_EMBEDDING_MODEL=${RAG_EMBEDDING_MODEL:-paraphrase-multilingual-mpnet-base-v2}
+      - RAG_EMBEDDING_DIM=${RAG_EMBEDDING_DIM:-768}
       - QUEUE_CONNECTION=database
     depends_on:
       postgres:
-        condition: service_healthy
-      embedder:
         condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "php artisan queue:work --once --no-interaction || exit 1"]
@@ -146,6 +126,9 @@ services:
       - ./:/var/www/html
       - storage:/var/www/html/storage
       - bootstrap-cache:/var/www/html/bootstrap/cache
+    env_file:
+      - path: .env
+        required: false
     environment:
       - APP_ENV=testing
       - APP_DEBUG=true
@@ -155,17 +138,14 @@ services:
       - DB_DATABASE=rag
       - DB_USERNAME=rag
       - DB_PASSWORD=secret
-      - RAG_EMBED_URL=http://embedder:8000/v1
-      - RAG_EMBED_KEY=rag-local
-      - RAG_EMBEDDING_MODEL=paraphrase-multilingual-mpnet-base-v2
-      - RAG_EMBEDDING_DIM=768
+      - RAG_EMBEDDING_PROVIDER=${RAG_EMBEDDING_PROVIDER:-local-embedder}
+      - RAG_EMBEDDING_MODEL=${RAG_EMBEDDING_MODEL:-paraphrase-multilingual-mpnet-base-v2}
+      - RAG_EMBEDDING_DIM=${RAG_EMBEDDING_DIM:-768}
       - QUEUE_CONNECTION=database
       - SESSION_DRIVER=database
       - CACHE_STORE=database
     depends_on:
       postgres:
-        condition: service_healthy
-      embedder:
         condition: service_healthy
     entrypoint: ["sh", "-c"]
     command: ["sleep infinity"]
@@ -174,4 +154,3 @@ volumes:
   rag-pgdata:
   storage:
   bootstrap-cache:
-  hf-cache:

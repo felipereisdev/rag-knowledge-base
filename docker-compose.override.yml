@@ -1,0 +1,47 @@
+services:
+  embedder:
+    build:
+      context: services/embedder
+      dockerfile: Dockerfile
+    container_name: rag-embedder
+    ports:
+      - "8001:8000"
+    environment:
+      - RAG_EMBEDDING_MODEL=${RAG_EMBEDDING_MODEL:-paraphrase-multilingual-mpnet-base-v2}
+      - RAG_EMBEDDING_DIM=${RAG_EMBEDDING_DIM:-768}
+    volumes:
+      - hf-cache:/root/.cache/huggingface
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health')\" || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+    restart: unless-stopped
+
+  app:
+    environment:
+      - RAG_EMBED_URL=http://embedder:8000/v1
+      - RAG_EMBED_KEY=rag-local
+    depends_on:
+      embedder:
+        condition: service_healthy
+
+  worker:
+    environment:
+      - RAG_EMBED_URL=http://embedder:8000/v1
+      - RAG_EMBED_KEY=rag-local
+    depends_on:
+      embedder:
+        condition: service_healthy
+
+  app-dev:
+    environment:
+      - RAG_EMBED_URL=http://embedder:8000/v1
+      - RAG_EMBED_KEY=rag-local
+    depends_on:
+      embedder:
+        condition: service_healthy
+
+volumes:
+  hf-cache:
