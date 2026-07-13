@@ -6,6 +6,8 @@ enum ProjectLanguage: string
 {
     case English = 'en';
     case Portuguese = 'pt';
+    case BrazilianPortuguese = 'pt-BR';
+    case EuropeanPortuguese = 'pt_PT';
     case Spanish = 'es';
 
     /**

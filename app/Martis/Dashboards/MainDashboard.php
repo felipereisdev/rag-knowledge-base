@@ -2,6 +2,7 @@
 
 namespace App\Martis\Dashboards;
 
+use App\Enums\KnowledgeStatus;
 use App\Models\ChunkEmbedding;
 use App\Models\KnowledgeEntry;
 use App\Models\Project;
@@ -53,7 +54,7 @@ class MainDashboard extends Dashboard
                 public function calculate(Request $request): ValueResult
                 {
                     return new ValueResult(
-                        KnowledgeEntry::where('status', 'pending')->count()
+                        KnowledgeEntry::where('status', KnowledgeStatus::Pending->value)->count()
                     );
                 }
             },

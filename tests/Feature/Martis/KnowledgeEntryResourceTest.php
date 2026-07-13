@@ -32,7 +32,61 @@ describe('KnowledgeEntryResource', function () {
             'status' => 'mystery',
         ]);
 
-        $response->assertUnprocessable();
+        $response->assertUnprocessable()
+            ->assertJsonFragment([
+                'field' => 'category',
+                'code' => 'invalid',
+            ])
+            ->assertJsonFragment([
+                'field' => 'status',
+                'code' => 'invalid',
+            ]);
+    });
+
+    it('normalizes explicit null text values when creating an entry', function () {
+        $project = Project::create(['id' => 'r1', 'name' => 'R1', 'root_path' => '/p']);
+
+        $response = $this->postJson('/martis/api/resources/knowledge-entries', [
+            'project_id' => $project->id,
+            'title' => 'Nullable entry',
+            'content' => null,
+            'source' => null,
+            'author' => null,
+        ]);
+
+        $response->assertCreated();
+        $this->assertDatabaseHas('knowledge_entries', [
+            'project_id' => 'r1',
+            'title' => 'Nullable entry',
+            'content' => '',
+            'source' => 'manual',
+            'author' => '',
+        ]);
+    });
+
+    it('normalizes explicit null text values when updating an entry', function () {
+        $project = Project::create(['id' => 'r1', 'name' => 'R1', 'root_path' => '/p']);
+        $entry = KnowledgeEntry::create([
+            'project_id' => $project->id,
+            'title' => 'Existing entry',
+            'content' => 'Existing content',
+            'source' => 'import',
+            'author' => 'Agent',
+        ]);
+
+        $response = $this->putJson("/martis/api/resources/knowledge-entries/{$entry->id}", [
+            'content' => null,
+            'source' => null,
+            'author' => null,
+        ]);
+
+        $response->assertOk();
+        $this->assertDatabaseHas('knowledge_entries', [
+            'id' => $entry->id,
+            'content' => '',
+            'source' => 'manual',
+            'author' => '',
+        ]);
     });
 
     it('serializes translated category and status options with machine values', function () {

@@ -41,29 +41,35 @@ class ProjectResource extends Resource
     public function fields(Request $request): array
     {
         return [
-            Id::make('id'),
+            Id::make('id', __('rag.fields.id')),
 
-            Text::make('id', 'Slug')
+            Text::make('id', __('rag.fields.slug'))
                 ->sortable()
                 ->immutable()
                 ->rules(['required', 'alpha_dash'])
-                ->help('Used in URLs and as project identifier.'),
+                ->help(__('rag.fields.slug_help')),
 
-            Text::make('name')
+            Text::make('name', __('rag.fields.name'))
                 ->sortable()
                 ->searchable()
-                ->required(),
-
-            Text::make('root_path')
                 ->required()
-                ->help('Absolute path to repo root.'),
+                ->rules(['required', 'string', 'max:255']),
 
-            Textarea::make('description'),
+            Text::make('root_path', __('rag.fields.root_path'))
+                ->required()
+                ->rules(['required', 'string', 'max:255'])
+                ->help(__('rag.fields.root_path_help')),
 
-            MultiSelect::make('project_type', 'Tech Stack')
+            Textarea::make('description', __('rag.fields.description'))
+                ->nullable()
+                ->rules(['nullable', 'string']),
+
+            MultiSelect::make('project_type', __('rag.fields.tech_stack'))
                 ->options(ProjectTechnology::options())
                 ->displayUsingLabels()
-                ->help('Programming languages, frameworks and databases used in the project.'),
+                ->nullable()
+                ->rules(['nullable', 'array'])
+                ->help(__('rag.fields.tech_stack_help')),
 
             Select::make('language', __('rag.fields.language'))
                 ->optionsFromMap(ProjectLanguage::options())

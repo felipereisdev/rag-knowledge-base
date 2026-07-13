@@ -122,7 +122,11 @@ class KnowledgeEntryResource extends Resource
                 ->span(12),
             Markdown::make('content', __('rag.fields.content'))
                 ->alwaysShow()
-                ->rules(['sometimes', 'string'])
+                ->nullable()
+                ->rules(['nullable', 'string'])
+                ->fillUsing(static function (KnowledgeEntry $entry, mixed $value, string $attribute): void {
+                    $entry->setAttribute($attribute, $value ?? '');
+                })
                 ->span(12),
 
             Select::make('status', __('rag.fields.status'))
@@ -133,10 +137,18 @@ class KnowledgeEntryResource extends Resource
                 ->span(4),
             Text::make('source', __('rag.fields.source'))
                 ->help(__('rag.fields.source_help'))
-                ->rules(['sometimes', 'string', 'max:255'])
+                ->nullable()
+                ->rules(['nullable', 'string', 'max:255'])
+                ->fillUsing(static function (KnowledgeEntry $entry, mixed $value, string $attribute): void {
+                    $entry->setAttribute($attribute, $value ?? 'manual');
+                })
                 ->span(4),
             Text::make('author', __('rag.fields.author'))
-                ->rules(['sometimes', 'string', 'max:255'])
+                ->nullable()
+                ->rules(['nullable', 'string', 'max:255'])
+                ->fillUsing(static function (KnowledgeEntry $entry, mixed $value, string $attribute): void {
+                    $entry->setAttribute($attribute, $value ?? '');
+                })
                 ->span(4),
             BelongsToMany::make(__('rag.fields.tags'), 'tags', TagResource::class)
                 ->searchable()
