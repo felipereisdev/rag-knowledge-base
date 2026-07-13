@@ -96,23 +96,22 @@ class HybridSearcher
      */
     private function vectorSearch(array $queryVector, ?string $projectId, ?string $category): array
     {
+        if ($this->vectorTopK <= 0) {
+            return [];
+        }
+
         $vector = '['.implode(',', $queryVector).']';
 
-        $sql = 'WITH ranked_chunks AS (
-                SELECT
+        $sql = 'SELECT
                     ce.entry_id,
                     ce.chunk_index,
                     ce.content,
-                    1 - (ce.embedding <=> ?::vector) AS semantic_similarity,
-                    ROW_NUMBER() OVER (
-                        PARTITION BY ce.entry_id
-                        ORDER BY ce.embedding <=> ?::vector
-                    ) AS chunk_rank
+                    1 - (ce.embedding <=> ?::vector) AS semantic_similarity
                 FROM chunk_embeddings ce
                 JOIN knowledge_entries ke ON ke.id = ce.entry_id
                 WHERE ke.status = \'approved\'';
 
-        $bindings = [$vector, $vector];
+        $bindings = [$vector];
 
         if ($projectId !== null) {
             $sql .= ' AND ke.project_id = ?';
@@ -124,43 +123,64 @@ class HybridSearcher
             $bindings[] = $category;
         }
 
-        $sql .= ')
-             SELECT entry_id, chunk_index, content, semantic_similarity
-             FROM ranked_chunks
-             WHERE chunk_rank = 1
-               AND semantic_similarity >= ?
-             ORDER BY semantic_similarity DESC, entry_id ASC
-             LIMIT ?';
+        $sql .= " AND (ce.embedding <=> ?::vector) <= ?
+                  AND (ce.embedding <=> ?::vector) > '-Infinity'::float8
+                  AND (ce.embedding <=> ?::vector) < 'Infinity'::float8
+                  ORDER BY ce.embedding <=> ?::vector ASC, ce.entry_id ASC, ce.chunk_index ASC
+                  LIMIT ?";
+        array_push(
+            $bindings,
+            $vector,
+            1.0 - $this->minScore,
+            $vector,
+            $vector,
+            $vector,
+        );
 
-        $bindings[] = $this->minScore;
-        $bindings[] = $this->vectorTopK;
-
-        $rows = DB::select($sql, $bindings);
         $results = [];
+        $acceptedRank = 0;
+        $candidateLimit = max(1, $this->vectorTopK * 4);
 
-        foreach ($rows as $rank => $row) {
-            $rawScore = is_string($row->semantic_similarity)
-                ? strtoupper($row->semantic_similarity)
-                : (string) $row->semantic_similarity;
+        while (true) {
+            $rows = DB::select($sql, [...$bindings, $candidateLimit]);
 
-            if (in_array($rawScore, ['NAN', 'INF', '-INF'], true)) {
-                continue;
+            foreach ($rows as $row) {
+                $rawScore = is_string($row->semantic_similarity)
+                    ? strtoupper($row->semantic_similarity)
+                    : (string) $row->semantic_similarity;
+
+                if (in_array($rawScore, ['NAN', 'INF', '-INF'], true)) {
+                    continue;
+                }
+
+                $score = (float) $row->semantic_similarity;
+                if (! is_finite($score)) {
+                    continue;
+                }
+
+                $entryId = (int) $row->entry_id;
+                if (isset($results[$entryId])) {
+                    continue;
+                }
+
+                $results[$entryId] = [
+                    'score' => $score,
+                    'rank' => $acceptedRank++,
+                    'chunkIndex' => (int) $row->chunk_index,
+                    'chunkContent' => (string) $row->content,
+                ];
+
+                if (count($results) >= $this->vectorTopK) {
+                    return $results;
+                }
             }
 
-            $score = (float) $row->semantic_similarity;
-            if (! is_finite($score)) {
-                continue;
+            if (count($rows) < $candidateLimit) {
+                return $results;
             }
 
-            $results[(int) $row->entry_id] = [
-                'score' => $score,
-                'rank' => $rank,
-                'chunkIndex' => (int) $row->chunk_index,
-                'chunkContent' => (string) $row->content,
-            ];
+            $candidateLimit *= 2;
         }
-
-        return $results;
     }
 
     /**
@@ -204,7 +224,12 @@ class HybridSearcher
     }
 
     /**
-     * @param  array<string, array{score: float, rank: int}>  $vector
+     * @param  array<int, array{
+     *     score: float,
+     *     rank: int,
+     *     chunkIndex: int,
+     *     chunkContent: string
+     * }>  $vector
      * @param  array<string, array{score: float, rank: int}>  $fts
      * @return array<string, array{score: float, matchedBy: array<string>, graphExpanded: bool}>
      */

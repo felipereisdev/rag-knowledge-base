@@ -449,4 +449,109 @@ describe('HybridSearcher', function () {
         expect(array_map(fn ($result) => $result->entryId, $results))
             ->toBe([$first->id, $second->id]);
     });
+
+    it('does not let a zero vector consume the vector top k limit', function () {
+        $queryVector = array_fill(0, 768, 0.0);
+        $queryVector[0] = 1.0;
+        Embeddings::fake([[$queryVector]]);
+
+        $zeroVectorEntry = KnowledgeEntry::create([
+            'project_id' => $this->project->id,
+            'title' => 'Zero vector entry',
+            'content' => 'This vector has no magnitude.',
+            'status' => 'approved',
+        ]);
+        $validEntry = KnowledgeEntry::create([
+            'project_id' => $this->project->id,
+            'title' => 'Valid vector entry',
+            'content' => 'This vector has finite similarity.',
+            'status' => 'approved',
+        ]);
+
+        $zeroVector = array_fill(0, 768, 0.0);
+        $validVector = array_fill(0, 768, 0.0);
+        $validVector[0] = 0.8;
+        $validVector[1] = 0.6;
+
+        DB::table('chunk_embeddings')->insert([
+            [
+                'entry_id' => $zeroVectorEntry->id,
+                'project_id' => $this->project->id,
+                'chunk_index' => 0,
+                'content' => 'This vector has no magnitude.',
+                'embedding' => '['.implode(',', $zeroVector).']',
+            ],
+            [
+                'entry_id' => $validEntry->id,
+                'project_id' => $this->project->id,
+                'chunk_index' => 0,
+                'content' => 'This vector has finite similarity.',
+                'embedding' => '['.implode(',', $validVector).']',
+            ],
+        ]);
+
+        $results = (new HybridSearcher(
+            limit: 1,
+            minScore: 0.3,
+            expandGraph: false,
+            vectorTopK: 1,
+        ))->search('vectoronlyterm', $this->project->id);
+
+        expect($results)->toHaveCount(1)
+            ->and($results[0]->entryId)->toBe($validEntry->id)
+            ->and($results[0]->matchedBy)->toContain('vector');
+    });
+
+    it('adaptively over-fetches when one entry crowds the initial candidate window', function () {
+        $queryVector = array_fill(0, 768, 0.0);
+        $queryVector[0] = 1.0;
+        Embeddings::fake([[$queryVector]]);
+
+        $crowdingEntry = KnowledgeEntry::create([
+            'project_id' => $this->project->id,
+            'title' => 'Entry with many closest chunks',
+            'content' => 'This entry crowds the initial candidate window.',
+            'status' => 'approved',
+        ]);
+        $nextEntry = KnowledgeEntry::create([
+            'project_id' => $this->project->id,
+            'title' => 'Next unique entry',
+            'content' => 'This entry appears after the crowded window.',
+            'status' => 'approved',
+        ]);
+
+        $crowdingChunks = [];
+        for ($chunkIndex = 0; $chunkIndex < 9; $chunkIndex++) {
+            $crowdingChunks[] = [
+                'entry_id' => $crowdingEntry->id,
+                'project_id' => $this->project->id,
+                'chunk_index' => $chunkIndex,
+                'content' => "Crowding chunk {$chunkIndex}.",
+                'embedding' => '['.implode(',', $queryVector).']',
+            ];
+        }
+
+        $nextVector = array_fill(0, 768, 0.0);
+        $nextVector[0] = 0.8;
+        $nextVector[1] = 0.6;
+        $crowdingChunks[] = [
+            'entry_id' => $nextEntry->id,
+            'project_id' => $this->project->id,
+            'chunk_index' => 0,
+            'content' => 'The next unique candidate.',
+            'embedding' => '['.implode(',', $nextVector).']',
+        ];
+
+        DB::table('chunk_embeddings')->insert($crowdingChunks);
+
+        $results = (new HybridSearcher(
+            limit: 2,
+            minScore: 0.3,
+            expandGraph: false,
+            vectorTopK: 2,
+        ))->search('vectoronlyterm', $this->project->id);
+
+        expect(array_map(fn ($result) => $result->entryId, $results))
+            ->toBe([$crowdingEntry->id, $nextEntry->id]);
+    });
 });
