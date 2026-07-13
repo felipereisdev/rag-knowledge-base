@@ -713,4 +713,41 @@ describe('HybridSearcher', function () {
         expect($results)->toHaveCount(1)
             ->and($results[0]->entryId)->toBe($eligibleEntry->id);
     });
+
+    it('restores the caller hnsw iterative scan setting inside an outer transaction', function () {
+        $queryVector = array_fill(0, 768, 0.0);
+        $queryVector[0] = 1.0;
+        Embeddings::fake([[$queryVector]]);
+
+        $entry = KnowledgeEntry::create([
+            'project_id' => $this->project->id,
+            'title' => 'Transaction-local HNSW setting',
+            'content' => 'Search must not leak its strict-order setting.',
+            'status' => 'approved',
+        ]);
+        DB::table('chunk_embeddings')->insert([
+            'entry_id' => $entry->id,
+            'project_id' => $this->project->id,
+            'chunk_index' => 0,
+            'content' => 'Search must not leak its strict-order setting.',
+            'embedding' => '['.implode(',', $queryVector).']',
+        ]);
+
+        DB::transaction(function (): void {
+            DB::statement('SET LOCAL hnsw.iterative_scan = off');
+
+            $before = DB::selectOne("SELECT current_setting('hnsw.iterative_scan') AS value")->value;
+
+            (new HybridSearcher(
+                minScore: 0.3,
+                expandGraph: false,
+                vectorTopK: 1,
+            ))->search('vectoronlyterm', $this->project->id);
+
+            $after = DB::selectOne("SELECT current_setting('hnsw.iterative_scan') AS value")->value;
+
+            expect($before)->toBe('off')
+                ->and($after)->toBe('off');
+        });
+    });
 });

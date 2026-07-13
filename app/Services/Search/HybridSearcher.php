@@ -156,68 +156,78 @@ class HybridSearcher
         );
 
         return DB::transaction(function () use ($sql, $bindings, $queryVector, $projectId, $category): array {
+            $previousSetting = (string) (DB::selectOne(
+                "SELECT current_setting('hnsw.iterative_scan', true) AS value",
+            )->value ?? 'off');
             DB::statement('SET LOCAL hnsw.iterative_scan = strict_order');
 
-            $results = [];
-            $acceptedRank = 0;
-            $candidateLimit = max(1, $this->vectorTopK * 4);
+            try {
+                $results = [];
+                $acceptedRank = 0;
+                $candidateLimit = max(1, $this->vectorTopK * 4);
 
-            while (true) {
-                // The lookahead row proves whether the boundary-distance tie
-                // group is complete before deterministic PHP deduplication.
-                $fetchLimit = $candidateLimit + 1;
-                $rows = DB::select($sql, [...$bindings, $fetchLimit]);
-                $fetchedCount = count($rows);
+                while (true) {
+                    // The lookahead row proves whether the boundary-distance tie
+                    // group is complete before deterministic PHP deduplication.
+                    $fetchLimit = $candidateLimit + 1;
+                    $rows = DB::select($sql, [...$bindings, $fetchLimit]);
+                    $fetchedCount = count($rows);
 
-                if ($fetchedCount > $candidateLimit) {
-                    $boundaryDistance = (string) $rows[$candidateLimit - 1]->distance;
-                    $extraDistance = (string) $rows[$candidateLimit]->distance;
+                    if ($fetchedCount > $candidateLimit) {
+                        $boundaryDistance = (string) $rows[$candidateLimit - 1]->distance;
+                        $extraDistance = (string) $rows[$candidateLimit]->distance;
 
-                    if ($boundaryDistance === $extraDistance) {
-                        $candidateLimit *= 2;
+                        if ($boundaryDistance === $extraDistance) {
+                            $candidateLimit *= 2;
 
-                        continue;
+                            continue;
+                        }
                     }
+
+                    foreach (array_slice($rows, 0, $candidateLimit) as $row) {
+                        $rawScore = is_string($row->semantic_similarity)
+                            ? strtoupper($row->semantic_similarity)
+                            : (string) $row->semantic_similarity;
+
+                        if (in_array($rawScore, ['NAN', 'INF', '-INF'], true)) {
+                            continue;
+                        }
+
+                        $score = (float) $row->semantic_similarity;
+                        if (! is_finite($score)) {
+                            continue;
+                        }
+
+                        $entryId = (int) $row->entry_id;
+                        if (isset($results[$entryId])) {
+                            continue;
+                        }
+
+                        $results[$entryId] = [
+                            'score' => $score,
+                            'rank' => $acceptedRank++,
+                            'chunkIndex' => (int) $row->chunk_index,
+                            'chunkContent' => (string) $row->content,
+                        ];
+
+                        if (count($results) >= $this->vectorTopK) {
+                            return $results;
+                        }
+                    }
+
+                    if ($fetchedCount < $fetchLimit) {
+                        // strict_order still stops at hnsw.max_scan_tuples, so a
+                        // short filtered ANN page is not proof of table exhaustion.
+                        return $this->exactVectorSearch($queryVector, $projectId, $category);
+                    }
+
+                    $candidateLimit *= 2;
                 }
-
-                foreach (array_slice($rows, 0, $candidateLimit) as $row) {
-                    $rawScore = is_string($row->semantic_similarity)
-                        ? strtoupper($row->semantic_similarity)
-                        : (string) $row->semantic_similarity;
-
-                    if (in_array($rawScore, ['NAN', 'INF', '-INF'], true)) {
-                        continue;
-                    }
-
-                    $score = (float) $row->semantic_similarity;
-                    if (! is_finite($score)) {
-                        continue;
-                    }
-
-                    $entryId = (int) $row->entry_id;
-                    if (isset($results[$entryId])) {
-                        continue;
-                    }
-
-                    $results[$entryId] = [
-                        'score' => $score,
-                        'rank' => $acceptedRank++,
-                        'chunkIndex' => (int) $row->chunk_index,
-                        'chunkContent' => (string) $row->content,
-                    ];
-
-                    if (count($results) >= $this->vectorTopK) {
-                        return $results;
-                    }
-                }
-
-                if ($fetchedCount < $fetchLimit) {
-                    // strict_order still stops at hnsw.max_scan_tuples, so a
-                    // short filtered ANN page is not proof of table exhaustion.
-                    return $this->exactVectorSearch($queryVector, $projectId, $category);
-                }
-
-                $candidateLimit *= 2;
+            } finally {
+                DB::selectOne(
+                    "SELECT set_config('hnsw.iterative_scan', ?, true)",
+                    [$previousSetting],
+                );
             }
         });
     }
