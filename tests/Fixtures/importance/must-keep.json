@@ -2,11 +2,12 @@
   "_meta": {
     "purpose": "Reviewed calibration corpus of knowledge that MUST survive the importance classifier. Every entry here is knowledge a human reviewer confirmed is worth keeping. The deterministic rules may never hard-veto any of them: a veto here means the rule is too aggressive and the RULE must be fixed, never the fixture.",
     "content": "All examples are synthetic or anonymized. No real credentials, hostnames, customer names, or private repository content.",
-    "rules_version_reviewed": "v3",
+    "rules_version_reviewed": "v4",
     "reviewed_on": "2026-07-13",
     "adversarial_block": "Fixtures with an 'adv-' id prefix are adversarial: they deliberately use vocabulary the veto rules key on (exit codes, tool calls, test outcomes, very short normative rules) so a green run is evidence the rules generalize, not that they were co-fitted to the rest of the corpus. Added after review found the agent_operation_only and empty_content vetoes false-vetoed real knowledge that happened to mention this vocabulary.",
     "veto_probes": "Every entry under `fixtures` carries at least one positive knowledge signal, and the agent_operation_only veto only fires when NO knowledge assertion is present — so no fixture in `fixtures` can ever exercise that veto. `veto_probes` exists to close that blind spot and pins the rule from BOTH directions. `veto_probes.must_not_be_vetoed` is real, durable knowledge that carries NO positive knowledge-assertion marker and yet uses the exact vocabulary the veto keys on ('task completed', 'let us', 'a executar', 'here is a summary', 'running the tests', 'reading the file', 'all tests pass'); it must never be vetoed AND must trigger no positive signal, so a green run proves the ANCHORING is right rather than that a positive phrase was bolted on. `veto_probes.must_be_vetoed` is unambiguous agent chatter that must be vetoed by agent_operation_only. If an entry under must_not_be_vetoed fails, the RULE is wrong, never the fixture.",
-    "v3_reach": "v3 deleted the gerund-subject narration branch and the progress-tail machinery: a sentence whose subject is a gerund over the agent's own tooling ('Running the tests now, 3 failed.', 'Reading the file config/rag.php…') is inherently ambiguous with a statement about the system ('Running the tests in parallel corrupts the sqlite database.'), and three rounds of tail-tuning failed to separate them. Those gerund progress reports were therefore REMOVED from must_be_vetoed: they now escape to the semantic judge, which scores them low. That is a deliberate, accepted recall loss — a missed veto costs one judge call, a false veto destroys knowledge forever. What must_be_vetoed still states is the true reach of the rule: first-person narration over a tooling artefact, and terse status sentences with no declarative tail."
+    "v3_reach": "v3 deleted the gerund-subject narration branch and the progress-tail machinery: a sentence whose subject is a gerund over the agent's own tooling ('Running the tests now, 3 failed.', 'Reading the file config/rag.php…') is inherently ambiguous with a statement about the system ('Running the tests in parallel corrupts the sqlite database.'), and three rounds of tail-tuning failed to separate them. Those gerund progress reports were therefore REMOVED from must_be_vetoed: they now escape to the semantic judge, which scores them low. That is a deliberate, accepted recall loss — a missed veto costs one judge call, a false veto destroys knowledge forever.",
+    "v4_reach": "v4 closed the last two structural holes, WITHOUT adding a single word to any marker list. (1) TAIL DISCIPLINE: shape (a) — a first-person operational clause over a tooling artefact — now has the same whole-sentence discipline shape (b) always had. A shape-(a) sentence that opens a FURTHER FINITE CLAUSE (',' ';' ':' '—', a subordinator/relativiser, or a coordinator that is not coordinating another bare infinitive) is ambiguous and escapes: 'I checked the logs and the worker restarts on every deploy.' is a fact, and v3 destroyed it. (2) HEAD-NOUN ANCHORING: the tooling keyword must now be the HEAD of the object, not merely its first noun, so 'the file naming convention', 'the test database credentials', 'the log format' and 'the diff algorithm' are no longer tooling artefacts and escape. TRUE REACH OF THE VETO AFTER v4: a sentence is narration only when it is (a) a SENTENCE-INITIAL first-person operational clause over a tooling artefact with NO further finite clause ('I ran the tests.', \"I'm checking the file now.\", 'Let me open the file.', 'Corri os testes.'), or (b) a terse status phrase that is the WHOLE sentence ('All tests pass.', 'Done.'), and EVERY sentence of the candidate is one of those, and the candidate asserts no knowledge anywhere. CHATTER MOVED OUT OF must_be_vetoed IN v4: 'chatter-i-ran-the-tests' ('I ran the tests and all tests pass now, the tool call returned successfully.') now ESCAPES, because the coordinated clause after 'and' is a further finite clause and the rule can no longer tell it apart from 'I ran the tests and the seeder populates the demo tenant.' — which is knowledge. That is a deliberate, accepted recall loss. The bare form ('I ran the tests.') is still vetoed and is pinned by 'chatter-i-ran-the-tests-bare'."
   },
   "fixtures": [
     {
@@ -813,6 +814,241 @@
           "content": "A suíte de testes demora 12 minutos em CI.",
           "entities": []
         }
+      },
+
+      {
+        "id": "veto-tail-and-config-parsed-once",
+        "why": "Round-4 false veto (defect 1): shape (a) had no tail discipline, so a first-person narration clause swallowed the coordinated declarative clause that carries the fact. v3 vetoed this. v4 escapes on the further finite clause after 'and', with no verb listed anywhere.",
+        "candidate": {
+          "title": "The config file at boot",
+          "content": "I read the config file at boot and it is only parsed once.",
+          "entities": []
+        }
+      },
+      {
+        "id": "veto-tail-and-worker-restarts",
+        "why": "Round-4 false veto (defect 1): same tail-swallowing, and 'restarts' is in no marker list, so nothing at all saved it in v3.",
+        "candidate": {
+          "title": "Worker restarts on deploy",
+          "content": "I checked the logs and the worker restarts on every deploy.",
+          "entities": []
+        }
+      },
+      {
+        "id": "veto-tail-and-migration-concurrent",
+        "why": "Round-4 false veto (defect 1): same shape, and 'runs' is in no marker list.",
+        "candidate": {
+          "title": "The migration runs concurrently",
+          "content": "I read the diff and the migration runs concurrently.",
+          "entities": []
+        }
+      },
+      {
+        "id": "veto-tail-and-seeder-demo-tenant",
+        "why": "Round-4 false veto (defect 1): same shape, and 'populates' is in no marker list.",
+        "candidate": {
+          "title": "The seeder populates the demo tenant",
+          "content": "I ran the tests and the seeder populates the demo tenant.",
+          "entities": []
+        }
+      },
+      {
+        "id": "veto-tail-and-parser-lowercases",
+        "why": "Round-4 false veto (defect 1): same shape, and 'lowercases' is in no marker list.",
+        "candidate": {
+          "title": "The parser lowercases every key",
+          "content": "I read the config file and the parser lowercases every key.",
+          "entities": []
+        }
+      },
+      {
+        "id": "veto-head-noun-test-suite-naming",
+        "why": "Round-4 false veto (defect 2): TOOLING_OBJECT closed on a bare word boundary, so any noun phrase whose FIRST noun was a tooling word counted as a tooling artefact. 'test suite' is not the head here; 'convention' is.",
+        "candidate": {
+          "title": "Test suite naming convention",
+          "content": "I read the test suite naming convention: one file per aggregate.",
+          "entities": []
+        }
+      },
+      {
+        "id": "veto-head-noun-file-naming-convention",
+        "why": "Round-4 false veto (defect 2). Isolates the head-noun fix on its own: there is no clause tail here, so ONLY the head-noun anchoring can save it.",
+        "candidate": {
+          "title": "File naming convention",
+          "content": "I updated the file naming convention to kebab-case for migrations.",
+          "entities": []
+        }
+      },
+      {
+        "id": "veto-head-noun-file-permissions",
+        "why": "Round-4 false veto (defect 2): 'file' is the first noun but 'permissions' is the head.",
+        "candidate": {
+          "title": "Socket path permissions",
+          "content": "I checked the file permissions on the socket path, which the worker needs at boot.",
+          "entities": []
+        }
+      },
+      {
+        "id": "veto-head-noun-test-database-credentials",
+        "why": "Round-4 false veto (defect 2): 'test' is the first noun but 'credentials' is the head.",
+        "candidate": {
+          "title": "Test database credentials",
+          "content": "I inspected the test database credentials and they come from the CI vault.",
+          "entities": []
+        }
+      },
+      {
+        "id": "veto-head-noun-log-format",
+        "why": "Fresh v4 head-noun trap: 'the log format' has no clause tail at all, so only the head-noun anchoring keeps it.",
+        "candidate": {
+          "title": "Log format",
+          "content": "I updated the log format to one JSON object per line.",
+          "entities": []
+        }
+      },
+      {
+        "id": "veto-head-noun-test-fixtures-directory",
+        "why": "Fresh v4 head-noun trap: 'the test fixtures directory', no clause tail.",
+        "candidate": {
+          "title": "Where the importance fixtures live",
+          "content": "I created the test fixtures directory under tests/Fixtures/importance.",
+          "entities": []
+        }
+      },
+      {
+        "id": "veto-head-noun-diff-algorithm",
+        "why": "Fresh v4 head-noun trap: 'the diff algorithm', no clause tail.",
+        "candidate": {
+          "title": "Diff algorithm for large files",
+          "content": "I updated the diff algorithm to histogram for large files.",
+          "entities": []
+        }
+      },
+      {
+        "id": "veto-pt-tail-parsing-arranque",
+        "why": "Round-4 false veto (defect 3), Portuguese: 'acontece' was not in the PT half of the marker list while 'ocorre' was, so the fact was destroyed on a lexical coin-flip. v4 escapes structurally on the clause after 'e' — no PT verb was added.",
+        "candidate": {
+          "title": "Parsing da configuração",
+          "content": "Li o ficheiro de configuração e o parsing acontece só no arranque.",
+          "entities": []
+        }
+      },
+      {
+        "id": "veto-pt-tail-middleware-order",
+        "why": "Round-4 false veto (defect 3), Portuguese: colon-introduced declarative clause after a first-person operational clause.",
+        "candidate": {
+          "title": "Ordem do middleware nas rotas",
+          "content": "Reli o ficheiro de rotas: o middleware de auth corre antes do throttle.",
+          "entities": []
+        }
+      },
+      {
+        "id": "veto-pt-tail-worker-reinicia",
+        "why": "Round-4 false veto (defect 3), Portuguese: the exact PT twin of veto-tail-and-worker-restarts. Both must now escape for the same structural reason.",
+        "candidate": {
+          "title": "O worker reinicia a cada deploy",
+          "content": "Verifiquei os logs e o worker reinicia a cada deploy.",
+          "entities": []
+        }
+      },
+      {
+        "id": "veto-pt-tail-sqlite-corrompe",
+        "why": "Round-4 false veto (defect 3), Portuguese: 'corrompe' was unlisted while the near-identical '…fica corrompida…' escaped purely on 'fica'. Structure, not vocabulary, now decides.",
+        "candidate": {
+          "title": "sqlite corrompe em paralelo",
+          "content": "Corri os testes e a base sqlite corrompe em paralelo.",
+          "entities": []
+        }
+      },
+      {
+        "id": "veto-pt-tail-hash-por-chunk",
+        "why": "Round-4 false veto (defect 3), Portuguese: 'guarda' unlisted, colon tail.",
+        "candidate": {
+          "title": "Hash de conteúdo por chunk",
+          "content": "Li o código do importador: cada chunk guarda um hash de conteúdo.",
+          "entities": []
+        }
+      },
+      {
+        "id": "veto-tail-semicolon",
+        "why": "Fresh v4 probe: a semicolon opens a further finite clause exactly as 'and' does.",
+        "candidate": {
+          "title": "The seeder populates the demo tenant",
+          "content": "I ran the tests; the seeder populates the demo tenant.",
+          "entities": []
+        }
+      },
+      {
+        "id": "veto-tail-comma",
+        "why": "Fresh v4 probe: a bare comma-spliced declarative clause.",
+        "candidate": {
+          "title": "Worker restarts on deploy",
+          "content": "I checked the logs, the worker restarts on every deploy.",
+          "entities": []
+        }
+      },
+      {
+        "id": "veto-tail-colon",
+        "why": "Fresh v4 probe: a colon-introduced declarative clause.",
+        "candidate": {
+          "title": "The migration adds a partial index",
+          "content": "I read the diff: the migration adds a partial index.",
+          "entities": []
+        }
+      },
+      {
+        "id": "veto-tail-relative-clause",
+        "why": "Fresh v4 probe: a relative clause carries the fact.",
+        "candidate": {
+          "title": "The diff reorders the migration files",
+          "content": "I read the diff, which reorders the migration files.",
+          "entities": []
+        }
+      },
+      {
+        "id": "veto-tail-subordinate-that",
+        "why": "Fresh v4 probe: a bare 'that' complement clause carries the fact.",
+        "candidate": {
+          "title": "The importer writes the file at boot",
+          "content": "I opened the file that the importer writes at boot.",
+          "entities": []
+        }
+      },
+      {
+        "id": "veto-tail-subordinate-when",
+        "why": "Fresh v4 probe: a subordinate 'when' clause carries the condition.",
+        "candidate": {
+          "title": "The suite depends on the seeder",
+          "content": "I ran the tests when the seeder is disabled.",
+          "entities": []
+        }
+      },
+      {
+        "id": "veto-pt-tail-semicolon",
+        "why": "Fresh v4 probe, Portuguese: semicolon clause boundary.",
+        "candidate": {
+          "title": "A suíte depende do seeder",
+          "content": "Corri os testes; a suíte falha sem o seeder.",
+          "entities": []
+        }
+      },
+      {
+        "id": "veto-pt-tail-relative-clause",
+        "why": "Fresh v4 probe, Portuguese: relative 'que' clause carries the fact.",
+        "candidate": {
+          "title": "O router carrega as rotas no arranque",
+          "content": "Li o ficheiro de rotas, que o router carrega no arranque.",
+          "entities": []
+        }
+      },
+      {
+        "id": "veto-pt-head-noun-formato-dos-logs",
+        "why": "Fresh v4 head-noun trap, Portuguese: 'logs' sits inside the PP 'dos logs' and is not the head — the head is 'formato'. Found by adversarial probing: the PT modifier slots did not exclude 'dos'/'das'/'nos'/'nas', so the keyword could be reached from INSIDE a prepositional phrase. They do now.",
+        "candidate": {
+          "title": "Formato dos logs",
+          "content": "Atualizei o formato dos logs para JSON por linha.",
+          "entities": []
+        }
       }
     ],
     "must_be_vetoed": [
@@ -832,9 +1068,24 @@
         "candidate": {"title": "Note", "content": "Let me read the RetryPolicy file and run the test suite for the shipping module now.", "entities": []}
       },
       {
-        "id": "chatter-i-ran-the-tests",
-        "why": "First-person tool run plus a status report.",
-        "candidate": {"title": "Note", "content": "I ran the tests and all tests pass now, the tool call returned successfully.", "entities": []}
+        "id": "chatter-i-ran-the-tests-bare",
+        "why": "First-person tool run, bare operational clause with no further finite clause. This REPLACES the v3 probe 'chatter-i-ran-the-tests' ('I ran the tests and all tests pass now, the tool call returned successfully.'), which v4 lets escape: the clause after 'and' is a further finite clause, and the rule cannot tell it apart from 'I ran the tests and the seeder populates the demo tenant.' — which is knowledge. An accepted, deliberate recall loss.",
+        "candidate": {"title": "Note", "content": "I ran the tests.", "entities": []}
+      },
+      {
+        "id": "chatter-let-me-open-the-file",
+        "why": "Bare let-form over a tooling artefact, no tail.",
+        "candidate": {"title": "Note", "content": "Let me open the file.", "entities": []}
+      },
+      {
+        "id": "chatter-done",
+        "why": "The tersest status phrase there is, and the whole sentence.",
+        "candidate": {"title": "Note", "content": "Done.", "entities": []}
+      },
+      {
+        "id": "chatter-pt-corri-os-testes",
+        "why": "Portuguese first-person past over a tooling artefact, bare clause. The PT twin of chatter-i-ran-the-tests-bare: the two halves of the veto must reach equally far.",
+        "candidate": {"title": "Nota", "content": "Corri os testes.", "entities": []}
       },
       {
         "id": "chatter-i-am-going-to",

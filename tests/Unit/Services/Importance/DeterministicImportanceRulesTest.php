@@ -165,11 +165,86 @@ it('does not veto ordinary technical vocabulary that merely mentions an exit cod
 });
 
 it('still hard-vetoes genuine agent-operation narration about tests and tool calls', function () {
-    $evaluation = evaluateRules('I ran the tests and all tests pass now, the tool call returned successfully.');
+    $evaluation = evaluateRules('I ran the tests. All tests pass. Done.');
 
     expect($evaluation->vetoed)->toBeTrue()
         ->and(triggeredRuleIds($evaluation))->toContain('agent_operation_only');
 });
+
+it('does not veto a first-person clause that opens a further finite clause', function (string $content) {
+    // Regression for review finding 1 (round 4): shape (b) always required the
+    // status phrase to be the WHOLE sentence, but shape (a) had no tail
+    // discipline at all, so a first-person narration clause swallowed the
+    // coordinated declarative clause that carried the actual knowledge. Every
+    // sentence below was hard-vetoed by v3 unless the tail's verb happened to be
+    // in GENERAL_ASSERTION_MARKERS -- which made a hand-tuned word list the only
+    // thing between real knowledge and destruction. v4 escapes on the GRAMMAR:
+    // a further finite clause makes the sentence ambiguous, and ambiguous text
+    // escapes. Nothing was added to any lexicon to make these pass.
+    $evaluation = evaluateRules($content);
+
+    expect($evaluation->vetoed)->toBeFalse(
+        'False-vetoed real knowledge by: '.implode(', ', triggeredRuleIds($evaluation)),
+    );
+})->with([
+    'and + declarative clause' => 'I read the config file at boot and it is only parsed once.',
+    'and + unlisted verb "restarts"' => 'I checked the logs and the worker restarts on every deploy.',
+    'and + unlisted verb "runs"' => 'I read the diff and the migration runs concurrently.',
+    'and + unlisted verb "populates"' => 'I ran the tests and the seeder populates the demo tenant.',
+    'and + unlisted verb "lowercases"' => 'I read the config file and the parser lowercases every key.',
+    'semicolon clause' => 'I ran the tests; the seeder populates the demo tenant.',
+    'comma-spliced clause' => 'I checked the logs, the worker restarts on every deploy.',
+    'colon clause' => 'I read the diff: the migration adds a partial index.',
+    'relative clause' => 'I read the diff, which reorders the migration files.',
+    'that-complement clause' => 'I opened the file that the importer writes at boot.',
+    'when-subordinate clause' => 'I ran the tests when the seeder is disabled.',
+    // The PT half must reach exactly as far as the EN half. Each of these was a
+    // confirmed v3 false veto whose escape depended on a Portuguese verb that
+    // was NOT in the list ('acontece' vs the listed 'ocorre', 'corrompe' vs the
+    // listed 'fica'). No PT verb was added: the structure decides.
+    'pt: e + unlisted verb "acontece"' => 'Li o ficheiro de configuração e o parsing acontece só no arranque.',
+    'pt: colon clause' => 'Reli o ficheiro de rotas: o middleware de auth corre antes do throttle.',
+    'pt: e + unlisted verb "reinicia"' => 'Verifiquei os logs e o worker reinicia a cada deploy.',
+    'pt: e + unlisted verb "corrompe"' => 'Corri os testes e a base sqlite corrompe em paralelo.',
+    'pt: colon + unlisted verb "guarda"' => 'Li o código do importador: cada chunk guarda um hash de conteúdo.',
+    'pt: semicolon clause' => 'Corri os testes; a suíte falha sem o seeder.',
+    'pt: relative clause' => 'Li o ficheiro de rotas, que o router carrega no arranque.',
+    // Accepted, deliberate recall loss. This was the v3 chatter probe
+    // 'chatter-i-ran-the-tests'; it is now indistinguishable from the knowledge
+    // above it ('I ran the tests and the seeder populates the demo tenant.'), so
+    // it escapes to the judge, which scores it low. A missed veto costs one judge
+    // call; a false veto destroys knowledge forever.
+    'accepted escape: chatter with a coordinated status clause' => 'I ran the tests and all tests pass now, the tool call returned successfully.',
+]);
+
+it('does not veto a first-person clause whose object head is not a tooling artefact', function (string $content) {
+    // Regression for review finding 2 (round 4): TOOLING_OBJECT closed its
+    // keyword alternation on a bare word boundary, so any noun phrase whose
+    // FIRST noun was a tooling word satisfied "tooling artefact object" -- and
+    // the constraint failed at exactly its stated purpose. 'the file' is a
+    // tooling artefact; 'the file naming convention' is a project convention.
+    // v4 anchors the keyword as the HEAD of the object: it may only be followed
+    // by end-of-clause, punctuation, a closed-class function word, or a code-like
+    // apposition -- never by another plain noun.
+    $evaluation = evaluateRules($content);
+
+    expect($evaluation->vetoed)->toBeFalse(
+        'False-vetoed real knowledge by: '.implode(', ', triggeredRuleIds($evaluation)),
+    );
+})->with([
+    'head is "convention", not "test suite"' => 'I read the test suite naming convention: one file per aggregate.',
+    'head is "convention", not "file"' => 'I updated the file naming convention to kebab-case for migrations.',
+    'head is "permissions", not "file"' => 'I checked the file permissions on the socket path, which the worker needs at boot.',
+    'head is "credentials", not "test"' => 'I inspected the test database credentials and they come from the CI vault.',
+    'head is "format", not "log"' => 'I updated the log format to one JSON object per line.',
+    'head is "directory", not "test"' => 'I created the test fixtures directory under tests/Fixtures/importance.',
+    'head is "algorithm", not "diff"' => 'I updated the diff algorithm to histogram for large files.',
+    // PT: 'logs' sits inside the prepositional phrase 'dos logs' and is not the
+    // head at all. Found by adversarial probing -- the PT modifier slots did not
+    // exclude 'dos'/'das'/'nos'/'nas', so the keyword was reachable from INSIDE
+    // a PP. They do now.
+    'pt: head is "formato", not "logs"' => 'Atualizei o formato dos logs para JSON por linha.',
+]);
 
 it('does not veto agent vocabulary used inside a declarative statement', function (string $content) {
     // Regression for review finding A (round 2): v1 matched the agent-operation
@@ -264,13 +339,23 @@ it('hard-vetoes agent narration with no knowledge assertion', function (string $
         ->and(triggeredRuleIds($evaluation))->toContain('agent_operation_only');
 })->with([
     'terse status sentence' => 'All tests pass.',
+    'tersest status sentence' => 'Done.',
     'chain of terse status phrases' => 'Ran the tests, everything is green.',
     'subjectless past-tense tool run' => 'Ran the tests.',
+    'bare first-person tool run' => 'I ran the tests.',
+    'bare let-form over a tooling artefact' => 'Let me open the file.',
     'first-person progressive over a tooling artefact' => "I'm checking the file now.",
     'first-person mutation of a tooling artefact' => 'I have updated the file app/Services/Foo.php with the new signature.',
     'announced intent' => 'I will now run the test suite for the shipping module.',
+    // 'and' here coordinates a second BARE infinitive under the same subject. A
+    // bare infinitive cannot state a fact, so it is not a further finite clause
+    // and the tail discipline correctly leaves this as narration.
+    'coordinated bare infinitive under an intent' => "I'm going to open the config file and check the retry limit.",
+    'coordinated bare infinitive under a let-form' => 'Let me read the RetryPolicy file and run the test suite for the shipping module now.',
     'every sentence is narration' => 'I ran the tests. All tests pass. Done.',
     'pt first-person past' => 'Executei os testes.',
+    'pt bare first-person past' => 'Corri os testes.',
+    'pt coordinated bare infinitive' => 'Vou executar os testes e depois atualizar o ficheiro.',
 ]);
 
 it('rewards an explicit decision', function () {
@@ -490,9 +575,38 @@ it('hard-vetoes every unambiguous agent-chatter probe', function () {
     }
 });
 
+it('does not depend on the knowledge-assertion lexicon for its precision', function () {
+    // The round-4 invariant, and the one that keeps rounds 1-3 from repeating.
+    //
+    // Before v4 the assertion lexicon was the LAST line of defence: a first-person
+    // sentence that reported a fact was structurally "narration", and only a verb
+    // that happened to be listed in GENERAL_ASSERTION_MARKERS saved it. That made
+    // the veto's precision hostage to a hand-tuned English word list -- and the
+    // Portuguese half of that list was materially thinner, so PT knowledge was
+    // systematically more exposed than the identical EN sentence.
+    //
+    // v4 makes the escape structural, which demotes the lexicon to a genuine
+    // SECOND net. This test asserts exactly that: the narration GRAMMAR alone,
+    // with the lexicon never consulted, already rejects every probe that must not
+    // be vetoed. If this fails, someone has re-introduced a structural hole and
+    // is relying on the word list to hide it -- fix the grammar, not the list.
+    $rules = new DeterministicImportanceRules;
+
+    $isNarration = new ReflectionMethod($rules, 'isAgentOperationNarration');
+    $haystack = new ReflectionMethod($rules, 'haystack');
+
+    foreach (vetoProbeKnowledge() as $probe) {
+        $content = $haystack->invoke($rules, $probe['candidate']['content']);
+
+        expect($isNarration->invoke($rules, $content))->toBeFalse(
+            "Veto probe [{$probe['id']}] is structurally agent narration, so only the knowledge-assertion lexicon keeps it. The GRAMMAR must reject it -- do not widen the lexicon.",
+        );
+    }
+});
+
 it('pins both directions of the agent-operation veto with enough probes', function () {
-    expect(count(vetoProbeKnowledge()))->toBeGreaterThanOrEqual(35)
-        ->and(count(vetoProbeChatter()))->toBeGreaterThanOrEqual(14);
+    expect(count(vetoProbeKnowledge()))->toBeGreaterThanOrEqual(60)
+        ->and(count(vetoProbeChatter()))->toBeGreaterThanOrEqual(18);
 
     foreach ([...vetoProbeKnowledge(), ...vetoProbeChatter()] as $probe) {
         expect(trim($probe['id']))->not->toBeEmpty()
