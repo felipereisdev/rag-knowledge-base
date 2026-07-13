@@ -228,7 +228,8 @@ class KnowledgeEntryResource extends Resource
                     $fields['source'],
                     $fields['author'],
                     DateTime::make('created_at', __('rag.fields.created_at'))
-                        ->onlyOnDetail(),
+                        ->onlyOnDetail()
+                        ->span(4),
                 ]),
                 Tab::make(__('rag.detail.relationships'), [
                     $fields['tags'],

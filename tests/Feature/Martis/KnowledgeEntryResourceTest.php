@@ -134,6 +134,11 @@ describe('KnowledgeEntryResource', function () {
             ->toBe(['tags', 'entities'])
             ->and(collect($tabs[__('rag.detail.metadata')]['fields'])->pluck('attribute')->all())
             ->toBe(['metadata']);
+
+        $relationshipFields = collect($tabs[__('rag.detail.relationships')]['fields'])->keyBy('attribute');
+
+        expect($relationshipFields['tags']['colSpan'])->toBe(12)
+            ->and($relationshipFields['entities']['colSpan'])->toBe(12);
     });
 
     it('uses the entry title in the Martis detail payload', function () {
@@ -141,12 +146,19 @@ describe('KnowledgeEntryResource', function () {
         $entry = KnowledgeEntry::create([
             'project_id' => $project->id,
             'title' => 'Readable knowledge title',
+            'status' => 'approved',
+            'content' => 'Explicit body content for the detail payload assertion.',
         ]);
 
         $this->getJson("/martis/api/resources/knowledge-entries/{$entry->id}")
             ->assertOk()
             ->assertJsonPath('data._title', 'Readable knowledge title')
-            ->assertJsonPath('data._resource.titleAttribute', 'title');
+            ->assertJsonPath('data._resource.titleAttribute', 'title')
+            // Content tab
+            ->assertJsonPath('data.status', 'approved')
+            ->assertJsonPath('data.content', 'Explicit body content for the detail payload assertion.')
+            // Context tab
+            ->assertJsonPath('data.project_id.id', 'rag');
     });
 
     it('translates knowledge detail tabs for every supported locale', function () {
