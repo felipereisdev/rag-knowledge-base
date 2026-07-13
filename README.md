@@ -275,7 +275,7 @@ RAG_EMBEDDING_MODEL=<a-model-configured-to-return-768-dimension-vectors>
 RAG_EMBEDDING_DIM=768
 ```
 
-> Embedding persistence currently supports 768 dimensions only. The application rejects other dimensions at boot until variable-dimension storage is implemented. When the provider or model changes, the server detects the mismatch and re-embeds stored chunks.
+> Embedding persistence currently supports 768 dimensions only. The application rejects other dimensions at boot until variable-dimension storage is implemented. A provider or model identity change removes stored chunk embeddings; run `php artisan rag:reindex` to regenerate them.
 
 ---
 
