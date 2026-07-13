@@ -80,27 +80,28 @@ Enquanto uma edição ou decisão está em curso, os botões e atalhos de mutaç
 
 ## Integração com Martis
 
-O fluxo será implementado como uma Lens de `KnowledgeEntryResource`, gerada com `php artisan martis:lens`. Uma Lens é a superfície adequada porque a experiência continua a representar uma consulta sobre o mesmo modelo e deve reutilizar filtros, ações, autorização e endpoints do Resource.
+O conjunto pendente será implementado como uma Lens de `KnowledgeEntryResource`, gerada com `php artisan martis:lens`. A Lens continua a ser a origem da consulta porque a experiência representa uma vista do mesmo modelo e deve reutilizar filtros, ações, autorização e endpoints do Resource.
 
 A Lens:
 
 - consulta apenas entradas com estado `pending`;
 - ordena por `created_at` ascendente e usa `id` como desempate;
 - expõe apenas os campos necessários ao modo de foco;
-- usa um componente React próprio através de `componentKey()`;
 - reutiliza `ApproveEntries` e `RejectEntries` para as decisões;
 - usa a atualização normal do Resource para as correções;
 - acrescenta uma operação compensatória para Desfazer.
 
-O componente é registado no bundle de extensões do consumidor e renderizado dentro do shell Martis. Não será criado um Tool separado, porque a página é uma vista do Resource e não uma superfície independente do modelo.
+O Martis v1.28.4 serializa `Lens::componentKey()`, mas o `ResourceLensPage` instalado não resolve esse componente no frontend. Como o projeto não pode editar `vendor/`, o modo de foco será renderizado por um Tool fino, gerado com `php artisan martis:tool KnowledgeReview --with-component`. O Tool não reimplementa consulta, validação ou decisões: apenas monta o componente no shell Martis e consome a Lens e os endpoints normais do Resource e das Actions.
 
-No menu, o item **Revisão** é construído como o item do `KnowledgeEntryResource`, com o caminho substituído pelo URL da Lens. Assim, reutiliza o badge numérico nativo e `menuCount()` pode devolver apenas o total pendente. **Todas as entradas** é um link separado para o índice normal, sem um segundo badge ambíguo.
+Esta separação mantém a Lens como contrato de dados e limita o Tool à experiência de workflow. Quando o Martis passar a resolver componentes de Lens, o mesmo componente poderá migrar para a rota da Lens sem alterar a consulta ou a lógica de domínio.
 
-No dashboard, o `ValueMetric` de pendentes é substituído por um Card gerado com `php artisan martis:card`. O Card mostra o total e um CTA para a Lens; a configuração inicial necessária ao componente segue em `meta()`.
+No menu, o item **Revisão** é construído como o item do `KnowledgeEntryResource`, com o caminho substituído pelo URL do Tool. Assim, reutiliza o badge numérico nativo e `menuCount()` pode devolver apenas o total pendente. **Todas as entradas** é um link separado para o índice normal, sem um segundo badge ambíguo.
+
+No dashboard, o `ValueMetric` de pendentes é substituído por um Card gerado com `php artisan martis:card`. O Card mostra o total e um CTA para o Tool; a configuração inicial necessária ao componente segue em `meta()`.
 
 ## Estado e fluxo de dados
 
-1. A Lens carrega uma página de entradas pendentes e seleciona a primeira.
+1. O Tool pede à Lens uma página de entradas pendentes e seleciona a primeira.
 2. O cliente pré-carrega a entrada seguinte, sem descarregar toda a fila.
 3. Saltar muda apenas o cursor local.
 4. Guardar envia a atualização, apresenta validações e substitui o estado local pela resposta do servidor.
@@ -108,7 +109,7 @@ No dashboard, o `ValueMetric` de pendentes é substituído por um Card gerado co
 6. Após sucesso, o cliente remove a entrada da coleção, avança e invalida fila, badge de navegação e métricas do dashboard.
 7. Desfazer restaura `pending`, volta a inserir a entrada na posição correta e invalida os mesmos dados.
 
-O URL mantém a identidade da entrada atual para permitir recarregar e partilhar a revisão sem depender apenas de estado em memória. Se a entrada já não estiver pendente, a Lens apresenta a próxima disponível.
+O URL do Tool mantém a identidade da entrada atual no parâmetro `entry` para permitir recarregar e partilhar a revisão sem depender apenas de estado em memória. Se a entrada já não estiver pendente, o Tool apresenta a próxima disponível.
 
 ## Estados de erro e estados vazios
 
