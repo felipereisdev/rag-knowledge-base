@@ -113,16 +113,14 @@ describe('KnowledgeEntryResource', function () {
         ]);
     });
 
-    it('renders detail fields in a section without a content label', function () {
+    it('keeps the detail layout and omits only relationship labels', function () {
         $detailFields = (new KnowledgeEntryResource)->fieldsForDetail(request());
 
-        expect($detailFields)->toHaveCount(1);
+        $fields = collect($detailFields)
+            ->map(fn ($field): array => $field->toArray())
+            ->keyBy('attribute');
 
-        $section = $detailFields[0]->toArray();
-        $fields = collect($section['fields'])->keyBy('attribute');
-
-        expect($section['type'])->toBe('section')
-            ->and($section['title'])->toBeNull()
+        expect($detailFields)->toHaveCount(10)
             ->and($fields->keys()->all())->toBe([
                 'project_id',
                 'category',
@@ -135,7 +133,9 @@ describe('KnowledgeEntryResource', function () {
                 'entities',
                 'metadata',
             ])
-            ->and($fields['content']['label'])->toBe('');
+            ->and($fields['content']['label'])->toBe('Content')
+            ->and($fields['tags']['label'])->toBe('')
+            ->and($fields['entities']['label'])->toBe('');
     });
 
     it('can list entries', function () {

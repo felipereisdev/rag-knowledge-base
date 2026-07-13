@@ -26,7 +26,6 @@ use Martis\Fields\Select;
 use Martis\Fields\Text;
 use Martis\Filters\DateRangeFilter;
 use Martis\Filters\Filter;
-use Martis\Layout\Section;
 use Martis\Resource;
 
 class KnowledgeEntryResource extends Resource
@@ -187,20 +186,19 @@ class KnowledgeEntryResource extends Resource
     }
 
     /**
-     * Keep the detail drawer on the Section renderer so fields do not acquire
-     * the package's loose-field label column. Content is self-explanatory in
-     * this context, so its label is omitted without affecting create/update.
+     * Keep the default drawer layout while omitting the redundant headings on
+     * the Tags and Entities relationship panels. Create/update keep the labels.
      */
     public function fieldsForDetail(Request $request): array
     {
         $fields = $this->fields($request);
 
         foreach ($fields as $field) {
-            if ($field instanceof Field && $field->attribute() === 'content') {
+            if ($field instanceof Field && in_array($field->attribute(), ['tags', 'entities'], true)) {
                 $field->withLabel('');
             }
         }
 
-        return [Section::make(null, $fields)->columns(12)];
+        return $fields;
     }
 }
