@@ -4,6 +4,7 @@ namespace App\Services\Evaluation;
 
 use App\Services\Search\HybridSearcher;
 use App\Services\Search\SearchResult;
+use InvalidArgumentException;
 
 final class RetrievalEvaluator
 {
@@ -18,6 +19,8 @@ final class RetrievalEvaluator
      */
     public function evaluate(string $projectId, array $cases, int $k): array
     {
+        $this->validateK($k);
+
         $evaluated = [];
 
         foreach ($cases as $case) {
@@ -44,5 +47,19 @@ final class RetrievalEvaluator
         }
 
         return $evaluated;
+    }
+
+    private function validateK(int $k): void
+    {
+        if ($k < 1) {
+            throw new InvalidArgumentException(__('rag.evaluation.k_invalid'));
+        }
+
+        $searchLimit = (int) config('rag.search.limit', 10);
+        if ($k > $searchLimit) {
+            throw new InvalidArgumentException(__('rag.evaluation.k_exceeds_search_limit', [
+                'max' => $searchLimit,
+            ]));
+        }
     }
 }

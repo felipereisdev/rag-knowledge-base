@@ -42,3 +42,27 @@ it('evaluates search results by stable entry title', function () {
         ->and($results[0]->ndcgAtK)->toBe(1.0)
         ->and($results[0]->zeroResults)->toBeFalse();
 });
+
+it('rejects evaluation depth above the configured search limit before retrieval', function () {
+    config()->set('rag.search.limit', 2);
+
+    $searcher = Mockery::mock(HybridSearcher::class);
+    $searcher->shouldNotReceive('search');
+
+    expect(fn () => (new RetrievalEvaluator($searcher, new RetrievalMetrics))->evaluate(
+        projectId: 'rag',
+        cases: [new EvaluationCase('Question', ['Expected'])],
+        k: 3,
+    ))->toThrow(InvalidArgumentException::class, 'k');
+});
+
+it('rejects non-positive evaluation depth before retrieval', function (int $k) {
+    $searcher = Mockery::mock(HybridSearcher::class);
+    $searcher->shouldNotReceive('search');
+
+    expect(fn () => (new RetrievalEvaluator($searcher, new RetrievalMetrics))->evaluate(
+        projectId: 'rag',
+        cases: [new EvaluationCase('Question', ['Expected'])],
+        k: $k,
+    ))->toThrow(InvalidArgumentException::class, 'k');
+})->with([0, -1]);
