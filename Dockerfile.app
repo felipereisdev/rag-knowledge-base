@@ -1,3 +1,15 @@
+# Stage 0: Martis consumer extensions
+FROM node:22-alpine AS extensions-builder
+
+WORKDIR /app
+
+COPY package.json package-lock.json ./
+RUN npm ci
+
+COPY vite.extensions.config.ts ./
+COPY resources/js/martis-extensions ./resources/js/martis-extensions
+RUN npm run build:extensions
+
 # Stage 1: Builder
 FROM php:8.3-fpm-alpine AS builder
 
@@ -39,6 +51,7 @@ COPY docker/php/php.ini /usr/local/etc/php/conf.d/production.ini
 WORKDIR /var/www/html
 
 COPY --from=builder /var/www/html .
+COPY --from=extensions-builder /app/public/vendor/martis-user ./public/vendor/martis-user
 COPY docker/entrypoint-app.sh /usr/local/bin/entrypoint-app.sh
 COPY docker/entrypoint-worker.sh /usr/local/bin/entrypoint-worker.sh
 RUN chmod +x /usr/local/bin/entrypoint-app.sh /usr/local/bin/entrypoint-worker.sh

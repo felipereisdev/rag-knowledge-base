@@ -198,7 +198,6 @@ class KnowledgeEntryResource extends Resource
 
         foreach ($this->fields($request) as $field) {
             if ($field instanceof Field && in_array($field->attribute(), ['tags', 'entities'], true)) {
-                $field->withLabel('');
                 $relationshipFields[] = $field;
 
                 continue;

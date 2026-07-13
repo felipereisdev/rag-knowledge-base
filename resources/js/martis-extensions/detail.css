@@ -1,0 +1,8 @@
+/*
+ * SectionDisplay and relationship panels both render the field label. Keep the
+ * panel heading (icon + title + count) and hide only the outer definition-term
+ * label when a relationship is wrapped in a Section for full-width display.
+ */
+.martis-section-grid > div:has(> dd .martis-relation-toolbar) > .martis-detail-label {
+  display: none;
+}

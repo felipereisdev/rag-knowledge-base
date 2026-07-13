@@ -136,9 +136,9 @@ describe('KnowledgeEntryResource', function () {
             ->and($fields['content']['label'])->toBe('Content')
             ->and($section['title'])->toBeNull()
             ->and($relationships->keys()->all())->toBe(['tags', 'entities'])
-            ->and($relationships['tags']['label'])->toBe('')
+            ->and($relationships['tags']['label'])->toBe(__('rag.fields.tags'))
             ->and($relationships['tags']['colSpan'])->toBe(12)
-            ->and($relationships['entities']['label'])->toBe('')
+            ->and($relationships['entities']['label'])->toBe(__('rag.fields.entities'))
             ->and($relationships['entities']['colSpan'])->toBe(12);
     });
 

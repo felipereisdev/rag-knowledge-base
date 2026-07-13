@@ -22,6 +22,17 @@
  * picks it up at the next `npm run build:extensions`.
  */
 
+import detailStyles from './detail.css?inline'
+
+const DETAIL_STYLE_ID = 'martis-consumer-detail-styles'
+
+if (document.getElementById(DETAIL_STYLE_ID) === null) {
+  const style = document.createElement('style')
+  style.id = DETAIL_STYLE_ID
+  style.textContent = detailStyles
+  document.head.appendChild(style)
+}
+
 declare global {
   interface Window {
     Martis?: {
