@@ -48,9 +48,6 @@ final class DeterministicImportanceRules
 
     public const int INSUFFICIENT_SUBSTANCE_ADJUSTMENT = -10;
 
-    /** Shorter than this (after normalization) there is nothing to judge. */
-    public const int MIN_CONTENT_LENGTH = 20;
-
     /** Below this word count the content is too thin to be useful later. */
     public const int MIN_SUBSTANCE_WORDS = 12;
 
@@ -111,16 +108,25 @@ final class DeterministicImportanceRules
      * project. On their own they are noise; combined with a knowledge assertion
      * they are fine (see `hasKnowledgeAssertion`).
      *
+     * These markers are deliberately narrow: first-person (or otherwise
+     * unambiguous) operation NARRATION only — "I ran the tests", "the tool call
+     * returned", "all tests pass now". Ordinary technical vocabulary ("exit
+     * code", "tool call", "test suite") is NOT here on its own, because a
+     * sentence that merely mentions it as a fact about the system (e.g. "A
+     * non-zero exit code means the model file is missing") is real knowledge,
+     * not agent chatter, and must never be vetoed.
+     *
      * @var list<string>
      */
     private const array AGENT_OPERATION_MARKERS = [
         'let me', 'let us', 'i will now', "i'll now", 'i am going to', "i'm going to",
         'i have updated', 'i have created', 'i have added', 'i have fixed', 'i have read',
-        'running the tests', 'running the test suite', 'reading the file', 'writing the file',
-        'creating the file', 'tool call', 'exit code', 'task completed', 'all tests pass',
-        'here is the diff', 'here is a summary',
+        'i ran the tests', 'i ran the test suite', 'i am running the tests', 'i am running the test suite',
+        'i just ran the tests', 'i am reading the file', 'i am writing the file', 'i am creating the file',
+        'the tool call returned', 'my tool call', 'this tool call', 'task completed',
+        'all tests pass now', 'all tests now pass', 'here is the diff', 'here is a summary',
         'vou executar', 'vou ler', 'vou criar', 'vou atualizar', 'estou a ler',
-        'tarefa concluída', 'a executar', 'segue o diff',
+        'tarefa concluída', 'a executar', 'segue o diff', 'acabei de executar',
     ];
 
     /** Content made only of placeholder tokens carries no knowledge at all. */
@@ -242,10 +248,16 @@ final class DeterministicImportanceRules
         return $penalties;
     }
 
+    /**
+     * A veto is reserved for content that is genuinely empty or carries no
+     * readable statement at all (no letters). Short-but-readable content (a
+     * one-line rule, a terse fact) is real knowledge and is never vetoed on
+     * length alone; `insufficient_substance` already penalizes thin content by
+     * word count without forcing the final score to zero.
+     */
     private function isEmptyOrUnreadable(string $content): bool
     {
         return $content === ''
-            || mb_strlen($content) < self::MIN_CONTENT_LENGTH
             || preg_match('/\p{L}/u', $content) !== 1;
     }
 

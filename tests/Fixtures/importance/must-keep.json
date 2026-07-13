@@ -3,7 +3,8 @@
     "purpose": "Reviewed calibration corpus of knowledge that MUST survive the importance classifier. Every entry here is knowledge a human reviewer confirmed is worth keeping. The deterministic rules may never hard-veto any of them: a veto here means the rule is too aggressive and the RULE must be fixed, never the fixture.",
     "content": "All examples are synthetic or anonymized. No real credentials, hostnames, customer names, or private repository content.",
     "rules_version_reviewed": "v1",
-    "reviewed_on": "2026-07-13"
+    "reviewed_on": "2026-07-13",
+    "adversarial_block": "Fixtures with an 'adv-' id prefix are adversarial: they deliberately use vocabulary the veto rules key on (exit codes, tool calls, test outcomes, very short normative rules) so a green run is evidence the rules generalize, not that they were co-fitted to the rest of the corpus. Added after review found the agent_operation_only and empty_content vetoes false-vetoed real knowledge that happened to mention this vocabulary."
   },
   "fixtures": [
     {
@@ -384,6 +385,70 @@
       "candidate": {
         "title": "Never edit files under vendor/",
         "content": "Changes under `vendor/` are erased by the next composer install, so a fix applied there is lost and the bug returns in production while it stays fixed on the developer machine. Extend the package through its documented hooks instead, and if no hook exists, open an upstream issue and keep a local override in the host application.",
+        "category": "convention",
+        "source": "condense",
+        "tags": ["composer", "conventions"],
+        "entities": [
+          {"name": "vendor", "type": "directory"}
+        ],
+        "relations": []
+      }
+    },
+    {
+      "id": "adv-exit-code-not-agent-chatter",
+      "kind": "operational-constraint",
+      "retention_reason": "Adversarial regression for the agent_operation_only veto: the sentence uses 'exit code', vocabulary the marker list used to key on, but it states an ordinary technical fact, not agent-operation narration.",
+      "candidate": {
+        "title": "A non-zero embedder exit code means the model file is missing",
+        "content": "A non-zero exit code from the embedder means the model file is missing, so the job must not retry until an operator restores the file: retrying only reproduces the same failure forever.",
+        "category": "constraint",
+        "source": "condense",
+        "tags": ["embeddings", "operations"],
+        "entities": [
+          {"name": "EmbedderClient", "type": "class"}
+        ],
+        "relations": []
+      }
+    },
+    {
+      "id": "adv-tool-call-not-agent-chatter",
+      "kind": "convention",
+      "retention_reason": "Adversarial regression for the agent_operation_only veto: the sentence names 'tool call' as a fact about an API contract, not as narration of the agent's own actions.",
+      "candidate": {
+        "title": "Every tool call to rag_store_knowledge must include a project_id",
+        "content": "Every tool call to `rag_store_knowledge` must include a project_id, because omitting it silently files the entry under the wrong project and the mistake stays invisible until someone searches for it later.",
+        "category": "convention",
+        "source": "condense",
+        "tags": ["mcp", "conventions"],
+        "entities": [
+          {"name": "rag_store_knowledge", "type": "tool"}
+        ],
+        "relations": []
+      }
+    },
+    {
+      "id": "adv-all-tests-pass-not-agent-chatter",
+      "kind": "operational-constraint",
+      "retention_reason": "Adversarial regression for the agent_operation_only veto: the sentence reports a durable CI policy that happens to use 'all tests pass', not an agent narrating a test run it just performed.",
+      "candidate": {
+        "title": "Branch protection blocks merges unless all tests pass",
+        "content": "The branch protection rule blocks merging unless all tests pass on the `main` pipeline, because a red pipeline previously reached production and took checkout down for six minutes. Never bypass the check with an admin merge.",
+        "category": "constraint",
+        "source": "condense",
+        "tags": ["ci", "branch-protection"],
+        "entities": [
+          {"name": "main", "type": "branch"}
+        ],
+        "relations": []
+      }
+    },
+    {
+      "id": "adv-short-normative-rule",
+      "kind": "convention",
+      "retention_reason": "Adversarial regression for the empty_content veto: an 18-character rule is short but fully readable, not empty or unreadable, and must never be stamped with the empty_content audit reason.",
+      "candidate": {
+        "title": "Never edit vendor code",
+        "content": "Never edit vendor.",
         "category": "convention",
         "source": "condense",
         "tags": ["composer", "conventions"],

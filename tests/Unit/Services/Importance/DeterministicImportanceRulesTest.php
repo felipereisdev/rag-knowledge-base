@@ -72,6 +72,17 @@ it('hard-vetoes content that carries no words at all', function () {
         ->and(triggeredRuleIds($evaluation))->toContain('empty_content');
 });
 
+it('does not veto short but readable content', function () {
+    // Regression for review finding 2: a 19-character normative rule is
+    // neither empty nor unreadable. It may still be penalized by
+    // insufficient_substance for being thin, but it must never be vetoed
+    // (and the public reason for empty_content must never be attached to it).
+    $evaluation = evaluateRules('Use UTC everywhere.');
+
+    expect($evaluation->vetoed)->toBeFalse()
+        ->and(triggeredRuleIds($evaluation))->not->toContain('empty_content');
+});
+
 it('hard-vetoes placeholder-only content', function () {
     $evaluation = evaluateRules('TODO. TBD. N/A. Placeholder.');
 
@@ -112,6 +123,23 @@ it('does not veto an agent-operation message that carries a knowledge assertion'
         ->and(triggeredRuleIds($evaluation))->not->toContain('agent_operation_only');
 });
 
+it('does not veto ordinary technical vocabulary that merely mentions an exit code', function () {
+    // Regression for review finding 1: 'exit code' is ordinary technical
+    // vocabulary, not agent-operation narration. This sentence is real,
+    // durable knowledge and must never be hard-vetoed.
+    $evaluation = evaluateRules('A non-zero exit code from the embedder means the model file is missing.');
+
+    expect($evaluation->vetoed)->toBeFalse()
+        ->and(triggeredRuleIds($evaluation))->not->toContain('agent_operation_only');
+});
+
+it('still hard-vetoes genuine agent-operation narration about tests and tool calls', function () {
+    $evaluation = evaluateRules('I ran the tests and all tests pass now, the tool call returned successfully.');
+
+    expect($evaluation->vetoed)->toBeTrue()
+        ->and(triggeredRuleIds($evaluation))->toContain('agent_operation_only');
+});
+
 it('rewards an explicit decision', function () {
     $evaluation = evaluateRules('We decided to serve reporting endpoints from the report_daily_totals projection instead of the write model, since one dashboard request issued 400 queries.');
 
@@ -146,17 +174,12 @@ it('applies the exact named adjustment of every positive signal', function () {
     }
 
     expect($adjustments)->toBe([
-        'explicit_decision' => DeterministicImportanceRules::EXPLICIT_DECISION_ADJUSTMENT,
-        'normative_restriction' => DeterministicImportanceRules::NORMATIVE_RESTRICTION_ADJUSTMENT,
-        'causal_rationale' => DeterministicImportanceRules::CAUSAL_RATIONALE_ADJUSTMENT,
-        'actionable_consequence' => DeterministicImportanceRules::ACTIONABLE_CONSEQUENCE_ADJUSTMENT,
+        'explicit_decision' => 6,
+        'normative_restriction' => 6,
+        'causal_rationale' => 5,
+        'actionable_consequence' => 5,
     ])
-        ->and($evaluation->adjustment)->toBe(
-            DeterministicImportanceRules::EXPLICIT_DECISION_ADJUSTMENT
-            + DeterministicImportanceRules::NORMATIVE_RESTRICTION_ADJUSTMENT
-            + DeterministicImportanceRules::CAUSAL_RATIONALE_ADJUSTMENT
-            + DeterministicImportanceRules::ACTIONABLE_CONSEQUENCE_ADJUSTMENT,
-        );
+        ->and($evaluation->adjustment)->toBe(22);
 });
 
 it('penalizes speculative language', function () {
@@ -200,10 +223,10 @@ it('applies the exact named adjustment of every penalty', function () {
     }
 
     expect($adjustments)->toBe([
-        'speculative_language' => DeterministicImportanceRules::SPECULATIVE_LANGUAGE_ADJUSTMENT,
-        'generic_without_context' => DeterministicImportanceRules::GENERIC_WITHOUT_CONTEXT_ADJUSTMENT,
-        'transient_status' => DeterministicImportanceRules::TRANSIENT_STATUS_ADJUSTMENT,
-        'insufficient_substance' => DeterministicImportanceRules::INSUFFICIENT_SUBSTANCE_ADJUSTMENT,
+        'speculative_language' => -8,
+        'generic_without_context' => -8,
+        'transient_status' => -12,
+        'insufficient_substance' => -10,
     ]);
 });
 
@@ -211,13 +234,16 @@ it('clamps the final score to 0..100', function () {
     $rewarded = evaluateRules(baselineContent());
     $penalized = evaluateRules('Maybe things are broken for now.');
 
-    expect($rewarded->adjustment)->toBeGreaterThan(0)
+    // baselineContent() triggers exactly explicit_decision (+6) and
+    // causal_rationale (+5): 11. 'Maybe things are broken for now.' triggers
+    // exactly the four penalties asserted above: -8 -8 -12 -10 = -38.
+    expect($rewarded->adjustment)->toBe(11)
         ->and($rewarded->apply(100))->toBe(100)
-        ->and($rewarded->apply(60))->toBe(60 + $rewarded->adjustment)
-        ->and($penalized->adjustment)->toBeLessThan(0)
+        ->and($rewarded->apply(60))->toBe(71)
+        ->and($penalized->adjustment)->toBe(-38)
         ->and($penalized->apply(0))->toBe(0)
         ->and($penalized->apply(10))->toBe(0)
-        ->and($penalized->apply(80))->toBe(80 + $penalized->adjustment);
+        ->and($penalized->apply(80))->toBe(42);
 });
 
 it('forces a vetoed candidate to zero whatever the semantic score is', function () {

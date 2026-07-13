@@ -442,7 +442,22 @@ it('rethrows a database failure that is not a unique-key race', function () {
 });
 
 it('resolves from the container with the configured model and prompt version', function () {
-    expect(app(HybridImportanceClassifier::class))->toBeInstanceOf(HybridImportanceClassifier::class);
+    $classifier = app(HybridImportanceClassifier::class);
+
+    expect($classifier)->toBeInstanceOf(HybridImportanceClassifier::class);
+
+    // Drive it through the veto path so it never reaches the real (container
+    // bound) semantic judge, and assert the model/prompt version it actually
+    // used come from config, not just that some instance was built.
+    $result = $classifier->classify('classifier', new ImportanceCandidate(
+        title: 'Empty note',
+        content: '',
+        category: 'insight',
+        source: 'condense',
+    ));
+
+    expect($result->model)->toBe((string) config('rag.importance.model'))
+        ->and($result->promptVersion)->toBe((string) config('rag.importance.prompt_version'));
 });
 
 /**
