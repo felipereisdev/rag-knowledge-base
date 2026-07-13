@@ -2,11 +2,12 @@
 
 namespace App\Services\Importing;
 
-use App\Models\KnowledgeEntry;
-use App\Models\Tag;
+use App\Services\Knowledge\KnowledgeWriter;
 
 class DocumentImporter
 {
+    public function __construct(private readonly KnowledgeWriter $writer) {}
+
     /**
      * Import a .md or .txt file, splitting into entries by H1/H2 (markdown)
      * or creating a single entry (txt).
@@ -35,24 +36,14 @@ class DocumentImporter
 
         $entryIds = [];
         foreach ($sections as $section) {
-            $entry = KnowledgeEntry::create([
-                'project_id' => $projectId,
-                'title' => $section['title'],
-                'content' => $section['content'],
-                'category' => $category,
-                'source' => 'import',
-                'status' => 'pending',
-            ]);
-
-            if ($tags !== null) {
-                foreach ($tags as $tagName) {
-                    $tag = Tag::firstOrCreate([
-                        'project_id' => $projectId,
-                        'name' => $tagName,
-                    ]);
-                    $entry->tags()->attach($tag->id);
-                }
-            }
+            $entry = $this->writer->store(
+                projectId: $projectId,
+                title: $section['title'],
+                content: $section['content'],
+                category: $category,
+                source: 'import',
+                tags: $tags ?? [],
+            );
 
             $entryIds[] = $entry->id;
         }
@@ -73,17 +64,19 @@ class DocumentImporter
     {
         $lines = preg_split('/\r\n|\r|\n/', $content) ?: [];
         $sections = [];
+        $currentH1 = null;
         $currentTitle = null;
         $currentBuffer = [];
 
         foreach ($lines as $line) {
             if (preg_match('/^#\s+(.+)$/', $line, $m)) {
                 $this->flushSection($sections, $currentTitle, $currentBuffer);
-                $currentTitle = trim($m[1]);
+                $currentH1 = trim($m[1]);
+                $currentTitle = $currentH1;
             } elseif (preg_match('/^##\s+(.+)$/', $line, $m)) {
                 $this->flushSection($sections, $currentTitle, $currentBuffer);
-                $currentTitle = ($currentTitle ?? '').' / '.trim($m[1]);
-                $currentTitle = ltrim($currentTitle, ' /');
+                $heading = trim($m[1]);
+                $currentTitle = $currentH1 !== null ? "{$currentH1} / {$heading}" : $heading;
             } else {
                 $currentBuffer[] = $line;
             }

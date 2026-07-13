@@ -18,7 +18,7 @@ beforeEach(function () {
         'root_path' => '/tmp/test',
     ]);
 
-    $this->importer = new DocumentImporter;
+    $this->importer = app(DocumentImporter::class);
 });
 
 it('splits markdown by H1 and H2 headers', function () {
@@ -36,6 +36,44 @@ it('splits markdown by H1 and H2 headers', function () {
         ->and($titles)->toContain('Section Two');
 
     unlink($path);
+});
+
+it('keeps sibling H2 sections under their parent H1', function () {
+    $path = tempnam(sys_get_temp_dir(), 'rag_test_');
+    $markdownPath = "{$path}.md";
+    rename($path, $markdownPath);
+    $path = $markdownPath;
+    file_put_contents($path, "# Parent\n\nIntro.\n\n## First\n\nOne.\n\n## Second\n\nTwo.");
+
+    try {
+        $entryIds = $this->importer->import($this->project->id, $path, 'documentation', ['docs']);
+
+        $titles = KnowledgeEntry::whereIn('id', $entryIds)->pluck('title')->all();
+
+        expect($titles)->toBe(['Parent', 'Parent / First', 'Parent / Second']);
+    } finally {
+        @unlink($path);
+    }
+});
+
+it('imports through the shared writer flow', function () {
+    $path = tempnam(sys_get_temp_dir(), 'rag_test_');
+    $textPath = "{$path}.txt";
+    rename($path, $textPath);
+    $path = $textPath;
+    file_put_contents($path, 'Shared writer import.');
+
+    try {
+        $entryIds = $this->importer->import($this->project->id, $path, 'documentation', ['docs']);
+        $entry = KnowledgeEntry::with('tags')->findOrFail($entryIds[0]);
+
+        expect($entry->source)->toBe('import')
+            ->and($entry->status)->toBe('pending')
+            ->and($entry->category)->toBe('documentation')
+            ->and($entry->tags->pluck('name')->all())->toBe(['docs']);
+    } finally {
+        @unlink($path);
+    }
 });
 
 it('imports a .txt file as a single entry', function () {
