@@ -268,7 +268,9 @@ docker compose exec app php artisan rag:reindex --project=my-project
 
 1. Your assistant stores knowledge via `rag_store_knowledge` → entry is created with status **pending** (not yet searchable).
 2. You review pending entries at **http://localhost:8090/martis/resources/knowledge-entries** and approve or reject them.
-3. On approval, the worker embeds the entry (vector + tsvector) and it becomes searchable via `rag_search`.
+3. The always-on `indexer` worker embeds pending entries on the dedicated
+   `indexing` queue. Approval makes those pre-indexed entries searchable without
+   waiting for the optional session-condensation worker.
 
 This keeps the assistant from polluting the knowledge base with unverified claims — you stay in control of what's searchable.
 
@@ -309,7 +311,7 @@ docker compose -f docker-compose.yml up -d --build
 docker compose -f docker-compose.yml --profile condense up -d --build
 ```
 
-The base file loads `.env` into `app`, `worker`, and `app-dev` when the file exists, allowing the selected provider's standard Laravel AI environment variables to flow through without Compose-specific credential entries.
+The base file loads `.env` into `app`, `indexer`, `worker`, and `app-dev` when the file exists, allowing the selected provider's standard Laravel AI environment variables to flow through without Compose-specific credential entries.
 
 > Embedding persistence currently supports 768 dimensions only. The application rejects other dimensions at boot until variable-dimension storage is implemented. A provider or model identity change removes stored chunk embeddings; run `php artisan rag:reindex` to regenerate them.
 
@@ -343,7 +345,8 @@ The embedding identity variables are interpolated from the host environment or `
 |---|---|---|---|
 | `app` | `Dockerfile.app` (PHP-FPM 8.3) | — | Laravel application |
 | `web` | `nginx:alpine` | `8090:80` | nginx reverse proxy |
-| `worker` | `Dockerfile.app` | — | Optional `condense` profile queue worker (embedding + indexing jobs) |
+| `indexer` | `Dockerfile.app` | — | Always-on worker for the dedicated `indexing` queue |
+| `worker` | `Dockerfile.app` | — | Optional `condense` profile worker for session condensation |
 | `postgres` | `pgvector/pgvector:pg16` | `5433:5432` | Postgres + pgvector |
 | `embedder` | `services/embedder/` (FastAPI) | `8001:8000` | Local-default sidecar from `docker-compose.override.yml`; absent in external mode |
 
@@ -362,7 +365,8 @@ docker compose -f docker-compose.yml down
 # Inspect
 docker compose ps
 docker compose logs -f app
-docker compose logs -f worker
+docker compose logs -f indexer
+docker compose --profile condense logs -f worker
 
 # Run migrations manually
 docker compose exec app php artisan migrate
@@ -382,6 +386,9 @@ docker compose --profile dev exec app-dev vendor/bin/pint --test
 
 The out-of-band condenser runs as a queue worker. **Where** it runs is derived
 from the extractor **driver** you set in Martis → *Condense Settings*:
+
+The default `indexer` service is separate from session condensation and must
+remain running so entries continue to be embedded on the `indexing` queue.
 
 - `driver = claude_sdk` → runs **locally on your host**, reusing your
   authenticated `claude` CLI (no API key), like claude-mem.

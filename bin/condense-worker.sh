@@ -20,7 +20,7 @@ case "$DRIVER" in
       exit 1
     fi
     echo "driver=claude_sdk -> running the queue worker locally (host claude auth)."
-    exec php artisan queue:work --queue=default --tries=3 --sleep=3
+    exec php artisan queue:work --queue=condense --tries=3 --sleep=3
     ;;
   api)
     echo "driver=api -> starting the dockerized worker."

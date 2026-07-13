@@ -12,7 +12,7 @@ it('ships an executable condense-worker helper with both placement branches', fu
     expect($body)->toContain('rag:condense-driver');
     // sdk branch: guards on the claude binary, runs the worker on the host
     expect($body)->toContain('command -v claude');
-    expect($body)->toContain('queue:work');
+    expect($body)->toContain('queue:work --queue=condense');
     // api branch: brings up the dockerized worker via the profile
     expect($body)->toContain('docker compose --profile condense up -d worker');
 });
