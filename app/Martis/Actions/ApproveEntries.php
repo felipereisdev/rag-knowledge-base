@@ -17,8 +17,8 @@ class ApproveEntries extends Action
     /**
      * Approve the selected knowledge entries so they become searchable.
      *
-     * Setting the status to "approved" triggers the entry's observer, which
-     * embeds and indexes it (vector + full-text) via the queue.
+     * The entry observer requests a recovery index when an approved entry has
+     * no chunks; queue uniqueness coalesces equivalent jobs waiting to run.
      *
      * @param  Collection<int, Model>  $models
      */

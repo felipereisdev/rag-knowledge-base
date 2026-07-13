@@ -17,7 +17,7 @@ class KnowledgeEntryObserver
 
     public function updated(KnowledgeEntry $entry): void
     {
-        if ($entry->wasChanged('status') && $entry->status === 'rejected') {
+        if ($entry->status === 'rejected') {
             DB::table('chunk_embeddings')->where('entry_id', $entry->id)->delete();
 
             return;
