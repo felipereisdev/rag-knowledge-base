@@ -6,8 +6,7 @@ until php -r "new PDO('pgsql:host=${DB_HOST};dbname=${DB_DATABASE}', '${DB_USERN
   sleep 1
 done
 
-echo "Running migrations..."
-php artisan migrate --force --no-interaction
+QUEUE_NAME=${QUEUE_NAME:-default}
 
-echo "Starting queue worker..."
-exec php artisan queue:work --tries=3 --sleep=3 --max-time=3600
+echo "Starting queue worker for '${QUEUE_NAME}'..."
+exec php artisan queue:work --queue="$QUEUE_NAME" --tries=3 --sleep=3 --max-time=3600
