@@ -6,6 +6,7 @@ use App\Jobs\IndexEntryJob;
 use App\Models\KnowledgeEntry;
 use App\Models\Project;
 use App\Services\Knowledge\KnowledgeWriter;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
 
 beforeEach(function () {
@@ -67,4 +68,85 @@ it('queues updated entries for indexing after commit', function () {
         fn (IndexEntryJob $job) => $job->entryId === (int) $entry->id
             && $job->afterCommit === true,
     );
+});
+
+it('reindexes when embedded content changes', function () {
+    Queue::fake();
+
+    $entry = KnowledgeEntry::create([
+        'project_id' => 'p1', 'title' => 't', 'content' => 'c',
+        'category' => 'insight', 'source' => 'manual', 'status' => 'pending',
+    ]);
+
+    Queue::fake();
+
+    $entry->update(['content' => 'updated content']);
+
+    Queue::assertPushed(
+        IndexEntryJob::class,
+        fn (IndexEntryJob $job) => $job->entryId === (int) $entry->id
+            && $job->afterCommit === true,
+    );
+});
+
+it('does not reindex a metadata-only update', function () {
+    Queue::fake();
+
+    $entry = KnowledgeEntry::create([
+        'project_id' => 'p1', 'title' => 't', 'content' => 'c',
+        'category' => 'insight', 'source' => 'manual', 'status' => 'pending',
+    ]);
+
+    Queue::fake();
+
+    $entry->update(['metadata' => ['key' => 'value']]);
+
+    Queue::assertNotPushed(IndexEntryJob::class);
+});
+
+it('does not reindex approval when the pending entry already has chunks', function () {
+    Queue::fake();
+
+    $entry = KnowledgeEntry::create([
+        'project_id' => 'p1', 'title' => 't', 'content' => 'c',
+        'category' => 'insight', 'source' => 'manual', 'status' => 'pending',
+    ]);
+
+    DB::table('chunk_embeddings')->insert([
+        'entry_id' => $entry->id,
+        'project_id' => 'p1',
+        'chunk_index' => 0,
+        'content' => 'chunk text',
+        'embedding' => '['.implode(',', array_fill(0, 768, '0.1')).']',
+    ]);
+
+    Queue::fake();
+
+    $entry->update(['status' => 'approved']);
+
+    Queue::assertNotPushed(IndexEntryJob::class);
+});
+
+it('deletes chunks when an entry is rejected', function () {
+    Queue::fake();
+
+    $entry = KnowledgeEntry::create([
+        'project_id' => 'p1', 'title' => 't', 'content' => 'c',
+        'category' => 'insight', 'source' => 'manual', 'status' => 'pending',
+    ]);
+
+    DB::table('chunk_embeddings')->insert([
+        'entry_id' => $entry->id,
+        'project_id' => 'p1',
+        'chunk_index' => 0,
+        'content' => 'chunk text',
+        'embedding' => '['.implode(',', array_fill(0, 768, '0.1')).']',
+    ]);
+
+    Queue::fake();
+
+    $entry->update(['status' => 'rejected']);
+
+    Queue::assertNotPushed(IndexEntryJob::class);
+    expect(DB::table('chunk_embeddings')->where('entry_id', $entry->id)->exists())->toBeFalse();
 });
