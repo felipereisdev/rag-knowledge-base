@@ -139,6 +139,10 @@ describe('KnowledgeEntryResource', function () {
 
         expect($relationshipFields['tags']['colSpan'])->toBe(12)
             ->and($relationshipFields['entities']['colSpan'])->toBe(12);
+
+        $contextFields = collect($tabs[__('rag.detail.context')]['fields'])->keyBy('attribute');
+
+        expect($contextFields['created_at']['colSpan'])->toBe(4);
     });
 
     it('uses the entry title in the Martis detail payload', function () {
@@ -158,7 +162,11 @@ describe('KnowledgeEntryResource', function () {
             ->assertJsonPath('data.status', 'approved')
             ->assertJsonPath('data.content', 'Explicit body content for the detail payload assertion.')
             // Context tab
-            ->assertJsonPath('data.project_id.id', 'rag');
+            ->assertJsonPath('data.project_id.id', 'rag')
+            // Metadata tab (last tab) — bounds the far end of the tab list so a
+            // regression that truncated the flattened field list before the
+            // last tab would still fail this assertion.
+            ->assertJsonPath('data.metadata', []);
     });
 
     it('translates knowledge detail tabs for every supported locale', function () {
