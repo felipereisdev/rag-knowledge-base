@@ -11,6 +11,7 @@ return [
         'constraint' => 'Constraint',
     ],
     'statuses' => [
+        'classifying' => 'Classifying',
         'pending' => 'Pending',
         'approved' => 'Approved',
         'rejected' => 'Rejected',

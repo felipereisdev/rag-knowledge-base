@@ -42,6 +42,12 @@ class KnowledgeEntry extends Model
         return $this->belongsTo(Project::class, 'project_id');
     }
 
+    /** @return BelongsTo<ImportanceAssessment, $this> */
+    public function importanceAssessment(): BelongsTo
+    {
+        return $this->belongsTo(ImportanceAssessment::class, 'importance_assessment_id');
+    }
+
     /** @return BelongsToMany<Tag, $this> */
     public function tags(): BelongsToMany
     {

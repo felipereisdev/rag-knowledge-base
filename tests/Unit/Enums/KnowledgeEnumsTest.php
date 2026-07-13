@@ -22,6 +22,7 @@ it('provides knowledge category values and translated options', function () {
 
 it('provides knowledge status values and translated options', function () {
     expect(KnowledgeStatus::values())->toBe([
+        'classifying',
         'pending',
         'approved',
         'rejected',
