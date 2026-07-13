@@ -152,11 +152,11 @@ class KnowledgeEntryResource extends Resource
             BelongsToMany::make(__('rag.fields.tags'), 'tags', TagResource::class)
                 ->searchable()
                 ->rules(['sometimes', 'array'])
-                ->span(6),
+                ->span(12),
             BelongsToMany::make(__('rag.fields.entities'), 'entities', EntityResource::class)
                 ->searchable()
                 ->rules(['sometimes', 'array'])
-                ->span(6),
+                ->span(12),
             KeyValue::make('metadata', __('rag.fields.metadata'))
                 ->rules(['sometimes', 'array'])
                 ->span(12),

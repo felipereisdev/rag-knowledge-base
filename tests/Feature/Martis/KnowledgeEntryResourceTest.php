@@ -135,7 +135,9 @@ describe('KnowledgeEntryResource', function () {
             ])
             ->and($fields['content']['label'])->toBe('Content')
             ->and($fields['tags']['label'])->toBe('')
-            ->and($fields['entities']['label'])->toBe('');
+            ->and($fields['tags']['colSpan'])->toBe(12)
+            ->and($fields['entities']['label'])->toBe('')
+            ->and($fields['entities']['colSpan'])->toBe(12);
     });
 
     it('can list entries', function () {
