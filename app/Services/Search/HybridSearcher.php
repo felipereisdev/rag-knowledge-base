@@ -155,7 +155,7 @@ class HybridSearcher
             $vector,
         );
 
-        return DB::transaction(function () use ($sql, $bindings): array {
+        return DB::transaction(function () use ($sql, $bindings, $queryVector, $projectId, $category): array {
             DB::statement('SET LOCAL hnsw.iterative_scan = strict_order');
 
             $results = [];
@@ -212,12 +212,117 @@ class HybridSearcher
                 }
 
                 if ($fetchedCount < $fetchLimit) {
-                    return $results;
+                    // strict_order still stops at hnsw.max_scan_tuples, so a
+                    // short filtered ANN page is not proof of table exhaustion.
+                    return $this->exactVectorSearch($queryVector, $projectId, $category);
                 }
 
                 $candidateLimit *= 2;
             }
         });
+    }
+
+    /**
+     * @param  list<float>  $queryVector
+     * @return array<int, array{
+     *     score: float,
+     *     rank: int,
+     *     chunkIndex: int,
+     *     chunkContent: string
+     * }>
+     */
+    private function exactVectorSearch(array $queryVector, ?string $projectId, ?string $category): array
+    {
+        $vector = '['.implode(',', $queryVector).']';
+
+        $sql = 'WITH eligible_chunks AS MATERIALIZED (
+                SELECT
+                    ce.entry_id,
+                    ce.chunk_index,
+                    ce.content,
+                    ce.embedding <=> ?::vector AS distance
+                FROM chunk_embeddings ce
+                JOIN knowledge_entries ke ON ke.id = ce.entry_id
+                WHERE ke.status = \'approved\'';
+
+        $bindings = [$vector];
+
+        if ($projectId !== null) {
+            $sql .= ' AND ke.project_id = ?';
+            $bindings[] = $projectId;
+        }
+
+        if ($category !== null) {
+            $sql .= ' AND ke.category = ?';
+            $bindings[] = $category;
+        }
+
+        $sql .= " AND (ce.embedding <=> ?::vector) <= ?
+                  AND (ce.embedding <=> ?::vector) > '-Infinity'::float8
+                  AND (ce.embedding <=> ?::vector) < 'Infinity'::float8
+            ),
+            ranked_chunks AS (
+                SELECT
+                    entry_id,
+                    chunk_index,
+                    content,
+                    distance,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY entry_id
+                        ORDER BY distance ASC, chunk_index ASC
+                    ) AS chunk_rank
+                FROM eligible_chunks
+            )
+            SELECT
+                entry_id,
+                chunk_index,
+                content,
+                1 - distance AS semantic_similarity
+            FROM ranked_chunks
+            WHERE chunk_rank = 1
+            ORDER BY distance ASC, entry_id ASC, chunk_index ASC
+            LIMIT ?";
+        array_push(
+            $bindings,
+            $vector,
+            1.0 - $this->minScore,
+            $vector,
+            $vector,
+            $this->vectorTopK,
+        );
+
+        $rows = DB::select($sql, $bindings);
+        $results = [];
+        $acceptedRank = 0;
+
+        foreach ($rows as $row) {
+            $rawScore = is_string($row->semantic_similarity)
+                ? strtoupper($row->semantic_similarity)
+                : (string) $row->semantic_similarity;
+
+            if (in_array($rawScore, ['NAN', 'INF', '-INF'], true)) {
+                continue;
+            }
+
+            $score = (float) $row->semantic_similarity;
+            if (! is_finite($score)) {
+                continue;
+            }
+
+            $entryId = (int) $row->entry_id;
+            if (isset($results[$entryId])) {
+                continue;
+            }
+
+            $results[$entryId] = [
+                'score' => $score,
+                'rank' => $acceptedRank++,
+                'chunkIndex' => (int) $row->chunk_index,
+                'chunkContent' => (string) $row->content,
+            ];
+        }
+
+        return $results;
     }
 
     /**

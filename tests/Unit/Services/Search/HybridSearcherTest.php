@@ -650,4 +650,67 @@ describe('HybridSearcher', function () {
         expect($results)->toHaveCount(1)
             ->and($results[0]->entryId)->toBe($lowerIdEntry->id);
     });
+
+    it('falls back when out-of-project candidates exhaust the hnsw scan horizon', function () {
+        DB::statement('SET LOCAL hnsw.ef_search = 1');
+        DB::statement('SET LOCAL hnsw.max_scan_tuples = 1');
+
+        $queryVector = array_fill(0, 768, 0.0);
+        $queryVector[0] = 1.0;
+        Embeddings::fake([[$queryVector]]);
+
+        $otherProject = Project::create([
+            'id' => 'r2',
+            'name' => 'R2',
+            'root_path' => '/other-project',
+        ]);
+        $excludedEntry = KnowledgeEntry::create([
+            'project_id' => $otherProject->id,
+            'title' => 'Excluded nearest chunks',
+            'content' => 'These chunks exhaust the filtered ANN scan horizon.',
+            'status' => 'approved',
+        ]);
+        $eligibleEntry = KnowledgeEntry::create([
+            'project_id' => $this->project->id,
+            'title' => 'Eligible candidate beyond the horizon',
+            'content' => 'Exact fallback must recover this entry.',
+            'status' => 'approved',
+        ]);
+
+        $queryEmbedding = '['.implode(',', $queryVector).']';
+        for ($batchStart = 0; $batchStart < 50000; $batchStart += 1000) {
+            $chunks = [];
+            for ($chunkIndex = $batchStart; $chunkIndex < $batchStart + 1000; $chunkIndex++) {
+                $chunks[] = [
+                    'entry_id' => $excludedEntry->id,
+                    'project_id' => $otherProject->id,
+                    'chunk_index' => $chunkIndex,
+                    'content' => "Excluded nearest chunk {$chunkIndex}.",
+                    'embedding' => $queryEmbedding,
+                ];
+            }
+            DB::table('chunk_embeddings')->insert($chunks);
+        }
+
+        $eligibleVector = array_fill(0, 768, 0.0);
+        $eligibleVector[0] = 0.98;
+        $eligibleVector[1] = 0.2;
+        DB::table('chunk_embeddings')->insert([
+            'entry_id' => $eligibleEntry->id,
+            'project_id' => $this->project->id,
+            'chunk_index' => 0,
+            'content' => 'Eligible candidate beyond the horizon.',
+            'embedding' => '['.implode(',', $eligibleVector).']',
+        ]);
+
+        $results = (new HybridSearcher(
+            limit: 1,
+            minScore: 0.3,
+            expandGraph: false,
+            vectorTopK: 1,
+        ))->search('vectoronlyterm', $this->project->id);
+
+        expect($results)->toHaveCount(1)
+            ->and($results[0]->entryId)->toBe($eligibleEntry->id);
+    });
 });
