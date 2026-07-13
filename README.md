@@ -12,6 +12,31 @@ Key features:
 - **Admin panel + graph explorer** — built on Martis, visualize entities and relations interactively
 - **Plug-and-play** — clone, `docker compose up`, connect your harness. No PHP on the host, no manual key generation
 
+### Retrieval scores and evaluation
+
+Search results expose separate signals:
+
+- `semantic` is the best approved chunk's cosine similarity to the query.
+- `keyword` is PostgreSQL's full-text rank when the entry matches FTS.
+- `fusion` is the raw reciprocal-rank-fusion score used for ordering. It is not a probability or semantic confidence.
+
+Run the checked-in golden-query evaluation against the `rag` project:
+
+```bash
+docker compose exec app php artisan rag:evaluate
+```
+
+To enforce quality thresholds in a controlled environment:
+
+```bash
+docker compose exec app php artisan rag:evaluate \
+  --k=5 \
+  --min-recall=0.80 \
+  --min-mrr=0.70
+```
+
+The dataset lives at `resources/evaluations/rag.json`. Add a query only when an approved entry title is stable and a human has confirmed that the entry is relevant to the query.
+
 ---
 
 ## How it works
