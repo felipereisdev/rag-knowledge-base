@@ -61,6 +61,9 @@ class HybridSearcher
         ?string $projectId = null,
         ?string $category = null,
     ): array {
+        $projectId = $projectId !== null && trim($projectId) === '' ? null : $projectId;
+        $category = $category !== null && trim($category) === '' ? null : $category;
+
         $textSearchConfig = $this->textSearchConfig($projectId);
 
         // 1. Generate query embedding

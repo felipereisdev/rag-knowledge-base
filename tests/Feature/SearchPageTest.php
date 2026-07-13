@@ -2,6 +2,7 @@
 
 use App\Models\KnowledgeEntry;
 use App\Models\Project;
+use Illuminate\Foundation\Http\Middleware\ConvertEmptyStringsToNull;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
 use Laravel\Ai\Embeddings;
@@ -50,6 +51,50 @@ describe('Search page', function () {
             ->assertSee('Laravel routing')
             ->assertSee('Fusion score')
             ->assertSee('Semantic similarity');
+    });
+
+    it('treats empty project and category selectors as unfiltered', function () {
+        Queue::fake();
+
+        $project = Project::create([
+            'id' => 'empty-filter-project',
+            'name' => 'Empty Filter Project',
+            'root_path' => '/empty-filter-project',
+        ]);
+        $entry = KnowledgeEntry::create([
+            'project_id' => $project->id,
+            'title' => 'Semantic-only result',
+            'content' => 'This passage deliberately shares no words with the query.',
+            'category' => 'architecture',
+            'status' => 'approved',
+        ]);
+
+        $fakeVector = array_fill(0, 768, 0.1);
+        Embeddings::fake(fn (): array => [$fakeVector])->preventStrayEmbeddings();
+
+        DB::table('chunk_embeddings')->insert([
+            'entry_id' => $entry->id,
+            'project_id' => $project->id,
+            'chunk_index' => 0,
+            'content' => 'This passage deliberately shares no words with the query.',
+            'embedding' => '['.implode(',', $fakeVector).']',
+        ]);
+
+        $this->get('/search?q=zzqvneedle')
+            ->assertOk()
+            ->assertSee('Semantic-only result');
+
+        // Exercise the search boundary with the raw values emitted by the
+        // form's "all" options, before HTTP middleware coerces them to null.
+        $this->withoutMiddleware(ConvertEmptyStringsToNull::class);
+
+        $this->get('/search?'.http_build_query([
+            'q' => 'zzqvneedle',
+            'project_id' => '',
+            'category' => '',
+        ]))
+            ->assertOk()
+            ->assertSee('Semantic-only result');
     });
 
     it('shows empty state when no results', function () {
