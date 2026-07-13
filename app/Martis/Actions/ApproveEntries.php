@@ -17,8 +17,8 @@ class ApproveEntries extends Action
     /**
      * Approve the selected knowledge entries so they become searchable.
      *
-     * The entry observer requests a recovery index when an approved entry has
-     * no chunks; queue uniqueness coalesces equivalent jobs waiting to run.
+     * Approval preserves indexing already completed or queued while pending.
+     * Entries recovering from rejection request fresh indexing via the observer.
      *
      * @param  Collection<int, Model>  $models
      */

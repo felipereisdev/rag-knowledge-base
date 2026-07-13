@@ -28,7 +28,9 @@ class KnowledgeEntryObserver
         }
 
         $embeddedContentChanged = $entry->wasChanged(['content', 'project_id']);
-        $needsRecoveryIndex = $entry->wasChanged('status') && ! $entry->chunks()->exists();
+        $needsRecoveryIndex = $entry->wasChanged('status')
+            && $entry->getOriginal('status') === 'rejected'
+            && ! $entry->chunks()->exists();
 
         if ($embeddedContentChanged || $needsRecoveryIndex) {
             IndexEntryJob::dispatch((int) $entry->id)->afterCommit();

@@ -5,9 +5,13 @@
 use App\Jobs\IndexEntryJob;
 use App\Models\KnowledgeEntry;
 use App\Models\Project;
+use App\Services\Indexing\EntryIndexer;
 use App\Services\Knowledge\KnowledgeWriter;
+use Illuminate\Bus\UniqueLock;
+use Illuminate\Contracts\Cache\Repository as CacheRepository;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
+use Laravel\Ai\Embeddings;
 
 beforeEach(function () {
     Project::create(['id' => 'p1', 'name' => 'p1', 'root_path' => '/tmp/p1']);
@@ -138,6 +142,27 @@ it('does not queue duplicate indexing when a pending entry is approved before it
     $entry->update(['status' => 'approved']);
 
     Queue::assertPushed(IndexEntryJob::class, 1);
+});
+
+it('does not reindex approval after successful zero-chunk indexing', function () {
+    Queue::fake();
+    Embeddings::fake()->preventStrayEmbeddings();
+
+    $entry = KnowledgeEntry::create([
+        'project_id' => 'p1', 'title' => 't', 'content' => '# Heading only',
+        'category' => 'insight', 'source' => 'manual', 'status' => 'pending',
+    ]);
+    $job = new IndexEntryJob((int) $entry->id);
+
+    $job->handle(app(EntryIndexer::class));
+    (new UniqueLock(app(CacheRepository::class)))->release($job);
+
+    expect($entry->chunks()->exists())->toBeFalse();
+    Queue::fake();
+
+    $entry->update(['status' => 'approved']);
+
+    Queue::assertNotPushed(IndexEntryJob::class);
 });
 
 it('deletes chunks when an entry is rejected', function () {
