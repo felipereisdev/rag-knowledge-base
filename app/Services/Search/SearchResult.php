@@ -5,9 +5,11 @@ namespace App\Services\Search;
 class SearchResult
 {
     /**
-     * @param  array<string>  $tags
-     * @param  array<string>  $matchedBy  ['vector', 'keyword', 'graph']
+     * @param  list<string>  $tags
+     * @param  list<string>  $matchedBy  vector, keyword, and/or graph
      */
+    public readonly float $fusionScore;
+
     public function __construct(
         public readonly int $entryId,
         public readonly string $title,
@@ -17,5 +19,10 @@ class SearchResult
         public readonly array $tags,
         public readonly array $matchedBy,
         public readonly bool $graphExpanded,
-    ) {}
+        public readonly ?float $semanticSimilarity = null,
+        public readonly ?float $keywordScore = null,
+        public readonly ?int $matchedChunkIndex = null,
+    ) {
+        $this->fusionScore = $score;
+    }
 }
