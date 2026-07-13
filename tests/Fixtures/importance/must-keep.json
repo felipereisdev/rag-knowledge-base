@@ -2,10 +2,11 @@
   "_meta": {
     "purpose": "Reviewed calibration corpus of knowledge that MUST survive the importance classifier. Every entry here is knowledge a human reviewer confirmed is worth keeping. The deterministic rules may never hard-veto any of them: a veto here means the rule is too aggressive and the RULE must be fixed, never the fixture.",
     "content": "All examples are synthetic or anonymized. No real credentials, hostnames, customer names, or private repository content.",
-    "rules_version_reviewed": "v2",
+    "rules_version_reviewed": "v3",
     "reviewed_on": "2026-07-13",
     "adversarial_block": "Fixtures with an 'adv-' id prefix are adversarial: they deliberately use vocabulary the veto rules key on (exit codes, tool calls, test outcomes, very short normative rules) so a green run is evidence the rules generalize, not that they were co-fitted to the rest of the corpus. Added after review found the agent_operation_only and empty_content vetoes false-vetoed real knowledge that happened to mention this vocabulary.",
-    "veto_probes": "Every entry under `fixtures` carries at least one positive knowledge signal, and the agent_operation_only veto only fires when NO knowledge assertion is present — so no fixture in `fixtures` can ever exercise that veto. `veto_probes` exists to close that blind spot and pins the rule from BOTH directions. `veto_probes.must_not_be_vetoed` is real, durable knowledge that carries NO positive knowledge-assertion marker and yet uses the exact vocabulary the veto keys on ('task completed', 'let us', 'a executar', 'here is a summary', 'running the tests', 'reading the file', 'all tests pass'); it must never be vetoed AND must trigger no positive signal, so a green run proves the ANCHORING is right rather than that a positive phrase was bolted on. `veto_probes.must_be_vetoed` is unambiguous agent chatter that must be vetoed by agent_operation_only. If an entry under must_not_be_vetoed fails, the RULE is wrong, never the fixture."
+    "veto_probes": "Every entry under `fixtures` carries at least one positive knowledge signal, and the agent_operation_only veto only fires when NO knowledge assertion is present — so no fixture in `fixtures` can ever exercise that veto. `veto_probes` exists to close that blind spot and pins the rule from BOTH directions. `veto_probes.must_not_be_vetoed` is real, durable knowledge that carries NO positive knowledge-assertion marker and yet uses the exact vocabulary the veto keys on ('task completed', 'let us', 'a executar', 'here is a summary', 'running the tests', 'reading the file', 'all tests pass'); it must never be vetoed AND must trigger no positive signal, so a green run proves the ANCHORING is right rather than that a positive phrase was bolted on. `veto_probes.must_be_vetoed` is unambiguous agent chatter that must be vetoed by agent_operation_only. If an entry under must_not_be_vetoed fails, the RULE is wrong, never the fixture.",
+    "v3_reach": "v3 deleted the gerund-subject narration branch and the progress-tail machinery: a sentence whose subject is a gerund over the agent's own tooling ('Running the tests now, 3 failed.', 'Reading the file config/rag.php…') is inherently ambiguous with a statement about the system ('Running the tests in parallel corrupts the sqlite database.'), and three rounds of tail-tuning failed to separate them. Those gerund progress reports were therefore REMOVED from must_be_vetoed: they now escape to the semantic judge, which scores them low. That is a deliberate, accepted recall loss — a missed veto costs one judge call, a false veto destroys knowledge forever. What must_be_vetoed still states is the true reach of the rule: first-person narration over a tooling artefact, and terse status sentences with no declarative tail."
   },
   "fixtures": [
     {
@@ -659,24 +660,162 @@
           "content": "The tool call returns a JSON envelope with a content array.",
           "entities": []
         }
+      },
+      {
+        "id": "veto-gerund-comma-tail-ci-duration",
+        "why": "Round-3 false veto: v2's progress tail treated ANY comma-introduced tail as a progress report, so this CI timing fact was hard-vetoed. v3 has no gerund branch at all.",
+        "candidate": {
+          "title": "The suite takes 12 minutes on CI",
+          "content": "Running the tests, even with --parallel, takes 12 minutes on CI.",
+          "entities": []
+        }
+      },
+      {
+        "id": "veto-gerund-comma-tail-chunking",
+        "why": "Round-3 false veto: same comma-tail branch, chunked-read fact.",
+        "candidate": {
+          "title": "Memory spike on large imports",
+          "content": "Reading the file, chunk by chunk, avoids the memory spike on large imports.",
+          "entities": []
+        }
+      },
+      {
+        "id": "veto-gerund-comma-tail-tmpfs",
+        "why": "Round-3 false veto: same comma-tail branch, container limit fact.",
+        "candidate": {
+          "title": "Docker tmpfs limit during tests",
+          "content": "Running the tests, in the Docker image, hits the 2 GB tmpfs limit.",
+          "entities": []
+        }
+      },
+      {
+        "id": "veto-gerund-colon-tail-hashes",
+        "why": "Round-3 false veto: v2's tail branch also swallowed a colon-introduced declarative clause.",
+        "candidate": {
+          "title": "The audit job compares content hashes",
+          "content": "Checking the file: the audit job compares content hashes, not mtime.",
+          "entities": []
+        }
+      },
+      {
+        "id": "veto-gerund-adverb-first",
+        "why": "Round-3 false veto: v2 matched the adverb 'first' wherever it landed and let '.*' swallow the declarative predicate.",
+        "candidate": {
+          "title": "Hash check before the importer runs",
+          "content": "Checking the file first avoids a race with the importer.",
+          "entities": []
+        }
+      },
+      {
+        "id": "veto-gerund-adverb-then",
+        "why": "Round-3 false veto: same adverb branch, 'then' as a coordinator rather than a progress adverb.",
+        "candidate": {
+          "title": "Deploying without a rebuild ships stale assets",
+          "content": "Running the tests then deploying without a rebuild ships stale assets.",
+          "entities": []
+        }
+      },
+      {
+        "id": "veto-gerund-adverb-next",
+        "why": "Round-3 false veto: same adverb branch, 'next to' as a preposition.",
+        "candidate": {
+          "title": "Tests deadlock a concurrent migration",
+          "content": "Running the tests next to a migration deadlocks the orders table.",
+          "entities": []
+        }
+      },
+      {
+        "id": "veto-first-person-system-object-source",
+        "why": "Round-3 false veto: v2's first-person INSPECTION branch had no object constraint, so a first-person report about a SYSTEM thing was vetoed. v3 requires a tooling-artefact object on every first-person branch.",
+        "candidate": {
+          "title": "ivfflat caps at 2000 dimensions",
+          "content": "I read the pgvector source and the ivfflat index caps at 2000 dimensions.",
+          "entities": []
+        }
+      },
+      {
+        "id": "veto-first-person-system-object-container",
+        "why": "Round-3 false veto: same missing object constraint; 'the container' is a system thing, not a tooling artefact.",
+        "candidate": {
+          "title": "OOM killer threshold",
+          "content": "I inspected the container and the OOM killer fires at 512 MB.",
+          "entities": []
+        }
+      },
+      {
+        "id": "veto-first-person-tooling-object-with-fact",
+        "why": "Round-3 false veto: the object IS a tooling artefact ('the tests'), so only the knowledge-assertion safety net can save it — this probe pins that net.",
+        "candidate": {
+          "title": "jsonb ordering changed in Postgres 16",
+          "content": "We ran the tests against Postgres 16 and the jsonb ordering changed.",
+          "entities": []
+        }
+      },
+      {
+        "id": "veto-knowledge-with-trailing-status",
+        "why": "Round-3 false veto: v2 vetoed the WHOLE candidate when ANY sentence was narration, so one trailing status line destroyed the knowledge above it. v3 requires EVERY sentence to be narration.",
+        "candidate": {
+          "title": "Retry policy of the job runner",
+          "content": "The retry policy has 3 attempts with a 2s backoff.\nAll tests pass.",
+          "entities": []
+        }
+      },
+      {
+        "id": "veto-knowledge-with-trailing-done",
+        "why": "Round-3 false veto: same poisoning-by-one-line class, terser sign-off.",
+        "candidate": {
+          "title": "The importer hashes each chunk",
+          "content": "The importer keeps a content hash per chunk.\nDone.",
+          "entities": []
+        }
+      },
+      {
+        "id": "veto-pt-gerund-opener",
+        "why": "Round-3 false veto: the PT openers allowed ANY tail, unlike their English counterparts. The PT gerund openers are gone in v3.",
+        "candidate": {
+          "title": "Testes em paralelo corrompem o sqlite",
+          "content": "A executar os testes em paralelo, o sqlite fica corrompido.",
+          "entities": []
+        }
+      },
+      {
+        "id": "veto-imperative-documentation",
+        "why": "Fresh v3 probe: imperative documentation style is a real convention voice and must never be read as narration.",
+        "candidate": {
+          "title": "Order of a deploy",
+          "content": "Run the migration before deploying, then swap the container.",
+          "entities": []
+        }
+      },
+      {
+        "id": "veto-we-run-tests-convention",
+        "why": "Fresh v3 probe: first-person PLURAL present tense is the convention voice, so bare 'we run' / 'we read' must never be narration.",
+        "candidate": {
+          "title": "CI runs the suite on every push",
+          "content": "We run the tests on every push in CI.",
+          "entities": []
+        }
+      },
+      {
+        "id": "veto-first-person-tooling-object-parallel-corruption",
+        "why": "Fresh v3 probe: first-person narration over a tooling artefact that carries an incidental durable fact; the assertion net must keep it.",
+        "candidate": {
+          "title": "Parallel tests corrupt sqlite",
+          "content": "I ran the tests with --parallel and the sqlite database got corrupted.",
+          "entities": []
+        }
+      },
+      {
+        "id": "veto-pt-suite-duration",
+        "why": "Fresh v3 probe: Portuguese measurement fact using the exact tooling vocabulary the veto keys on.",
+        "candidate": {
+          "title": "Duração da suíte em CI",
+          "content": "A suíte de testes demora 12 minutos em CI.",
+          "entities": []
+        }
       }
     ],
     "must_be_vetoed": [
-      {
-        "id": "chatter-running-tests-now",
-        "why": "Sentence-initial gerund progress report with a result tail.",
-        "candidate": {"title": "Note", "content": "Running the tests now, 3 failed and 2 passed.", "entities": []}
-      },
-      {
-        "id": "chatter-reading-file",
-        "why": "Sentence-initial progress report whose tail is a single path token.",
-        "candidate": {"title": "Note", "content": "Reading the file config/rag.php…", "entities": []}
-      },
-      {
-        "id": "chatter-writing-file",
-        "why": "Same shape, write side.",
-        "candidate": {"title": "Note", "content": "Writing the file app/Foo.php…", "entities": []}
-      },
       {
         "id": "chatter-all-tests-pass",
         "why": "Terse status report that is the whole sentence.",
@@ -733,14 +872,29 @@
         "candidate": {"title": "Note", "content": "Let's run the test suite for the shipping module.", "entities": []}
       },
       {
-        "id": "chatter-bulleted-progress",
-        "why": "A bulleted progress report is still sentence-initial once the bullet is stripped.",
-        "candidate": {"title": "Note", "content": "- Running the tests now.", "entities": []}
+        "id": "chatter-bulleted-status",
+        "why": "A bulleted status report is still a whole sentence once the bullet is stripped, and every sentence here is one.",
+        "candidate": {"title": "Note", "content": "- Ran the tests.\n- All tests pass.", "entities": []}
       },
       {
         "id": "chatter-i-will-now",
         "why": "First-person announced intent over the test suite.",
         "candidate": {"title": "Note", "content": "I will now run the test suite for the shipping module.", "entities": []}
+      },
+      {
+        "id": "chatter-i-am-checking-the-file",
+        "why": "First-person progressive inspection of a tooling artefact.",
+        "candidate": {"title": "Note", "content": "I'm checking the file now.", "entities": []}
+      },
+      {
+        "id": "chatter-pt-executei-os-testes",
+        "why": "Portuguese first-person past over a tooling artefact.",
+        "candidate": {"title": "Nota", "content": "Executei os testes.", "entities": []}
+      },
+      {
+        "id": "chatter-multi-sentence-all-narration",
+        "why": "Every sentence is narration, so the whole-candidate veto is correct here — the counterpart of the must_not_be_vetoed probes that mix knowledge with a trailing status line.",
+        "candidate": {"title": "Note", "content": "I ran the tests. All tests pass. Done.", "entities": []}
       }
     ]
   }

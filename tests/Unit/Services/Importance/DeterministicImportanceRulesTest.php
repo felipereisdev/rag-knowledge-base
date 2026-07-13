@@ -175,7 +175,7 @@ it('does not veto agent vocabulary used inside a declarative statement', functio
     // Regression for review finding A (round 2): v1 matched the agent-operation
     // markers as free substrings anywhere in the content, so a phrase that
     // signals narration in one grammatical position also matched in the middle
-    // of a declarative sentence about the system. v2 anchors every marker to a
+    // of a declarative sentence about the system. v2 anchored every marker to a
     // first-person subject or to a sentence-initial progress-report shape.
     $evaluation = evaluateRules($content);
 
@@ -194,20 +194,83 @@ it('does not veto agent vocabulary used inside a declarative statement', functio
     'phrasal "I ran into"' => 'I ran into a deadlock when two workers updated the same row.',
 ]);
 
-it('hard-vetoes a sentence-initial progress report with no knowledge assertion', function (string $content) {
-    // Regression for review finding B (round 2): keying the markers to literal
-    // first-person forms let the gerund/imperative progress-report register sail
-    // through. These are the unambiguous case the veto is FOR.
+it('does not veto a gerund subject, whatever its tail', function (string $content) {
+    // Regression for review finding (round 3): a sentence whose subject is a
+    // gerund over the agent's own tooling is inherently ambiguous between a
+    // progress report and a statement about the system, and v2's progress-tail
+    // machinery separated them wrongly: any comma-introduced tail, and any of
+    // the adverbs now/again/next/first/then wherever it landed, made the whole
+    // sentence a "progress report". v3 deletes the gerund branch outright.
+    $evaluation = evaluateRules($content);
+
+    expect($evaluation->vetoed)->toBeFalse(
+        'False-vetoed real knowledge by: '.implode(', ', triggeredRuleIds($evaluation)),
+    );
+})->with([
+    'comma tail, CI duration' => 'Running the tests, even with --parallel, takes 12 minutes on CI.',
+    'comma tail, chunked read' => 'Reading the file, chunk by chunk, avoids the memory spike on large imports.',
+    'comma tail, container limit' => 'Running the tests, in the Docker image, hits the 2 GB tmpfs limit.',
+    'colon tail, declarative clause' => 'Checking the file: the audit job compares content hashes, not mtime.',
+    'adverb "first" as a predicate' => 'Checking the file first avoids a race with the importer.',
+    'adverb "then" as a coordinator' => 'Running the tests then deploying without a rebuild ships stale assets.',
+    'adverb "next" as a preposition' => 'Running the tests next to a migration deadlocks the orders table.',
+    'pt gerund opener with a tail' => 'A executar os testes em paralelo, o sqlite fica corrompido.',
+]);
+
+it('does not veto first-person narration about a system thing', function (string $content) {
+    // Regression for review finding (round 3): v2's first-person INSPECTION
+    // branch carried no object constraint, so any "I read/inspected/checked X"
+    // was narration whatever X was. v3 requires the object to be a tooling
+    // artefact (the file, the tests, the diff, the logs...), and the
+    // knowledge-assertion safety net covers the case where it genuinely IS one.
+    $evaluation = evaluateRules($content);
+
+    expect($evaluation->vetoed)->toBeFalse(
+        'False-vetoed real knowledge by: '.implode(', ', triggeredRuleIds($evaluation)),
+    );
+})->with([
+    'system object: the pgvector source' => 'I read the pgvector source and the ivfflat index caps at 2000 dimensions.',
+    'system object: the container' => 'I inspected the container and the OOM killer fires at 512 MB.',
+    'tooling object, but asserts a fact' => 'We ran the tests against Postgres 16 and the jsonb ordering changed.',
+    'tooling object, measured fact' => 'I ran the tests with --parallel and the sqlite database got corrupted.',
+    'first-person plural present is the convention voice' => 'We run the tests on every push in CI.',
+    'imperative documentation style' => 'Run the migration before deploying, then swap the container.',
+]);
+
+it('does not veto knowledge that merely ends with a status line', function (string $content) {
+    // Regression for review finding (round 3): v2 vetoed the whole candidate
+    // when ANY sentence looked like narration, so a single trailing "Done."
+    // destroyed the knowledge above it. The veto now needs EVERY sentence to be
+    // narration.
+    $evaluation = evaluateRules($content);
+
+    expect($evaluation->vetoed)->toBeFalse(
+        'False-vetoed real knowledge by: '.implode(', ', triggeredRuleIds($evaluation)),
+    );
+})->with([
+    'fact then "All tests pass."' => "The retry policy has 3 attempts with a 2s backoff.\nAll tests pass.",
+    'fact then "Done."' => "The importer keeps a content hash per chunk.\nDone.",
+    'narration then a fact' => 'I ran the tests. The sqlite database is corrupted under --parallel.',
+]);
+
+it('hard-vetoes agent narration with no knowledge assertion', function (string $content) {
+    // The unambiguous case the veto is FOR: a first-person operational subject
+    // over a tooling artefact, or a terse status phrase that is the whole
+    // sentence. Pins the rule from the other side, so a precision fix cannot
+    // silently delete the veto.
     $evaluation = evaluateRules($content);
 
     expect($evaluation->vetoed)->toBeTrue()
         ->and(triggeredRuleIds($evaluation))->toContain('agent_operation_only');
 })->with([
-    'gerund + result tail' => 'Running the tests now, 3 failed and 2 passed.',
-    'gerund + path tail' => 'Reading the file config/rag.php…',
-    'gerund + path tail, write side' => 'Writing the file app/Foo.php…',
     'terse status sentence' => 'All tests pass.',
-    'subjectless past-tense tool run' => 'Ran the tests, everything is green.',
+    'chain of terse status phrases' => 'Ran the tests, everything is green.',
+    'subjectless past-tense tool run' => 'Ran the tests.',
+    'first-person progressive over a tooling artefact' => "I'm checking the file now.",
+    'first-person mutation of a tooling artefact' => 'I have updated the file app/Services/Foo.php with the new signature.',
+    'announced intent' => 'I will now run the test suite for the shipping module.',
+    'every sentence is narration' => 'I ran the tests. All tests pass. Done.',
+    'pt first-person past' => 'Executei os testes.',
 ]);
 
 it('rewards an explicit decision', function () {
@@ -428,8 +491,8 @@ it('hard-vetoes every unambiguous agent-chatter probe', function () {
 });
 
 it('pins both directions of the agent-operation veto with enough probes', function () {
-    expect(count(vetoProbeKnowledge()))->toBeGreaterThanOrEqual(15)
-        ->and(count(vetoProbeChatter()))->toBeGreaterThanOrEqual(10);
+    expect(count(vetoProbeKnowledge()))->toBeGreaterThanOrEqual(35)
+        ->and(count(vetoProbeChatter()))->toBeGreaterThanOrEqual(14);
 
     foreach ([...vetoProbeKnowledge(), ...vetoProbeChatter()] as $probe) {
         expect(trim($probe['id']))->not->toBeEmpty()

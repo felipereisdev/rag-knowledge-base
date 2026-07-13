@@ -3,7 +3,7 @@
 namespace App\Services\Importance;
 
 /**
- * Version one of the deterministic importance rules.
+ * The deterministic importance rules.
  *
  * The rules are intentionally small, independent, and explainable. They never
  * try to be a second judge: the semantic score comes from the model, and these
@@ -23,7 +23,7 @@ namespace App\Services\Importance;
  */
 final class DeterministicImportanceRules
 {
-    public const string VERSION = 'v2';
+    public const string VERSION = 'v3';
 
     /**
      * A hard veto forces the final score to zero. It is exactly the negative of
@@ -111,177 +111,196 @@ final class DeterministicImportanceRules
      * call on text the judge will score low anyway. The asymmetry is the whole
      * design constraint, so ambiguous text is deliberately allowed to escape.
      *
-     * v1 matched a flat list of markers as free substrings ANYWHERE in the
-     * content, which false-vetoed ordinary knowledge that happened to contain
-     * the same words in a different grammatical position ("Every task completed
-     * by the worker writes a row to job_runs.", "Moving to pgvector let us drop
-     * the Pinecone dependency."). v2 therefore anchors every marker to the
-     * grammatical position that actually signals operation narration:
+     * v1 matched the markers as free substrings anywhere in the content. v2
+     * anchored them grammatically but still tried to separate a progress report
+     * from a statement by inspecting the TAIL of a sentence whose subject is a
+     * gerund ("Running the tests now, 3 failed." vs "Running the tests in
+     * parallel corrupts the sqlite database."). Three rounds of tail-tuning
+     * never separated the two, because they are not separable: a gerund subject
+     * over the agent's own tooling is inherently ambiguous. v3 therefore DELETES
+     * the gerund-subject branch and the whole progress-tail machinery instead of
+     * tuning it again. "Running the tests now, 3 failed and 2 passed." escapes
+     * the veto — an accepted, deliberate recall loss; the judge scores it low.
      *
-     *  - FIRST_PERSON_OPERATION_PATTERN — an explicit `I`/`we` subject in front
-     *    of a tooling verb ("I ran…", "I'm reading…", "I have updated the
-     *    file…"). First person is the strongest, safest signal: durable project
-     *    knowledge is not written in the first person. Present-tense forms ("we
-     *    run model jobs on the classification queue") are excluded on purpose —
-     *    that is the canonical voice of a convention, not of narration.
-     *  - AGENT_NARRATION_OPENERS — sentence-INITIAL only ("Let me…", "Ran the
-     *    tests…"). Mid-sentence occurrences ("…let us drop…") never match.
-     *  - AGENT_PROGRESS_OPENERS — sentence-initial gerund + the agent's own
-     *    tooling as object, and only when the rest of the sentence is a progress
-     *    tail (see PROGRESS_TAIL_PATTERN). "Running the tests now, 3 failed."
-     *    matches; "Running the test suite twice leaks 400 MB." does not.
-     *  - AGENT_STATUS_SENTENCES — terse status reports that are the WHOLE
-     *    sentence ("All tests pass.", "Done."). "…unless all tests pass on the
-     *    main pipeline" never matches.
+     * What survives is a much smaller rule. `agent_operation_only` fires only
+     * when ALL of the following hold:
      *
-     * `hasKnowledgeAssertion()` is the second safety net on top of all of them.
+     *   1. the candidate asserts no knowledge anywhere (hasKnowledgeAssertion()
+     *      over the whole text — kept deliberately broad, it is the safety net);
+     *   2. EVERY sentence of the content is agent narration, not merely some
+     *      sentence. A knowledge note with a trailing "All tests pass." keeps
+     *      its knowledge, which kills the whole class of poisoning-by-one-line;
+     *   3. a sentence is narration only in one of two shapes:
+     *      (a) a first-person operational subject over a TOOLING artefact —
+     *          "I ran the tests", "I'm checking the file", "let me open the
+     *          diff" (FIRST_PERSON_OPERATION_PATTERN, PT_FIRST_PERSON_OPERATION_PATTERN,
+     *          LET_NARRATION_PATTERN, PT_LET_NARRATION_PATTERN). The object
+     *          constraint is what lets first-person narration about a SYSTEM
+     *          thing escape: "I added a unique index on chunks.hash", "I read
+     *          the pgvector source and the ivfflat index caps at 2000
+     *          dimensions", "I inspected the container and the OOM killer fires
+     *          at 512 MB";
+     *      (b) a terse status phrase that is the ENTIRE sentence, with no
+     *          declarative tail — "All tests pass.", "Done.", "Ran the tests."
+     *          (AGENT_STATUS_PHRASES). A status phrase carrying a tail is
+     *          ambiguous ("All tests pass on the release branch only after the
+     *          seeder ran") and escapes.
      *
-     * @var list<string>
+     * Tense discipline inside shape (a): the convention voice is first-person
+     * PLURAL present ("We run model-backed jobs on the classification queue.",
+     * "We read the config file at boot."), so bare present-tense `we run` / `we
+     * read` are NOT narration. `we ran`, `we're reading`, `we've run` are. Bare
+     * `I read the diff` IS narration, because no convention is written in the
+     * first-person singular.
      */
-    private const array AGENT_FIRST_PERSON_MARKERS = [
-        // Portuguese first-person narration (the English forms are covered by
-        // FIRST_PERSON_OPERATION_PATTERN). Every entry carries an explicit
-        // first-person subject or inflection, so it cannot appear inside a
-        // declarative statement about the system. The v1 marker 'a executar' is
-        // gone: it matched any progressive verb ("O worker está a executar em
-        // lotes de 32 vetores.").
-        'vou executar', 'vou correr', 'vou rodar', 'vou ler', 'vou criar', 'vou atualizar',
-        'vou escrever', 'vou verificar', 'vou abrir', 'vou procurar',
-        'estou a executar', 'estou a correr', 'estou a ler', 'estou a escrever',
-        'estou a criar', 'estou a atualizar', 'estou a verificar',
-        'estou executando', 'estou lendo', 'estou rodando', 'estou escrevendo',
-        'estou criando', 'estou atualizando',
-        'acabei de executar', 'acabei de correr', 'acabei de rodar', 'acabei de ler',
-        'acabei de atualizar', 'acabei de criar',
-        'executei os testes', 'corri os testes', 'rodei os testes',
-        'li o ficheiro', 'li o arquivo', 'atualizei o ficheiro', 'criei o ficheiro',
-    ];
-
-    /**
-     * Sentence-initial narration. Any tail is allowed: nothing that opens a
-     * sentence with these words is a statement about the project.
-     *
-     * @var list<string>
-     */
-    private const array AGENT_NARRATION_OPENERS = [
-        'ran the tests', 'ran the test suite', 'ran the suite', 'ran pest', 'ran phpstan',
-        'ran the linter', 'ran the command', 're-ran the tests', 'reran the tests',
-        'deixa-me', 'deixe-me', 'a executar os testes', 'a correr os testes', 'a rodar os testes',
-    ];
-
-    /**
-     * "Let me run…", "Let's read…": a sentence-initial let-form followed by an
-     * operational verb. The verb is required: "Let's Encrypt certificates renew
-     * 30 days before expiry." is knowledge about a CA, and a bare `let's` opener
-     * false-vetoed it.
-     */
-    private const string LET_NARRATION_PATTERN = '/^let(?:\s+me|\s+us|\'s)\s+
-        (?:(?:now|first|then|just|quickly|also)\s+)*
-        (?:re-?)?
-        (?:run|read|check|write|create|update|open|look|see|inspect|search|grep|fix|start
-           |add|try|verify|examine|apply|build|test|edit|patch|delete|remove|list|explore|review|dig)
+    private const string TOOLING_OBJECT = '
+        (?:(?:the|a|an|this|that|these|those|our|my|its)\s+)?
+        (?:(?!(?:into|to|from|for|with|on|at|in|of|about|and|or|the|a|an)(?![\p{L}\p{N}]))[\w.\/-]+\s+){0,2}
+        (?:files?|tests?|test\s+suite|suite|diff|patch|stub|snippet|logs?|output|codebase
+           |linter|command|script|pest|phpstan|pint|phpunit)
         (?![\p{L}\p{N}])
-    /xu';
+    ';
+
+    /** Bare verb forms. They only signal narration behind an auxiliary, a modal, or a let-form. */
+    private const string OPERATION_VERBS_BARE = '
+        (?:re-?)?
+        (?:run|read|check|inspect|execute|open|search|grep|list|update|create|write
+           |add|fix|edit|patch|delete|remove|verify|examine|review|apply)
+    ';
+
+    /** Inflected forms that are narration on their own: past tense, progressive, participle. */
+    private const string OPERATION_VERBS_INFLECTED = '
+        (?:
+            ran|re-?ran|reran|running
+            |re-?read|reading
+            |check(?:ed|ing)|inspect(?:ed|ing)|execut(?:ed|ing)
+            |open(?:ed|ing)|search(?:ed|ing)|grepp(?:ed|ing)|list(?:ed|ing)
+            |updated|updating|created|creating|wrote|written|writing|added|adding
+            |fixed|fixing|edited|editing|patched|patching|deleted|deleting
+            |removed|removing|renamed
+        )
+    ';
 
     /**
-     * Sentence-initial gerund progress reports over the agent's own tooling.
-     * Only fire when the rest of the sentence is a progress tail, so that a
-     * gerund used as the SUBJECT of a declarative sentence ("Running the tests
-     * in parallel corrupts the shared sqlite database.") is never vetoed.
+     * Shape (a), English: a first-person subject in front of an operational verb
+     * whose object is a tooling artefact.
      *
-     * @var list<string>
-     */
-    private const array AGENT_PROGRESS_OPENERS = [
-        'running the tests', 'running the test suite', 'running the suite', 'running tests',
-        'running the command', 'running the linter', 'running pest', 'running phpstan', 'running pint',
-        'reading the file', 'reading file', 'reading the config file', 'reading the source file',
-        'writing the file', 'writing file', 'creating the file', 'updating the file',
-        'editing the file', 'opening the file', 'checking the file', 'checking the tests',
-        'inspecting the file', 'listing the files', 'searching the codebase', 'grepping for',
-        'a ler o ficheiro', 'a ler o arquivo', 'a escrever o ficheiro', 'a escrever o arquivo',
-        'a criar o ficheiro', 'a atualizar o ficheiro',
-    ];
-
-    /**
-     * Terse status reports. They must be the WHOLE sentence (an optional "now"
-     * or "again" plus punctuation aside), which is what separates "All tests
-     * pass." from "Branch protection blocks merges unless all tests pass."
-     *
-     * @var list<string>
-     */
-    private const array AGENT_STATUS_SENTENCES = [
-        'all tests pass', 'all tests passed', 'all tests now pass', 'all tests are green',
-        'tests pass', 'tests passed', 'tests are green', 'everything is green',
-        'the build is green', 'build is green', 'done', 'all done', 'task completed',
-        'task complete', 'no errors', 'no issues found', 'it works', 'fixed it',
-        'todos os testes passam', 'todos os testes passaram', 'testes todos verdes',
-        'tarefa concluída', 'tarefa concluida', 'concluído', 'concluido', 'feito',
-        'tudo verde', 'sem erros',
-    ];
-
-    /**
-     * An explicit first-person subject in front of a tooling verb. See the
-     * AGENT_FIRST_PERSON_MARKERS docblock for the design; the branches are:
-     *   (a) I + past/progressive execution or inspection verb ("I ran", "I'm reading");
-     *   (b) I/we + past/progressive mutation verb, but ONLY of a tooling artefact
-     *       ("I have updated the file"). "I added a unique index on chunks.hash"
-     *       is a fact about the system and deliberately escapes;
-     *   (c) I have run / I've run;
-     *   (d) we ran/are running the tests — the only "we" narration that is
-     *       unambiguous, because "we run/we write/we create <system thing>" is
-     *       how conventions are written;
-     *   (e) announced intent ("I'm going to…", "I will now…", "I'll run…").
+     *   (1) narration morphology, no auxiliary needed ("I ran the tests",
+     *       "I'm checking the file", "we were running the suite");
+     *   (2) an auxiliary / modal / announced intent licenses a bare verb form
+     *       ("I have run the tests", "I'll run the suite", "I'm going to open
+     *       the config file", "we've run the tests"). The auxiliary is REQUIRED
+     *       here, so the plain present tense of a convention ("We run the tests
+     *       on every push.") never reaches this branch;
+     *   (3) bare "I read the diff" — licensed for the first-person SINGULAR
+     *       only, because a convention is never written as "I".
      */
     private const string FIRST_PERSON_OPERATION_PATTERN = '/
         (?<![\p{L}\p{N}])
         (?:
-            i(?:\'(?:m|ve|ll))?
-            (?:\s+(?:am|was|have|had|will|just|already|now|then|also|finally|need|to))*
-            \s+
+            (?:i|we)(?:\'(?:m|re|ve))?
+            (?:\s+(?:am|are|was|were|have|has|had|just|already|now|then|also|finally))*
+            \s+'.self::OPERATION_VERBS_INFLECTED.'
+            |
             (?:
-                (?:ran|re-?ran)(?!\s+into)
-                |running
-                |read|re-?read|reading
-                |check(?:ed|ing)|inspect(?:ed|ing)|execut(?:ed|ing)
-                |open(?:ed|ing)|search(?:ed|ing)|grepp(?:ed|ing)|list(?:ed|ing)
+                (?:i|we)\'(?:ve|ll|m|re|d)
+                |
+                (?:i|we)(?:\s+(?:have|has|had|will|would|am|are|was|were
+                                |need\s+to|want\s+to|going\s+to|about\s+to|plan\s+to))+
             )
+            (?:\s+(?:just|already|now|then|also|finally|first|quickly|going\s+to|about\s+to|to))*
+            \s+'.self::OPERATION_VERBS_BARE.'
             |
-            (?:i|we)(?:\'(?:m|ve|ll|re))?
-            (?:\s+(?:am|are|have|had|will|just|already|now|then|also))*
-            \s+
-            (?:updated|updating|created|creating|wrote|written|writing|added|adding
-               |fixed|fixing|edited|editing|patched|patching|deleted|removed|renamed)
-            \s+
-            (?:(?:the|a|an|this|that|these|those|our|my)\s+)?
-            (?:files?|tests?|test\s+suite|diff|patch|stub|snippet)
-            |
-            i(?:\'ve|\s+have)(?:\s+(?:just|already|now))?\s+run
-            |
-            we(?:\'(?:ve|re))?(?:\s+(?:just|already|have|are|will))*\s+(?:ran|run|running)
-            \s+(?:the\s+)?(?:tests?|test\s+suite|suite)
-            |
-            i(?:\'m)?(?:\s+am)?\s+(?:going\s+to|about\s+to)
-            |
-            i(?:\'ll|\s+will)\s+(?:now|run|read|update|create|write|add|fix|check|open|edit|patch|execute|inspect)
+            i(?:\s+(?:just|already|then|also|first))*\s+read
         )
-        (?![\p{L}\p{N}])
+        \s+'.self::TOOLING_OBJECT.'
     /xu';
 
     /**
-     * What may follow a sentence-initial progress opener for it to still be a
-     * progress report: nothing, an ellipsis, a result clause introduced by a
-     * comma, a progress adverb ("now", "again"), or a single path/identifier
-     * token ("Reading the file config/rag.php…"). Anything else means the
-     * gerund phrase is the subject of a declarative sentence, i.e. knowledge.
+     * Shape (a), English let-form. The operational verb AND the tooling object
+     * are both required: "Let's Encrypt certificates renew 30 days before
+     * expiry." is knowledge about a certificate authority, and "Let me know the
+     * retry limit" is not an operation on a tooling artefact.
      */
-    private const string PROGRESS_TAIL_PATTERN = '/^\s*(?:
-        [.!\x{2026}]*\s*
-        |\.{3}.*
-        |[\x{2026}].*
-        |[,;:].*
-        |(?:now|again|next|first|then)(?![\p{L}\p{N}]).*
-        |[`"\']?[\p{L}\p{N}][\w.\/\\\\@:-]*[`"\']?\s*[.!\x{2026}]*\s*
-    )$/xu';
+    private const string LET_NARRATION_PATTERN = '/^
+        let(?:\s+me|\s+us|\'s)
+        (?:\s+(?:now|first|then|just|quickly|also))*
+        \s+'.self::OPERATION_VERBS_BARE.'
+        \s+'.self::TOOLING_OBJECT.'
+    /xu';
+
+    /**
+     * Shape (a), Portuguese. Every branch carries an explicit first-person
+     * subject or inflection, so a declarative progressive ("O worker está a
+     * executar em lotes de 32 vetores.") and a third-person present ("O comando
+     * de deploy corre os testes.") can never match. The v2 sentence-initial
+     * gerund openers ('a executar os testes…') are gone with the English ones:
+     * "A executar os testes em paralelo, o sqlite fica corrompido." is knowledge.
+     */
+    private const string PT_FIRST_PERSON_OPERATION_PATTERN = '/
+        (?<![\p{L}\p{N}])
+        (?:
+            (?:vou|vamos)\s+(?:voltar\s+a\s+)?'.self::PT_OPERATION_VERBS_INFINITIVE.'
+            |
+            (?:estou|estamos)\s+(?:a\s+)?
+            (?:'.self::PT_OPERATION_VERBS_INFINITIVE.'|'.self::PT_OPERATION_VERBS_GERUND.')
+            |
+            (?:acabei|acabamos|acabo)\s+de\s+'.self::PT_OPERATION_VERBS_INFINITIVE.'
+            |
+            '.self::PT_OPERATION_VERBS_FIRST_PERSON_PAST.'
+        )
+        \s+'.self::PT_TOOLING_OBJECT.'
+    /xu';
+
+    /** Shape (a), Portuguese let-form ("Deixa-me ler o ficheiro."). */
+    private const string PT_LET_NARRATION_PATTERN = '/^
+        deix[ae](?:-|\s+)(?:me|nos)
+        \s+'.self::PT_OPERATION_VERBS_INFINITIVE.'
+        \s+'.self::PT_TOOLING_OBJECT.'
+    /xu';
+
+    private const string PT_OPERATION_VERBS_INFINITIVE = '
+        (?:executar|correr|rodar|ler|reler|abrir|verificar|inspecionar|procurar|listar
+           |escrever|criar|atualizar|editar|apagar|remover|corrigir)
+    ';
+
+    private const string PT_OPERATION_VERBS_GERUND = '
+        (?:executando|correndo|rodando|lendo|abrindo|verificando|inspecionando|procurando
+           |listando|escrevendo|criando|atualizando|editando|apagando|removendo|corrigindo)
+    ';
+
+    private const string PT_OPERATION_VERBS_FIRST_PERSON_PAST = '
+        (?:executei|corri|rodei|li|reli|abri|verifiquei|inspecionei|procurei|listei
+           |escrevi|criei|atualizei|editei|apaguei|removi|corrigi)
+    ';
+
+    private const string PT_TOOLING_OBJECT = '
+        (?:(?:o|a|os|as|um|uma|este|esta|esse|essa|nosso|nossa)\s+)?
+        (?:(?!(?:o|a|os|as|de|do|da|em|no|na|para|com|e)(?![\p{L}\p{N}]))[\w.\/-]+\s+){0,2}
+        (?:ficheiros?|arquivos?|testes?|su[ií]tes?|diffs?|patch|logs?|comando|linter|c[óo]digo)
+        (?![\p{L}\p{N}])
+    ';
+
+    /**
+     * Shape (b): terse status phrases. They only count as narration when one of
+     * them (or a comma/and-joined chain of them, "Ran the tests, everything is
+     * green.") is the WHOLE sentence. A declarative tail makes it ambiguous, and
+     * ambiguous text escapes: "All tests pass on the release branch only after
+     * the seeder has populated the demo tenant." is knowledge.
+     *
+     * @var list<string>
+     */
+    private const array AGENT_STATUS_PHRASES = [
+        'all tests pass', 'all tests passed', 'all tests now pass', 'all tests are green',
+        'tests pass', 'tests passed', 'tests are green', 'everything is green',
+        'the build is green', 'build is green', 'done', 'all done', 'task completed',
+        'task complete', 'no errors', 'no issues found', 'it works', 'fixed it',
+        'ran the tests', 'ran the test suite', 'ran the suite', 'ran pest', 'ran phpstan',
+        'ran pint', 'ran the linter', 'ran the command', 're-ran the tests', 'reran the tests',
+        'todos os testes passam', 'todos os testes passaram', 'testes todos verdes',
+        'tarefa concluída', 'tarefa concluida', 'concluído', 'concluido', 'feito',
+        'tudo verde', 'sem erros',
+    ];
 
     /**
      * General assertion verbs. They are NOT a positive signal (they do not
@@ -297,9 +316,18 @@ final class DeterministicImportanceRules
         'depends on', 'is defined as', 'says', 'states', 'specifies', 'documents',
         'defines', 'expects', 'accepts', 'rejects', 'blocks', 'allows', 'disables',
         'enables', 'limits', 'corrupts', 'invalidates', 'overwrites',
+        // Behaviour of a system thing, stated as an observed fact. These carry no
+        // score of their own; they only widen the escape hatch, so a first-person
+        // sentence that ALSO reports what the system does ("We ran the tests
+        // against Postgres 16 and the jsonb ordering changed.") keeps its fact.
+        'changed', 'changes', 'differs', 'fires', 'happens', 'occurs', 'takes',
+        'costs', 'hits', 'leaks', 'skips', 'adds', 'drops', 'caps at', 'stops at',
+        'corrupted', 'broke', 'crashed', 'deadlocked', 'leaked', 'overflowed',
+        'timed out', 'took',
         'significa', 'indica', 'implica', 'retorna', 'devolve', 'garante', 'define',
         'exige', 'depende de', 'corresponde a', 'bloqueia', 'impede', 'permite',
-        'rejeita', 'especifica', 'diz',
+        'rejeita', 'especifica', 'diz', 'mudou', 'alterou', 'muda', 'altera',
+        'fica', 'ficam', 'demora', 'ocorre',
     ];
 
     /**
@@ -316,6 +344,25 @@ final class DeterministicImportanceRules
 
     /** Content made only of placeholder tokens carries no knowledge at all. */
     private const string PLACEHOLDER_PATTERN = '/^(?:[\p{P}\p{S}\s]*(?:tbd|tbc|to\s?do|n\/?a|none|null|undefined|placeholder|lorem\s+ipsum|x{3,}|fixme|wip|nothing\s+to\s+add|no\s+notes|a\s+definir|pendente|em\s+branco|sem\s+(?:informa[çc][ãa]o|conte[úu]do|notas))[\p{P}\p{S}\s]*)+$/iu';
+
+    /**
+     * A quantified measurement ("30s", "12 minutes", "512 MB", "60 requests").
+     * It counts as a knowledge assertion on its own: a number carrying a unit is
+     * a statement about how the system behaves, and agent chatter reports bare
+     * counts ("3 failed", "ran it 3 times") rather than measurements. Like every
+     * other branch of hasKnowledgeAssertion() it can only WEAKEN a veto.
+     */
+    private const string MEASUREMENT_ASSERTION_PATTERN = '/
+        \b\d+(?:[.,]\d+)?\s*
+        (?:ms|µs|ns|s|secs?|seconds?|mins?|minutes?|hours?|days?|weeks?|months?
+           |[kmgt]i?b|%|rps|qps|rpm)
+        (?![\p{L}\p{N}])
+        |
+        \b\d+\s+
+        (?:rows?|requests?|dimensions?|bytes?|attempts?|retries|workers?|connections?
+           |tokens?|queries|jobs?|entries|chunks?|vectors?|columns?|shards?|replicas?)
+        (?![\p{L}\p{N}])
+    /xiu';
 
     /** A concrete anchor: code identifier, path, number, acronym, or dotted token. */
     private const string CONCRETE_ANCHOR_PATTERN = '/`|[\/\\\\][\w.-]+|\b\d+\b|\b[A-Z]{2,}\b|\b\w+_\w+\b|\b[a-z]+[A-Z]\w*\b|\b[A-Z][a-z0-9]+[A-Z]\w*\b|\b\w+\.\w{2,}\b/u';
@@ -374,7 +421,7 @@ final class DeterministicImportanceRules
             $vetoes[] = $this->rule('unanswered_question', self::VETO_ADJUSTMENT, 'Content only asks questions and answers none.');
         }
 
-        if ($this->isAgentOperationNarration($haystack) && ! $this->hasKnowledgeAssertion($haystack, $text, $entities)) {
+        if ($this->isAgentOperationNarration($this->haystack($content)) && ! $this->hasKnowledgeAssertion($haystack, $text, $entities)) {
             $vetoes[] = $this->rule('agent_operation_only', self::VETO_ADJUSTMENT, 'Content reports an agent operation without asserting knowledge.');
         }
 
@@ -382,40 +429,40 @@ final class DeterministicImportanceRules
     }
 
     /**
-     * True only for UNAMBIGUOUS agent-operation narration: a first-person
-     * operational subject anywhere, or a progress-report shape anchored at the
-     * start of a sentence. Ambiguous text escapes to the semantic judge by
-     * design — losing recall here is an accepted trade, losing precision is not.
+     * True only when EVERY sentence of the content is agent narration. "Some
+     * sentence is narration" is not enough: a candidate that states a fact and
+     * then signs off with "Done." still carries the fact, and vetoing the whole
+     * candidate for its last line destroyed real knowledge. Requiring all of
+     * them removes that failure by construction.
+     *
+     * Narration itself is only the two shapes described on TOOLING_OBJECT above.
+     * Anything else escapes to the semantic judge by design — losing recall here
+     * is an accepted trade, losing precision is not.
      */
-    private function isAgentOperationNarration(string $haystack): bool
+    private function isAgentOperationNarration(string $contentHaystack): bool
     {
-        if (preg_match(self::FIRST_PERSON_OPERATION_PATTERN, $haystack) === 1) {
-            return true;
+        $sentences = $this->sentences($contentHaystack);
+
+        if ($sentences === []) {
+            return false;
         }
 
-        if ($this->matchesAny($haystack, self::AGENT_FIRST_PERSON_MARKERS)) {
-            return true;
-        }
-
-        foreach ($this->sentences($haystack) as $sentence) {
-            if ($this->startsWithAny($sentence, self::AGENT_NARRATION_OPENERS)) {
-                return true;
-            }
-
-            if (preg_match(self::LET_NARRATION_PATTERN, $sentence) === 1) {
-                return true;
-            }
-
-            if ($this->isProgressReport($sentence)) {
-                return true;
-            }
-
-            if ($this->isStatusSentence($sentence)) {
-                return true;
+        foreach ($sentences as $sentence) {
+            if (! $this->isNarrationSentence($sentence)) {
+                return false;
             }
         }
 
-        return false;
+        return true;
+    }
+
+    private function isNarrationSentence(string $sentence): bool
+    {
+        return preg_match(self::FIRST_PERSON_OPERATION_PATTERN, $sentence) === 1
+            || preg_match(self::PT_FIRST_PERSON_OPERATION_PATTERN, $sentence) === 1
+            || preg_match(self::LET_NARRATION_PATTERN, $sentence) === 1
+            || preg_match(self::PT_LET_NARRATION_PATTERN, $sentence) === 1
+            || $this->isStatusSentence($sentence);
     }
 
     /**
@@ -427,8 +474,8 @@ final class DeterministicImportanceRules
 
         $sentences = array_map(
             // Drop leading list bullets, quotes and markdown so a bulleted
-            // progress report is still recognised as sentence-initial.
-            static fn (string $sentence): string => (string) preg_replace('/^[\s\p{Pd}*>#`"\'\x{2022}\p{Pi}]+/u', '', $sentence),
+            // status line is still recognised as a whole sentence.
+            static fn (string $sentence): string => trim((string) preg_replace('/^[\s\p{Pd}*>#`"\'\x{2022}\p{Pi}]+/u', '', $sentence)),
             $sentences,
         );
 
@@ -439,47 +486,20 @@ final class DeterministicImportanceRules
     }
 
     /**
-     * @param  list<string>  $openers
+     * Shape (b): the sentence is nothing but terse status phrases — one, or a
+     * comma/and-joined chain of them. Every segment must be a listed phrase, so
+     * no declarative tail can ride along.
      */
-    private function startsWithAny(string $sentence, array $openers): bool
-    {
-        foreach ($openers as $opener) {
-            if (preg_match('/^'.preg_quote($opener, '/').'(?![\p{L}\p{N}])/u', $sentence) === 1) {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    private function isProgressReport(string $sentence): bool
-    {
-        foreach (self::AGENT_PROGRESS_OPENERS as $opener) {
-            $pattern = '/^'.preg_quote($opener, '/').'(?![\p{L}\p{N}])(?<tail>.*)$/u';
-
-            if (preg_match($pattern, $sentence, $matches) !== 1) {
-                continue;
-            }
-
-            if (preg_match(self::PROGRESS_TAIL_PATTERN, $matches['tail']) === 1) {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
     private function isStatusSentence(string $sentence): bool
     {
-        foreach (self::AGENT_STATUS_SENTENCES as $status) {
-            $pattern = '/^'.preg_quote($status, '/').'(?:\s+(?:now|again|agora|já))?\s*[.!\x{2026}]*$/u';
+        $phrase = '(?:'.implode('|', array_map(
+            static fn (string $status): string => preg_quote($status, '/'),
+            self::AGENT_STATUS_PHRASES,
+        )).')(?:\s+(?:now|again|agora|já))?';
 
-            if (preg_match($pattern, $sentence) === 1) {
-                return true;
-            }
-        }
+        $pattern = '/^'.$phrase.'(?:(?:\s*[,;]\s*|\s+(?:and|e)\s+)'.$phrase.')*\s*[.!\x{2026}]*$/u';
 
-        return false;
+        return preg_match($pattern, $sentence) === 1;
     }
 
     /**
@@ -571,11 +591,14 @@ final class DeterministicImportanceRules
     }
 
     /**
-     * The second safety net under the agent-operation veto. A knowledge
-     * assertion is any of the four positive signals (a decision, a rule, a
-     * reason, a consequence), any general assertion verb ("means", "returns",
-     * "indicates"), or a copula backed by a concrete anchor ("the retry limit
-     * is 3"). Widening this can only weaken a veto, which is the safe direction.
+     * The safety net under the agent-operation veto, and the first of the three
+     * conditions that must ALL hold for it to fire. A knowledge assertion is any
+     * of the four positive signals (a decision, a rule, a reason, a
+     * consequence), any general assertion verb ("means", "returns", "changed"),
+     * a quantified measurement ("the suite took 12 minutes"), or a copula backed
+     * by a concrete anchor ("the retry limit is 3"). Widening this can only ever
+     * weaken a veto, which is the safe direction under a precision-first veto,
+     * so it is deliberately generous.
      *
      * @param  list<array{name:string, type:string}>  $entities
      */
@@ -587,6 +610,10 @@ final class DeterministicImportanceRules
             || $this->matchesAny($haystack, self::ACTIONABLE_CONSEQUENCE_MARKERS)
             || $this->matchesAny($haystack, self::GENERAL_ASSERTION_MARKERS)
         ) {
+            return true;
+        }
+
+        if (preg_match(self::MEASUREMENT_ASSERTION_PATTERN, $haystack) === 1) {
             return true;
         }
 
