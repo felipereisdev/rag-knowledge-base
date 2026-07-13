@@ -9,6 +9,7 @@ use App\Services\Condense\CondenseDedup;
 use App\Services\Condense\KnowledgeExtractor;
 use App\Services\Condense\KnowledgeExtractorFactory;
 use App\Services\Condense\TranscriptParser;
+use App\Services\Knowledge\KnowledgeWriter;
 use Illuminate\Support\Facades\Queue;
 
 beforeEach(function () {
@@ -19,16 +20,23 @@ beforeEach(function () {
     CondenseSetting::current();
 
     // Stub the parser to return fixed text regardless of path.
-    app()->bind(TranscriptParser::class, fn () => new class extends TranscriptParser {
-        public function parse(string $path, int $maxChars): string { return 'USER: hi'; }
+    app()->bind(TranscriptParser::class, fn () => new class extends TranscriptParser
+    {
+        public function parse(string $path, int $maxChars): string
+        {
+            return 'USER: hi';
+        }
     });
 
     // Stub the extractor factory to return one candidate.
-    app()->bind(KnowledgeExtractorFactory::class, fn () => new class extends KnowledgeExtractorFactory {
+    app()->bind(KnowledgeExtractorFactory::class, fn () => new class extends KnowledgeExtractorFactory
+    {
         public function __construct() {}
+
         public function make($setting): KnowledgeExtractor
         {
-            return new class implements KnowledgeExtractor {
+            return new class implements KnowledgeExtractor
+            {
                 public function extract(string $transcript): array
                 {
                     return [[
@@ -41,8 +49,12 @@ beforeEach(function () {
     });
 
     // Stub dedup to "not duplicate".
-    app()->bind(CondenseDedup::class, fn () => new class extends CondenseDedup {
-        public function isDuplicate(string $p, string $t, string $c, float $th): bool { return false; }
+    app()->bind(CondenseDedup::class, fn () => new class extends CondenseDedup
+    {
+        public function isDuplicate(string $p, string $t, string $c, float $th): bool
+        {
+            return false;
+        }
     });
 });
 
@@ -52,7 +64,7 @@ it('creates a pending entry and records a done run', function () {
 
     (new CondenseSessionJob('p1', $path, 'sess-1'))->handle(
         app(TranscriptParser::class), app(KnowledgeExtractorFactory::class),
-        app(CondenseDedup::class), app(\App\Services\Knowledge\KnowledgeWriter::class),
+        app(CondenseDedup::class), app(KnowledgeWriter::class),
     );
 
     expect(KnowledgeEntry::where('project_id', 'p1')->where('status', 'pending')->count())->toBe(1);
@@ -66,15 +78,19 @@ it('is idempotent for the same session_id', function () {
 
     (new CondenseSessionJob('p1', '/tmp/whatever.jsonl', 'sess-1'))->handle(
         app(TranscriptParser::class), app(KnowledgeExtractorFactory::class),
-        app(CondenseDedup::class), app(\App\Services\Knowledge\KnowledgeWriter::class),
+        app(CondenseDedup::class), app(KnowledgeWriter::class),
     );
 
     expect(KnowledgeEntry::where('project_id', 'p1')->count())->toBe(0);
 });
 
 it('skips creation when a candidate is a duplicate', function () {
-    app()->bind(CondenseDedup::class, fn () => new class extends CondenseDedup {
-        public function isDuplicate(string $p, string $t, string $c, float $th): bool { return true; }
+    app()->bind(CondenseDedup::class, fn () => new class extends CondenseDedup
+    {
+        public function isDuplicate(string $p, string $t, string $c, float $th): bool
+        {
+            return true;
+        }
     });
 
     $path = tempnam(sys_get_temp_dir(), 'tr').'.jsonl';
@@ -82,7 +98,7 @@ it('skips creation when a candidate is a duplicate', function () {
 
     (new CondenseSessionJob('p1', $path, 'sess-2'))->handle(
         app(TranscriptParser::class), app(KnowledgeExtractorFactory::class),
-        app(CondenseDedup::class), app(\App\Services\Knowledge\KnowledgeWriter::class),
+        app(CondenseDedup::class), app(KnowledgeWriter::class),
     );
 
     expect(KnowledgeEntry::where('project_id', 'p1')->count())->toBe(0);
@@ -92,7 +108,7 @@ it('skips creation when a candidate is a duplicate', function () {
 it('marks the run failed for an unreadable transcript', function () {
     (new CondenseSessionJob('p1', '/no/such/dir/nope.jsonl', 'sess-unreadable'))->handle(
         app(TranscriptParser::class), app(KnowledgeExtractorFactory::class),
-        app(CondenseDedup::class), app(\App\Services\Knowledge\KnowledgeWriter::class),
+        app(CondenseDedup::class), app(KnowledgeWriter::class),
     );
 
     $run = CondenseRun::where('session_id', 'sess-unreadable')->first();
@@ -105,7 +121,7 @@ it('returns early without creating a run when disabled', function () {
 
     (new CondenseSessionJob('p1', '/tmp/whatever.jsonl', 'sess-disabled'))->handle(
         app(TranscriptParser::class), app(KnowledgeExtractorFactory::class),
-        app(CondenseDedup::class), app(\App\Services\Knowledge\KnowledgeWriter::class),
+        app(CondenseDedup::class), app(KnowledgeWriter::class),
     );
 
     expect(CondenseRun::where('session_id', 'sess-disabled')->exists())->toBeFalse();
@@ -113,8 +129,12 @@ it('returns early without creating a run when disabled', function () {
 });
 
 it('records failed when a collaborator throws', function () {
-    app()->bind(TranscriptParser::class, fn () => new class extends TranscriptParser {
-        public function parse(string $path, int $maxChars): string { throw new \RuntimeException('boom'); }
+    app()->bind(TranscriptParser::class, fn () => new class extends TranscriptParser
+    {
+        public function parse(string $path, int $maxChars): string
+        {
+            throw new RuntimeException('boom');
+        }
     });
 
     $path = tempnam(sys_get_temp_dir(), 'tr').'.jsonl';
@@ -122,7 +142,7 @@ it('records failed when a collaborator throws', function () {
 
     (new CondenseSessionJob('p1', $path, 'sess-throws'))->handle(
         app(TranscriptParser::class), app(KnowledgeExtractorFactory::class),
-        app(CondenseDedup::class), app(\App\Services\Knowledge\KnowledgeWriter::class),
+        app(CondenseDedup::class), app(KnowledgeWriter::class),
     );
 
     $run = CondenseRun::where('session_id', 'sess-throws')->first();
@@ -131,8 +151,12 @@ it('records failed when a collaborator throws', function () {
 });
 
 it('records skipped when the transcript has no durable text', function () {
-    app()->bind(TranscriptParser::class, fn () => new class extends TranscriptParser {
-        public function parse(string $path, int $maxChars): string { return ''; }
+    app()->bind(TranscriptParser::class, fn () => new class extends TranscriptParser
+    {
+        public function parse(string $path, int $maxChars): string
+        {
+            return '';
+        }
     });
 
     $path = tempnam(sys_get_temp_dir(), 'tr').'.jsonl';
@@ -140,7 +164,7 @@ it('records skipped when the transcript has no durable text', function () {
 
     (new CondenseSessionJob('p1', $path, 'sess-empty'))->handle(
         app(TranscriptParser::class), app(KnowledgeExtractorFactory::class),
-        app(CondenseDedup::class), app(\App\Services\Knowledge\KnowledgeWriter::class),
+        app(CondenseDedup::class), app(KnowledgeWriter::class),
     );
 
     $run = CondenseRun::where('session_id', 'sess-empty')->first();

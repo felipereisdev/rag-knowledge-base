@@ -1,4 +1,5 @@
 <?php
+
 // tests/Feature/Hooks/CondenseEndpointTest.php
 
 use App\Jobs\CondenseSessionJob;

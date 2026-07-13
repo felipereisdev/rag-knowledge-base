@@ -5,8 +5,8 @@ use App\Services\Condense\CandidateParser;
 it('parses a JSON array, tolerating code fences and surrounding prose', function () {
     $raw = "Here you go:\n```json\n".json_encode([
         ['title' => 'A', 'content' => '# a', 'category' => 'design-decision',
-         'entities' => [['name' => 'X', 'type' => 'class']],
-         'relations' => [['subject' => 'X', 'predicate' => 'uses', 'object' => 'Y']]],
+            'entities' => [['name' => 'X', 'type' => 'class']],
+            'relations' => [['subject' => 'X', 'predicate' => 'uses', 'object' => 'Y']]],
         ['title' => '', 'content' => 'dropped: no title'],
     ])."\n```";
 
@@ -22,8 +22,8 @@ it('parses a JSON array, tolerating code fences and surrounding prose', function
 it('coerces an unknown/absent category to insight and drops malformed graph items', function () {
     $raw = json_encode([
         ['title' => 'T', 'content' => 'c', 'category' => 'decision', // not in chk_category -> insight
-         'entities' => [['type' => 'class']], // no name -> dropped
-         'relations' => [['subject' => 'X', 'object' => 'Y']]], // no predicate -> dropped
+            'entities' => [['type' => 'class']], // no name -> dropped
+            'relations' => [['subject' => 'X', 'object' => 'Y']]], // no predicate -> dropped
     ]);
 
     $out = app(CandidateParser::class)->parse($raw);

@@ -11,8 +11,10 @@ it('maps the model text response into candidates', function () {
         'entities' => [], 'relations' => [],
     ]]);
 
-    $extractor = new class(app(ExtractionPrompt::class), app(CandidateParser::class), 'anthropic', 'claude-haiku-4-5-20251001', null) extends ApiExtractor {
+    $extractor = new class(app(ExtractionPrompt::class), app(CandidateParser::class), 'anthropic', 'claude-haiku-4-5-20251001', null) extends ApiExtractor
+    {
         public string $captured = '';
+
         protected function respond(string $instructions, string $transcript): string
         {
             $this->captured = $transcript;

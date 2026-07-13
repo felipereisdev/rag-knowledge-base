@@ -258,6 +258,7 @@ The server supports two embedding backends, configured via environment variables
 The `embedder` service runs a FastAPI app with `paraphrase-multilingual-mpnet-base-v2` (768-dim). No API key, no internet after the initial model download. Good for PT/EN. This is the out-of-the-box default.
 
 ```env
+RAG_EMBEDDING_PROVIDER=local-embedder
 RAG_EMBED_URL=http://embedder:8000/v1   # inside Docker
 RAG_EMBED_KEY=rag-local
 RAG_EMBEDDING_MODEL=paraphrase-multilingual-mpnet-base-v2
@@ -269,13 +270,14 @@ RAG_EMBEDDING_DIM=768
 Point the server at an external embeddings endpoint instead of the sidecar. Smaller stack (you can drop the `embedder` service), but requires an API key and incurs per-token cost. Set in `docker-compose.yml` under the `app` and `worker` `environment`:
 
 ```env
+RAG_EMBEDDING_PROVIDER=local-embedder
 RAG_EMBED_URL=https://api.openai.com/v1
 RAG_EMBED_KEY=sk-...
-RAG_EMBEDDING_MODEL=text-embedding-3-small
-RAG_EMBEDDING_DIM=1536
+RAG_EMBEDDING_MODEL=<a-model-configured-to-return-768-dimension-vectors>
+RAG_EMBEDDING_DIM=768
 ```
 
-> If you change the model or dimension on an existing database, the server detects the mismatch on boot and automatically re-embeds all chunks.
+> Embedding persistence currently supports 768 dimensions only. External providers are compatible when their selected model returns 768-dimension vectors; other dimensions are rejected at boot with an actionable configuration error. When the provider or model changes, the server detects the mismatch and re-embeds stored chunks.
 
 ---
 
@@ -289,9 +291,10 @@ Environment variables are set in `docker-compose.yml` (they override anything in
 | `DB_PORT` | `5432` | Postgres port |
 | `DB_DATABASE` | `rag` | Database name |
 | `DB_USERNAME` / `DB_PASSWORD` | `rag` / `secret` | Database credentials |
+| `RAG_EMBEDDING_PROVIDER` | `local-embedder` | Prism provider used for embedding requests |
 | `RAG_EMBED_URL` | `http://embedder:8000/v1` | Embedding endpoint (sidecar or external) |
 | `RAG_EMBEDDING_MODEL` | `paraphrase-multilingual-mpnet-base-v2` | Embedding model name |
-| `RAG_EMBEDDING_DIM` | `768` | Embedding dimension (must match the model) |
+| `RAG_EMBEDDING_DIM` | `768` | Embedding dimension; persistence currently requires 768 |
 | `RAG_SEARCH_MIN_SCORE` | `0.30` | Minimum score cutoff for search results |
 | `RAG_SEARCH_LIMIT` | `10` | Default result limit |
 | `MARTIS_AUTH_MIDDLEWARE` | (empty) | Auth middleware for admin routes (empty = no auth — **localhost only**) |

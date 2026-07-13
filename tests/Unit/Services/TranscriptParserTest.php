@@ -1,4 +1,5 @@
 <?php
+
 // tests/Unit/Services/TranscriptParserTest.php
 
 use App\Services\Condense\TranscriptParser;
