@@ -6,6 +6,24 @@ use App\Providers\AppServiceProvider;
 use Database\Seeders\EmbeddingModelStateSeeder;
 use Illuminate\Support\Facades\DB;
 
+it('rejects embedding dimensions incompatible with the persisted vector column', function () {
+    $column = DB::selectOne(
+        "SELECT format_type(atttypid, atttypmod) AS type
+         FROM pg_attribute
+         WHERE attrelid = 'chunk_embeddings'::regclass
+         AND attname = 'embedding'",
+    );
+    expect($column->type)->toBe('vector(768)');
+
+    config(['rag.embeddings.dimension' => 384]);
+
+    expect(fn () => (new AppServiceProvider(app()))->register())
+        ->toThrow(
+            InvalidArgumentException::class,
+            'RAG_EMBEDDING_DIM must be 768 because chunk_embeddings.embedding is vector(768); variable embedding dimensions are not supported.',
+        );
+});
+
 it('invalidates stored embeddings when the configured provider changes', function () {
     config([
         'rag.embeddings.provider' => 'custom-embedder',
@@ -46,21 +64,21 @@ it('configures the selected AI provider from centralized embedding settings', fu
     config([
         'rag.embeddings.provider' => 'custom-embedder',
         'rag.embeddings.model' => 'custom-model',
-        'rag.embeddings.dimension' => 384,
+        'rag.embeddings.dimension' => 768,
         'ai.providers.custom-embedder' => config('ai.providers.local-embedder'),
     ]);
 
     (new AppServiceProvider(app()))->register();
 
     expect(config('ai.providers.custom-embedder.models.embeddings.default'))->toBe('custom-model')
-        ->and(config('ai.providers.custom-embedder.models.embeddings.dimensions'))->toBe(384);
+        ->and(config('ai.providers.custom-embedder.models.embeddings.dimensions'))->toBe(768);
 });
 
 it('seeds embedding state from centralized embedding settings', function () {
     config([
         'rag.embeddings.provider' => 'custom-embedder',
         'rag.embeddings.model' => 'custom-model',
-        'rag.embeddings.dimension' => 384,
+        'rag.embeddings.dimension' => 768,
     ]);
 
     (new EmbeddingModelStateSeeder)->run();
@@ -70,7 +88,7 @@ it('seeds embedding state from centralized embedding settings', function () {
     expect((array) $state)
         ->toHaveKey('provider_name', 'custom-embedder')
         ->toHaveKey('model_name', 'custom-model')
-        ->toHaveKey('model_dim', 384);
+        ->toHaveKey('model_dim', 768);
 });
 
 it('does not expose obsolete RAG settings under app config', function () {

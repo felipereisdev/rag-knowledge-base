@@ -28,9 +28,17 @@ class AppServiceProvider extends ServiceProvider
         $this->app->bind(ClientInstaller::class, fn () => new ClientInstaller(base_path('stubs/client')));
 
         $embeddingProvider = (string) config('rag.embeddings.provider', 'local-embedder');
+        $embeddingDimension = (int) config('rag.embeddings.dimension', 768);
+
+        if ($embeddingDimension !== 768) {
+            throw new \InvalidArgumentException(
+                'RAG_EMBEDDING_DIM must be 768 because chunk_embeddings.embedding is vector(768); variable embedding dimensions are not supported.',
+            );
+        }
+
         config([
             "ai.providers.{$embeddingProvider}.models.embeddings.default" => (string) config('rag.embeddings.model', 'paraphrase-multilingual-mpnet-base-v2'),
-            "ai.providers.{$embeddingProvider}.models.embeddings.dimensions" => (int) config('rag.embeddings.dimension', 768),
+            "ai.providers.{$embeddingProvider}.models.embeddings.dimensions" => $embeddingDimension,
         ]);
 
         Route::get('/martis/graph', function () {
