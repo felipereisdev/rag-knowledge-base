@@ -1,5 +1,7 @@
 <?php
 
+use App\Jobs\ClassifyKnowledgeEntryJob;
+
 return [
 
     /*
@@ -41,6 +43,27 @@ return [
             'table' => env('DB_QUEUE_TABLE', 'jobs'),
             'queue' => env('DB_QUEUE', 'default'),
             'retry_after' => (int) env('DB_QUEUE_RETRY_AFTER', 90),
+            'after_commit' => false,
+        ],
+
+        // A dedicated connection for ClassifyKnowledgeEntryJob (see
+        // config/rag.php's `importance.queue_connection`), not just a queue
+        // name on the default `database` connection. Its retry_after must
+        // stay strictly greater than the job's own $timeout — otherwise a
+        // Claude call running long re-reserves the job onto a second worker
+        // mid-flight (see ClassifyKnowledgeEntryJob's class docblock). That
+        // value is derived, not hand-typed, from
+        // ClassifyKnowledgeEntryJob::classificationRetryAfterSeconds() so a
+        // future change to RAG_IMPORTANCE_TIMEOUT cannot silently reopen the
+        // gap. The other settings mirror the `database` connection exactly.
+        'classification' => [
+            'driver' => 'database',
+            'connection' => env('DB_QUEUE_CONNECTION'),
+            'table' => env('DB_QUEUE_TABLE', 'jobs'),
+            'queue' => env('RAG_IMPORTANCE_QUEUE', 'classification'),
+            'retry_after' => ClassifyKnowledgeEntryJob::classificationRetryAfterSeconds(
+                (int) env('RAG_IMPORTANCE_TIMEOUT', ClassifyKnowledgeEntryJob::DEFAULT_MODEL_TIMEOUT_SECONDS),
+            ),
             'after_commit' => false,
         ],
 

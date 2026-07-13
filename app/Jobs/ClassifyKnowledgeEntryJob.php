@@ -57,10 +57,25 @@ class ClassifyKnowledgeEntryJob implements ShouldQueue
     public const string UNEXPECTED_ERROR_MESSAGE = 'The importance classifier failed unexpectedly.';
 
     /**
+     * The fallback used when `RAG_IMPORTANCE_TIMEOUT` is unset. The single
+     * literal for the model call's bound: `config/rag.php` and
+     * `config/queue.php` (via {@see self::classificationRetryAfterSeconds()})
+     * both read it from here so there is exactly one number to change, not two
+     * that can drift apart.
+     */
+    public const int DEFAULT_MODEL_TIMEOUT_SECONDS = 90;
+
+    /**
      * The worker must outlive the model call it is waiting on, otherwise the job
      * is killed mid-classification and leaves an orphaned assessment behind.
      */
-    private const int TIMEOUT_MARGIN_SECONDS = 30;
+    public const int TIMEOUT_MARGIN_SECONDS = 30;
+
+    /**
+     * How much the `classification` queue connection's `retry_after` must
+     * exceed this job's own `$timeout` (see {@see self::classificationRetryAfterSeconds()}).
+     */
+    public const int RETRY_AFTER_MARGIN_SECONDS = 30;
 
     public int $tries = 3;
 
@@ -72,7 +87,33 @@ class ClassifyKnowledgeEntryJob implements ShouldQueue
     {
         $this->entryId = (int) $entryId;
         $this->timeout = (int) config('rag.importance.timeout') + self::TIMEOUT_MARGIN_SECONDS;
+        $this->onConnection((string) config('rag.importance.queue_connection'));
         $this->onQueue((string) config('rag.importance.queue'));
+    }
+
+    /**
+     * Sizes the `classification` queue connection's `retry_after` window
+     * (`config/queue.php`), so a job still running near its own `$timeout`
+     * cannot be silently re-reserved and handed to a second worker. The
+     * required ordering:
+     *
+     *     Claude process timeout (RAG_IMPORTANCE_TIMEOUT, default
+     *     {@see self::DEFAULT_MODEL_TIMEOUT_SECONDS})
+     *   < this job's `$timeout`                        (+= TIMEOUT_MARGIN_SECONDS)
+     *   < `classification` connection's `retry_after`   (+= RETRY_AFTER_MARGIN_SECONDS)
+     *
+     * Pure arithmetic on purpose — it takes the model timeout as a parameter
+     * rather than reading it itself. `config/queue.php` is the caller and
+     * loads (alphabetically) before `config/rag.php`, so `rag.importance.timeout`
+     * is not yet in the config repository at that point; `config/queue.php`
+     * reads `RAG_IMPORTANCE_TIMEOUT` from the environment directly (the same
+     * var and default `config/rag.php` uses for the same setting) and passes
+     * it in, so this method never needs `env()`/`config()` itself and the two
+     * config files cannot define the model timeout differently.
+     */
+    public static function classificationRetryAfterSeconds(int $modelTimeoutSeconds): int
+    {
+        return $modelTimeoutSeconds + self::TIMEOUT_MARGIN_SECONDS + self::RETRY_AFTER_MARGIN_SECONDS;
     }
 
     /**
@@ -157,28 +198,45 @@ class ClassifyKnowledgeEntryJob implements ShouldQueue
      * itself dies (timeout, killed process), so the entry cannot stay stuck in
      * `classifying`. The transition guard makes this safe to run late, twice, or
      * after the entry has already been decided.
+     *
+     * Laravel does not retry `failed()` itself, so this is wrapped end to end:
+     * `mode()` and `failOpen()` both touch the database, and if either of those
+     * throws (a dead connection, a deadlock) the entry would otherwise be
+     * stranded in `classifying` forever — the one gap fail-open would have left
+     * uncovered.
      */
     public function failed(?Throwable $exception): void
     {
-        $entry = KnowledgeEntry::query()->find($this->entryId);
+        try {
+            $entry = KnowledgeEntry::query()->find($this->entryId);
 
-        if ($entry === null || $entry->status !== KnowledgeStatus::Classifying->value) {
-            return;
+            if ($entry === null || $entry->status !== KnowledgeStatus::Classifying->value) {
+                return;
+            }
+
+            // The contention exception is sanitized by construction; anything else
+            // is replaced with a fixed message.
+            [$code, $message] = $exception instanceof ImportanceAssessmentInProgressException
+                ? [$exception->errorCode, $exception->getMessage()]
+                : [self::UNEXPECTED_ERROR_CODE, self::UNEXPECTED_ERROR_MESSAGE];
+
+            Log::error('ClassifyKnowledgeEntryJob: failing the entry open', [
+                'entry_id' => $this->entryId,
+                'error_code' => $code,
+                'exception' => $exception === null ? null : $exception::class,
+            ]);
+
+            $this->failOpen($entry, $this->mode(), $code, $message);
+        } catch (Throwable $recoveryException) {
+            // Nothing left to retry this: log and give up. The entry stays
+            // `classifying`, but that is a visible, alertable state rather than
+            // a silent one, and it is exactly what would have happened anyway
+            // had this catch not existed.
+            Log::error('ClassifyKnowledgeEntryJob: terminal recovery itself failed; entry may be stranded in classifying', [
+                'entry_id' => $this->entryId,
+                'exception' => $recoveryException::class,
+            ]);
         }
-
-        // The contention exception is sanitized by construction; anything else
-        // is replaced with a fixed message.
-        [$code, $message] = $exception instanceof ImportanceAssessmentInProgressException
-            ? [$exception->errorCode, $exception->getMessage()]
-            : [self::UNEXPECTED_ERROR_CODE, self::UNEXPECTED_ERROR_MESSAGE];
-
-        Log::error('ClassifyKnowledgeEntryJob: failing the entry open', [
-            'entry_id' => $this->entryId,
-            'error_code' => $code,
-            'exception' => $exception === null ? null : $exception::class,
-        ]);
-
-        $this->failOpen($entry, $this->mode(), $code, $message);
     }
 
     /**

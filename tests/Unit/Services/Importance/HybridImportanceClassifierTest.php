@@ -492,6 +492,35 @@ it('lets only one worker reclaim the same stale assessment', function () {
         ->and(ImportanceAssessment::query()->sole()->status)->toBe(ImportanceAssessmentStatus::Running);
 });
 
+it('floors a zero or negative staleAfterMinutes so it cannot defeat the contention guard', function () {
+    // `0` (or a non-numeric env value, which casts to `0`) would make the
+    // reclamation predicate `updated_at <= now()`, so a `running` row is
+    // "stale" the instant it is written and two workers can judge the same
+    // candidate at once. The class must floor this itself rather than trust
+    // the caller.
+    setImportanceThreshold(70);
+    $judge = new RecordingJudge(semanticAssessment());
+    $candidate = neutralCandidate();
+
+    // A row written just now — genuine live contention from another worker.
+    runningAssessment($candidate, staleMinutes: 0);
+
+    $classifier = new HybridImportanceClassifier(
+        new ImportanceCandidateNormalizer,
+        new DeterministicImportanceRules,
+        $judge,
+        model: 'claude-test',
+        promptVersion: 'v1',
+        staleAfterMinutes: 0,
+    );
+
+    expect(fn () => $classifier->classify('classifier', $candidate))
+        ->toThrow(ImportanceAssessmentInProgressException::class);
+
+    expect($judge->calls)->toBe(0)
+        ->and(ImportanceAssessment::query()->sole()->status)->toBe(ImportanceAssessmentStatus::Running);
+});
+
 it('rethrows a database failure that is not a unique-key race', function () {
     setImportanceThreshold(70);
     $judge = new RecordingJudge(semanticAssessment());

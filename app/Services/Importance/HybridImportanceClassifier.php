@@ -45,8 +45,21 @@ final class HybridImportanceClassifier
     private const string UNIQUE_VIOLATION = '23505';
 
     /**
+     * A floor, not a suggestion: `0` (or a non-numeric env value, which casts
+     * to `0`) would make the reclamation predicate `updated_at <= now()`, so
+     * every `running` row is instantly "stale" and two workers can judge the
+     * same candidate at once. The class owns this invariant itself rather
+     * than trusting the caller (`AppServiceProvider`, wiring
+     * `rag.importance.stale_after_minutes`) to have validated it.
+     */
+    private const int MIN_STALE_AFTER_MINUTES = 1;
+
+    private readonly int $staleAfterMinutes;
+
+    /**
      * @param  int  $staleAfterMinutes  How long a `running` assessment may go without a
      *                                  write before it is considered abandoned rather than owned.
+     *                                  Floored to {@see self::MIN_STALE_AFTER_MINUTES}.
      */
     public function __construct(
         private readonly ImportanceCandidateNormalizer $normalizer,
@@ -54,8 +67,10 @@ final class HybridImportanceClassifier
         private readonly SemanticImportanceJudge $judge,
         private readonly string $model,
         private readonly string $promptVersion,
-        private readonly int $staleAfterMinutes = 15,
-    ) {}
+        int $staleAfterMinutes = 15,
+    ) {
+        $this->staleAfterMinutes = max(self::MIN_STALE_AFTER_MINUTES, $staleAfterMinutes);
+    }
 
     /**
      * @throws ImportanceAssessmentInProgressException when another worker owns this

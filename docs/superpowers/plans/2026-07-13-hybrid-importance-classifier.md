@@ -502,10 +502,12 @@ The command reports readiness only; it must never change mode automatically.
 - [ ] Add `bin/classification-worker.sh` as a host-side helper. It must fail clearly when `claude` is absent, resolve the project root safely, and run:
 
 ```bash
-php artisan queue:work --queue=classification --tries=3 --timeout=120
+php artisan queue:work classification --queue=classification --tries=3 --timeout=120
 ```
 
-Document that the 120-second worker timeout is deliberately greater than the 90-second Claude process timeout.
+Note the leading `classification` connection argument (Task 5 fix round 1): the job runs on the dedicated `classification` queue *connection* (`config/queue.php`, wired from `rag.importance.queue_connection`), not the default `database` connection — its `retry_after` is sized above the job's `$timeout` via `ClassifyKnowledgeEntryJob::classificationRetryAfterSeconds()`. Running `queue:work` without the connection argument falls back to the default connection's 90s `retry_after`, which is shorter than the job's 120s `$timeout` and reopens the double-delivery bug the dedicated connection exists to prevent.
+
+Document that the ordering is: Claude process timeout (`rag.importance.timeout`, 90s) < job `$timeout` (120s) < `classification` connection `retry_after` (150s) — each derived from the one before it, not independently configured.
 
 - [ ] Document setup, shadow rollout, worker supervision, status inspection through MCP, calibration report usage, manual `enforce` activation, and rollback to `shadow`/`off`. State explicitly that the production Docker image does not provide Claude and the classification worker therefore runs on a trusted host with Claude authenticated.
 

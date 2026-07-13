@@ -19,6 +19,7 @@ use App\Services\Importance\NormalizedImportanceCandidate;
 use App\Services\Importance\SemanticImportanceAssessment;
 use App\Services\Importance\SemanticImportanceJudge;
 use Illuminate\Log\Events\MessageLogged;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Queue;
 
@@ -129,10 +130,27 @@ it('runs on the classification queue with bounded retries and a timeout above th
 
     expect($job->queue)->toBe('classification')
         ->and($job->queue)->toBe((string) config('rag.importance.queue'))
+        ->and($job->connection)->toBe('classification')
+        ->and($job->connection)->toBe((string) config('rag.importance.queue_connection'))
         ->and($job->tries)->toBe(3)
         ->and($job->timeout)->toBeGreaterThan((int) config('rag.importance.timeout'))
-        ->and($job->backoff())->toBeArray()
-        ->and($job->backoff())->not->toBeEmpty();
+        ->and($job->backoff())->toBe([30, 60]);
+});
+
+it('sizes the classification queue connection so retry_after strictly exceeds the job timeout', function () {
+    // Pins the invariant Finding 1 exists to protect: a job still running near
+    // its own $timeout must not be eligible for re-reservation by a second
+    // worker. `retry_after` is read from the *connection* the worker listens
+    // on (config/queue.php), not from the job's own properties, so both must
+    // be checked — and the connection's value must be derived from the same
+    // formula as the job's $timeout, not a second, independently-typed number.
+    $job = new ClassifyKnowledgeEntryJob(1);
+    $retryAfter = (int) config('queue.connections.classification.retry_after');
+
+    expect($retryAfter)->toBeGreaterThan($job->timeout)
+        ->and($retryAfter)->toBe(ClassifyKnowledgeEntryJob::classificationRetryAfterSeconds(
+            (int) config('rag.importance.timeout'),
+        ));
 });
 
 it('keeps a shadow-mode important entry pending with its verdict snapshot', function () {
@@ -243,6 +261,10 @@ it('releases an entry to pending without an assessment when the mode was switche
         ->and($entry->importance_assessment_id)->toBeNull()
         ->and($entry->metadata)->not->toHaveKey('importance')
         ->and(ImportanceAssessment::query()->count())->toBe(0);
+
+    // Released to pending like every other release path, so it must be
+    // indexed the same way — otherwise it is invisible to search forever.
+    Queue::assertPushed(IndexEntryJob::class, 1);
 });
 
 it('writes the verdict snapshot without touching unrelated metadata keys', function () {
@@ -496,6 +518,26 @@ it('is idempotent in its terminal failure handler', function () {
         ->and($entry->metadata['importance'])->not->toHaveKey('classification_error');
 
     Queue::assertPushed(IndexEntryJob::class, 1);
+});
+
+it('does not propagate when its own recovery write fails', function () {
+    classifierMode(ImportanceClassifierMode::Enforce);
+    $entry = classifyingEntry();
+
+    // Laravel never retries `failed()`; if the DB write it performs throws,
+    // that must be swallowed and logged rather than propagated, or the entry
+    // is stranded in `classifying` with no further recovery attempt at all.
+    DB::shouldReceive('transaction')->once()->andThrow(new RuntimeException('db down'));
+
+    $logged = [];
+    Log::listen(function (MessageLogged $message) use (&$logged): void {
+        $logged[] = $message->message;
+    });
+
+    (new ClassifyKnowledgeEntryJob((int) $entry->id))->failed(new RuntimeException('boom'));
+
+    expect(implode("\n", $logged))->toContain('terminal recovery itself failed')
+        ->and($entry->refresh()->status)->toBe(KnowledgeStatus::Classifying->value);
 });
 
 it('does nothing when the entry no longer exists', function () {
