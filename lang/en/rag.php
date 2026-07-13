@@ -73,6 +73,9 @@ return [
         'category' => 'Category',
         'graph_expanded' => 'graph expanded',
     ],
+    'health' => [
+        'index_queue' => 'Index queue: :pending pending, :failed failed, :missing approved without chunks',
+    ],
     'evaluation' => [
         'description' => 'Evaluate RAG retrieval against a versioned golden-query dataset.',
         'query_string' => 'Evaluation query must be a string.',

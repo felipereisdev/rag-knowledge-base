@@ -73,6 +73,9 @@ return [
         'category' => 'Categoria',
         'graph_expanded' => 'expandido pelo grafo',
     ],
+    'health' => [
+        'index_queue' => 'Fila de indexação: :pending pendentes, :failed falhados, :missing aprovados sem chunks',
+    ],
     'evaluation' => [
         'description' => 'Avalia a recuperação RAG com um conjunto versionado de consultas de referência.',
         'query_string' => 'A consulta de avaliação tem de ser uma cadeia de texto.',

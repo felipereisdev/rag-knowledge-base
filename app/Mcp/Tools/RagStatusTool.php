@@ -51,6 +51,18 @@ class RagStatusTool extends Tool
         $pending = KnowledgeEntry::where('project_id', $pid)->where('status', 'pending')->count();
         $rejected = KnowledgeEntry::where('project_id', $pid)->where('status', 'rejected')->count();
         $chunks = DB::table('chunk_embeddings')->where('project_id', $pid)->count();
+        $pendingIndexJobs = DB::table('jobs')
+            ->where('queue', 'indexing')
+            ->count();
+        $failedIndexJobs = DB::table('failed_jobs')
+            ->where('queue', 'indexing')
+            ->count();
+        $approvedWithoutChunks = KnowledgeEntry::query()
+            ->where('project_id', $pid)
+            ->where('status', 'approved')
+            ->where('content', '<>', '')
+            ->whereDoesntHave('chunks')
+            ->count();
 
         $categoryCounts = KnowledgeEntry::where('project_id', $pid)
             ->select('category', DB::raw('count(*) as count'))
@@ -68,6 +80,11 @@ class RagStatusTool extends Tool
             '',
             "  Total: {$total} | Approved: {$approved} | Pending: {$pending} | Rejected: {$rejected}",
             "  Chunks: {$chunks}",
+            '  '.__('rag.health.index_queue', [
+                'pending' => $pendingIndexJobs,
+                'failed' => $failedIndexJobs,
+                'missing' => $approvedWithoutChunks,
+            ]),
         ];
 
         if ($categoryCounts) {

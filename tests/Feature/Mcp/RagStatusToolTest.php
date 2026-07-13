@@ -4,6 +4,7 @@ use App\Mcp\Servers\RagServer;
 use App\Mcp\Tools\RagStatusTool;
 use App\Models\KnowledgeEntry;
 use App\Models\Project;
+use Illuminate\Support\Facades\DB;
 use Laravel\Ai\Embeddings;
 
 beforeEach(function () {
@@ -49,6 +50,33 @@ it('returns status for an existing project', function () {
     $response->assertSee('Total: 2');
     $response->assertSee('Approved: 1');
     $response->assertSee('Pending: 1');
+    $response->assertSee('Index queue: 0 pending, 0 failed, 1 approved without chunks');
+});
+
+it('reports pending and failed indexing jobs', function () {
+    DB::table('jobs')->insert([
+        'queue' => 'indexing',
+        'payload' => '{}',
+        'attempts' => 0,
+        'reserved_at' => null,
+        'available_at' => now()->timestamp,
+        'created_at' => now()->timestamp,
+    ]);
+    DB::table('failed_jobs')->insert([
+        'uuid' => (string) str()->uuid(),
+        'connection' => 'database',
+        'queue' => 'indexing',
+        'payload' => '{}',
+        'exception' => 'embedding failed',
+        'failed_at' => now(),
+    ]);
+
+    $response = RagServer::tool(RagStatusTool::class, [
+        'project_id' => 'test-project',
+    ]);
+
+    $response->assertOk();
+    $response->assertSee('Index queue: 1 pending, 1 failed, 0 approved without chunks');
 });
 
 it('returns a not-found message for an unknown project', function () {
