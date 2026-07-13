@@ -13,7 +13,7 @@ class DocumentImporter
      * or creating a single entry (txt).
      *
      * @param  array<string>|null  $tags
-     * @return array<string> Entry IDs created.
+     * @return list<int> Entry IDs created.
      *
      * @throws \InvalidArgumentException
      */

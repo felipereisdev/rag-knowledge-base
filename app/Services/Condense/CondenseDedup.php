@@ -38,7 +38,11 @@ class CondenseDedup
         return is_finite($score) && $score >= $threshold;
     }
 
-    /** Seam for testing; generates the query embedding. */
+    /**
+     * Seam for testing; generates the query embedding.
+     *
+     * @return list<float>
+     */
     protected function embed(string $text): array
     {
         return Embeddings::for([$text])->generate((string) config('rag.embeddings.provider', self::PROVIDER))->embeddings[0];
