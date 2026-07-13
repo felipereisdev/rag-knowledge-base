@@ -232,8 +232,14 @@ describe('HybridSearcher', function () {
         $results = $searcher->search('laravel', $this->project->id);
 
         $entryIds = array_map(fn ($r) => $r->entryId, $results);
+        $graphResult = collect($results)->first(fn ($result) => $result->entryId === $entry2->id);
+
         expect($entryIds)->toContain($entry1->id)
-            ->and($entryIds)->toContain($entry2->id);
+            ->and($entryIds)->toContain($entry2->id)
+            ->and($graphResult)->not->toBeNull()
+            ->and($graphResult?->semanticSimilarity)->toBeNull()
+            ->and($graphResult?->keywordScore)->toBeNull()
+            ->and($graphResult?->matchedChunkIndex)->toBeNull();
     });
 
     it('returns results without crashing when expand_graph is false', function () {
@@ -259,11 +265,7 @@ describe('HybridSearcher', function () {
             ->and($results[0]->graphExpanded)->toBeFalse();
     });
 
-    it('normalizes fused scores so a top hit scores near 1.0, not the raw RRF ceiling', function () {
-        // Entry matched by BOTH vector and keyword at rank 0. The raw RRF score
-        // for that case is 2/rrfK ≈ 0.033; after normalization it must land
-        // near 1.0 (well above the documented ~0.65 relevance calibration and
-        // the default 0.30 min_score), not at the tiny raw ceiling.
+    it('keeps raw rrf separate from semantic and keyword scores', function () {
         $entry = KnowledgeEntry::create([
             'project_id' => $this->project->id,
             'title' => 'Eloquent models',
@@ -278,14 +280,52 @@ describe('HybridSearcher', function () {
             'embedding' => '['.implode(',', $this->fakeVector).']',
         ]);
 
-        $searcher = new HybridSearcher(minScore: 0.2, expandGraph: false);
+        $searcher = new HybridSearcher(minScore: 0.2, expandGraph: false, rrfK: 60);
         $results = $searcher->search('eloquent', $this->project->id);
 
         expect($results)->not->toBeEmpty()
             ->and($results[0]->matchedBy)->toContain('vector')
             ->and($results[0]->matchedBy)->toContain('keyword')
-            ->and($results[0]->score)->toBeGreaterThanOrEqual(0.65)
-            ->and($results[0]->score)->toBeLessThanOrEqual(1.0);
+            ->and($results[0]->fusionScore)->toBeGreaterThan(0.03)
+            ->and($results[0]->fusionScore)->toBeLessThan(0.04)
+            ->and($results[0]->semanticSimilarity)->toBe(1.0)
+            ->and($results[0]->keywordScore)->not->toBeNull()
+            ->and($results[0]->matchedChunkIndex)->toBe(0);
+    });
+
+    it('orders equal fusion scores by entry id', function () {
+        $keywordOnly = KnowledgeEntry::create([
+            'project_id' => $this->project->id,
+            'title' => 'Keyword candidate',
+            'content' => 'deterministictie',
+            'status' => 'approved',
+        ]);
+        $vectorOnly = KnowledgeEntry::create([
+            'project_id' => $this->project->id,
+            'title' => 'Vector candidate',
+            'content' => 'No lexical overlap with the query.',
+            'status' => 'approved',
+        ]);
+        DB::table('chunk_embeddings')->insert([
+            'entry_id' => $vectorOnly->id,
+            'project_id' => $this->project->id,
+            'chunk_index' => 0,
+            'content' => 'No lexical overlap with the query.',
+            'embedding' => '['.implode(',', $this->fakeVector).']',
+        ]);
+
+        $results = (new HybridSearcher(
+            limit: 2,
+            minScore: 0.2,
+            expandGraph: false,
+            vectorTopK: 1,
+            ftsTopK: 1,
+            rrfK: 60,
+        ))->search('deterministictie', $this->project->id);
+
+        expect(array_map(fn ($result) => $result->entryId, $results))
+            ->toBe([$keywordOnly->id, $vectorOnly->id])
+            ->and($results[0]->fusionScore)->toBe($results[1]->fusionScore);
     });
 
     it('returns empty results for no matches', function () {

@@ -8,6 +8,17 @@ use App\Support\Rag\PostgresTextSearch;
 use Illuminate\Support\Facades\DB;
 use Laravel\Ai\Embeddings;
 
+/**
+ * @phpstan-type FusedResult array{
+ *     fusionScore: float,
+ *     semanticSimilarity: ?float,
+ *     keywordScore: ?float,
+ *     matchedChunkIndex: ?int,
+ *     matchedChunkContent: ?string,
+ *     matchedBy: list<string>,
+ *     graphExpanded: bool
+ * }
+ */
 class HybridSearcher
 {
     private readonly int $limit;
@@ -343,7 +354,7 @@ class HybridSearcher
     }
 
     /**
-     * @return array<string, array{score: float, rank: int}>
+     * @return array<int, array{score: float, rank: int}>
      */
     private function ftsSearch(
         string $query,
@@ -389,36 +400,33 @@ class HybridSearcher
      *     chunkIndex: int,
      *     chunkContent: string
      * }>  $vector
-     * @param  array<string, array{score: float, rank: int}>  $fts
-     * @return array<string, array{score: float, matchedBy: array<string>, graphExpanded: bool}>
+     * @param  array<int, array{score: float, rank: int}>  $fts
+     * @return array<int, FusedResult>
      */
     private function reciprocalRankFusion(array $vector, array $fts): array
     {
         $fused = [];
         $allEntryIds = array_unique(array_merge(array_keys($vector), array_keys($fts)));
 
-        // Raw RRF scores are bounded by numSources * (1 / rrfK): each list
-        // contributes at most 1/(rrfK+0) to a single item, so with two lists at
-        // k=60 the ceiling is ~0.033. That is far below the cosine-similarity
-        // scale that the rest of the system, the min_score threshold, and the
-        // documented relevance calibration (~0.65+) all assume. Normalising by
-        // that theoretical maximum maps scores back to [0, 1] while preserving
-        // the RRF ordering exactly (it is a monotonic rescale), so a hit ranked
-        // first by every active retriever scores 1.0 instead of 0.033.
-        $activeSources = ($vector !== [] ? 1 : 0) + ($fts !== [] ? 1 : 0);
-        $maxScore = $activeSources > 0 ? $activeSources / $this->rrfK : 1.0;
-
         foreach ($allEntryIds as $entryId) {
-            $score = 0.0;
+            $fusionScore = 0.0;
             $matchedBy = [];
+            $semanticSimilarity = null;
+            $keywordScore = null;
+            $matchedChunkIndex = null;
+            $matchedChunkContent = null;
 
             if (isset($vector[$entryId])) {
-                $score += 1 / ($this->rrfK + $vector[$entryId]['rank']);
+                $fusionScore += 1 / ($this->rrfK + $vector[$entryId]['rank']);
+                $semanticSimilarity = $vector[$entryId]['score'];
+                $matchedChunkIndex = $vector[$entryId]['chunkIndex'];
+                $matchedChunkContent = $vector[$entryId]['chunkContent'];
                 $matchedBy[] = 'vector';
             }
 
             if (isset($fts[$entryId])) {
-                $score += 1 / ($this->rrfK + $fts[$entryId]['rank']);
+                $fusionScore += 1 / ($this->rrfK + $fts[$entryId]['rank']);
+                $keywordScore = $fts[$entryId]['score'];
                 $matchedBy[] = 'keyword';
             }
 
@@ -427,7 +435,11 @@ class HybridSearcher
             // graph expansion is disabled; expandGraph() overrides it to true
             // only for entries it pulls in.
             $fused[$entryId] = [
-                'score' => $score / $maxScore,
+                'fusionScore' => $fusionScore,
+                'semanticSimilarity' => $semanticSimilarity,
+                'keywordScore' => $keywordScore,
+                'matchedChunkIndex' => $matchedChunkIndex,
+                'matchedChunkContent' => $matchedChunkContent,
                 'matchedBy' => $matchedBy,
                 'graphExpanded' => false,
             ];
@@ -437,8 +449,8 @@ class HybridSearcher
     }
 
     /**
-     * @param  array<string, array{score: float, matchedBy: array<string>, graphExpanded: bool}>  $fused
-     * @return array<string, array{score: float, matchedBy: array<string>, graphExpanded: bool}>
+     * @param  array<int, FusedResult>  $fused
+     * @return array<int, FusedResult>
      */
     private function expandGraph(array $fused, ?string $projectId): array
     {
@@ -468,7 +480,11 @@ class HybridSearcher
                 $relatedId = $row->entry_id;
                 if (! isset($expanded[$relatedId])) {
                     $expanded[$relatedId] = [
-                        'score' => $data['score'] * $this->graphWeight,
+                        'fusionScore' => $data['fusionScore'] * $this->graphWeight,
+                        'semanticSimilarity' => null,
+                        'keywordScore' => null,
+                        'matchedChunkIndex' => null,
+                        'matchedChunkContent' => null,
                         'matchedBy' => ['graph'],
                         'graphExpanded' => true,
                     ];
@@ -480,18 +496,25 @@ class HybridSearcher
     }
 
     /**
-     * @param  array<string, array{score: float, matchedBy: array<string>, graphExpanded: bool}>  $fused
-     * @return array<string, array{score: float, matchedBy: array<string>, graphExpanded: bool}>
+     * @param  array<int, FusedResult>  $fused
+     * @return array<int, FusedResult>
      */
     private function sortAndLimit(array $fused): array
     {
-        uasort($fused, fn ($a, $b) => $b['score'] <=> $a['score']);
+        $sortValues = $fused;
+        uksort($fused, function (int $leftEntryId, int $rightEntryId) use ($sortValues): int {
+            $byScore = $sortValues[$rightEntryId]['fusionScore'] <=> $sortValues[$leftEntryId]['fusionScore'];
+
+            return $byScore !== 0
+                ? $byScore
+                : (int) $leftEntryId <=> (int) $rightEntryId;
+        });
 
         return array_slice($fused, 0, $this->limit, true);
     }
 
     /**
-     * @param  array<string, array{score: float, matchedBy: array<string>, graphExpanded: bool}>  $fused
+     * @param  array<int, FusedResult>  $fused
      * @return array<SearchResult>
      */
     private function hydrate(array $fused, string $query, string $textSearchConfig): array
@@ -500,11 +523,8 @@ class HybridSearcher
             return [];
         }
 
-        // Filter to approved entries at hydration so pending/rejected drafts
-        // never surface in search results. This is the single chokepoint
-        // that covers all match paths (vector, FTS, and graph expansion);
-        // vectorSearch doesn't apply a status filter and graph expansion
-        // can pull in related entries of any status.
+        // Keep hydration as a final approval check across all match paths;
+        // graph expansion can pull in related entries of any status.
         $entries = KnowledgeEntry::with(['tags', 'entities'])
             ->whereIn('id', array_keys($fused))
             ->where('status', 'approved')
@@ -524,11 +544,14 @@ class HybridSearcher
                 entryId: (int) $entryId,
                 title: $entry->title,
                 snippet: $snippet,
-                score: $data['score'],
+                score: $data['fusionScore'],
                 category: $entry->category,
-                tags: $entry->tags->pluck('name')->toArray(),
+                tags: $entry->tags->pluck('name')->values()->all(),
                 matchedBy: $data['matchedBy'],
                 graphExpanded: $data['graphExpanded'],
+                semanticSimilarity: $data['semanticSimilarity'],
+                keywordScore: $data['keywordScore'],
+                matchedChunkIndex: $data['matchedChunkIndex'],
             );
         }
 
