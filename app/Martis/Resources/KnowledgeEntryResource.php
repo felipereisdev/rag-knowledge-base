@@ -18,6 +18,7 @@ use Martis\DrawerOverride;
 use Martis\Fields\BelongsTo;
 use Martis\Fields\BelongsToMany;
 use Martis\Fields\DateTime;
+use Martis\Fields\Field;
 use Martis\Fields\Id;
 use Martis\Fields\KeyValue;
 use Martis\Fields\Markdown;
@@ -25,6 +26,7 @@ use Martis\Fields\Select;
 use Martis\Fields\Text;
 use Martis\Filters\DateRangeFilter;
 use Martis\Filters\Filter;
+use Martis\Layout\Section;
 use Martis\Resource;
 
 class KnowledgeEntryResource extends Resource
@@ -96,11 +98,9 @@ class KnowledgeEntryResource extends Resource
     }
 
     /**
-     * Drawer form (create / update / detail): a 12-column grid grouped into
-     * Sections, each field sized with ->span(N). Returning Sections from
-     * fields() is phpstan-clean since Martis v1.28.4 (field methods accept
-     * list<FieldContract|LayoutContract>). The index table is defined
-     * separately in fieldsForIndex() so it stays a flat sortable table.
+     * Drawer form (create / update): a 12-column grid, with each field sized
+     * using ->span(N). The detail drawer groups these fields separately in
+     * fieldsForDetail(), while the index table remains a flat sortable table.
      */
     public function fields(Request $request): array
     {
@@ -184,5 +184,23 @@ class KnowledgeEntryResource extends Resource
             DateTime::make('created_at', __('rag.fields.created_at'))
                 ->sortable(),
         ];
+    }
+
+    /**
+     * Keep the detail drawer on the Section renderer so fields do not acquire
+     * the package's loose-field label column. Content is self-explanatory in
+     * this context, so its label is omitted without affecting create/update.
+     */
+    public function fieldsForDetail(Request $request): array
+    {
+        $fields = $this->fields($request);
+
+        foreach ($fields as $field) {
+            if ($field instanceof Field && $field->attribute() === 'content') {
+                $field->withLabel('');
+            }
+        }
+
+        return [Section::make(null, $fields)->columns(12)];
     }
 }

@@ -113,6 +113,31 @@ describe('KnowledgeEntryResource', function () {
         ]);
     });
 
+    it('renders detail fields in a section without a content label', function () {
+        $detailFields = (new KnowledgeEntryResource)->fieldsForDetail(request());
+
+        expect($detailFields)->toHaveCount(1);
+
+        $section = $detailFields[0]->toArray();
+        $fields = collect($section['fields'])->keyBy('attribute');
+
+        expect($section['type'])->toBe('section')
+            ->and($section['title'])->toBeNull()
+            ->and($fields->keys()->all())->toBe([
+                'project_id',
+                'category',
+                'title',
+                'content',
+                'status',
+                'source',
+                'author',
+                'tags',
+                'entities',
+                'metadata',
+            ])
+            ->and($fields['content']['label'])->toBe('');
+    });
+
     it('can list entries', function () {
         $project = Project::create(['id' => 'r1', 'name' => 'R1', 'root_path' => '/p']);
         KnowledgeEntry::create(['project_id' => $project->id, 'title' => 'E1']);
