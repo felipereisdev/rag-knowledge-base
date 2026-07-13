@@ -2,13 +2,14 @@
   "_meta": {
     "purpose": "Reviewed calibration corpus of knowledge that MUST survive the importance classifier. Every entry here is knowledge a human reviewer confirmed is worth keeping. The deterministic rules may never hard-veto any of them: a veto here means the rule is too aggressive and the RULE must be fixed, never the fixture.",
     "content": "All examples are synthetic or anonymized. No real credentials, hostnames, customer names, or private repository content.",
-    "rules_version_reviewed": "v5",
+    "rules_version_reviewed": "v6",
     "reviewed_on": "2026-07-13",
     "adversarial_block": "Fixtures with an 'adv-' id prefix are adversarial: they deliberately use vocabulary the veto rules key on (exit codes, tool calls, test outcomes, very short normative rules) so a green run is evidence the rules generalize, not that they were co-fitted to the rest of the corpus. Added after review found the agent_operation_only and empty_content vetoes false-vetoed real knowledge that happened to mention this vocabulary.",
     "veto_probes": "Every entry under `fixtures` carries at least one positive knowledge signal, and the agent_operation_only veto only fires when NO knowledge assertion is present — so no fixture in `fixtures` can ever exercise that veto. `veto_probes` exists to close that blind spot and pins the rule from BOTH directions. `veto_probes.must_not_be_vetoed` is real, durable knowledge that carries NO positive knowledge-assertion marker and yet uses the exact vocabulary the veto keys on ('task completed', 'let us', 'a executar', 'here is a summary', 'running the tests', 'reading the file', 'all tests pass'); it must never be vetoed AND must trigger no positive signal, so a green run proves the ANCHORING is right rather than that a positive phrase was bolted on. `veto_probes.must_be_vetoed` is unambiguous agent chatter that must be vetoed by agent_operation_only. If an entry under must_not_be_vetoed fails, the RULE is wrong, never the fixture.",
     "v3_reach": "v3 deleted the gerund-subject narration branch and the progress-tail machinery: a sentence whose subject is a gerund over the agent's own tooling ('Running the tests now, 3 failed.', 'Reading the file config/rag.php…') is inherently ambiguous with a statement about the system ('Running the tests in parallel corrupts the sqlite database.'), and three rounds of tail-tuning failed to separate them. Those gerund progress reports were therefore REMOVED from must_be_vetoed: they now escape to the semantic judge, which scores them low. That is a deliberate, accepted recall loss — a missed veto costs one judge call, a false veto destroys knowledge forever.",
     "v4_reach": "v4 closed the last two structural holes, WITHOUT adding a single word to any marker list. (1) TAIL DISCIPLINE: shape (a) — a first-person operational clause over a tooling artefact — now has the same whole-sentence discipline shape (b) always had. A shape-(a) sentence that opens a FURTHER FINITE CLAUSE (',' ';' ':' '—', a subordinator/relativiser, or a coordinator that is not coordinating another bare infinitive) is ambiguous and escapes: 'I checked the logs and the worker restarts on every deploy.' is a fact, and v3 destroyed it. (2) HEAD-NOUN ANCHORING: the tooling keyword must now be the HEAD of the object, not merely its first noun, so 'the file naming convention', 'the test database credentials', 'the log format' and 'the diff algorithm' are no longer tooling artefacts and escape. TRUE REACH OF THE VETO AFTER v4: a sentence is narration only when it is (a) a SENTENCE-INITIAL first-person operational clause over a tooling artefact with NO further finite clause ('I ran the tests.', \"I'm checking the file now.\", 'Let me open the file.', 'Corri os testes.'), or (b) a terse status phrase that is the WHOLE sentence ('All tests pass.', 'Done.'), and EVERY sentence of the candidate is one of those, and the candidate asserts no knowledge anywhere. CHATTER MOVED OUT OF must_be_vetoed IN v4: 'chatter-i-ran-the-tests' ('I ran the tests and all tests pass now, the tool call returned successfully.') now ESCAPES, because the coordinated clause after 'and' is a further finite clause and the rule can no longer tell it apart from 'I ran the tests and the seeder populates the demo tenant.' — which is knowledge. That is a deliberate, accepted recall loss. The bare form ('I ran the tests.') is still vetoed and is pinned by 'chatter-i-ran-the-tests-bare'.",
-    "v5_reach": "v5 INVERTS the shape-(a) predicate. Rounds 1-4 all defined agent narration by enumerating what BREAKS it: a marker list, then a progress-tail reader, then a class of clause-opening separators (',' ';' ':' en-dash, em-dash) plus a head-noun anchor. Every round, an adversarial reviewer found real facts hard-vetoed through the separator that had NOT been enumerated -- '(', '[', a quote, the ASCII '--', '/', a newline -- and the head-noun anchor additionally failed whenever the true head noun ended the sentence ('I updated the log format.'). A blacklist of the ways a sentence can carry a fact cannot be completed; the next round always finds one more. The blacklist WAS the bug. In v5, shape (a) is a WHITELIST carrying exactly the whole-sentence discipline shape (b) always had: ^ <first-person operational opener> <tooling-artefact object> <terminal punctuation only> $. NOTHING may follow the object -- no parenthetical, bracket, quote, dash, slash, newline, coordinated clause, preposition, second noun, code path or adverb. There is no separator class to under-list, because nothing is listed: the sentence must simply be OVER. ACCEPTED, DELIBERATE RECALL LOSS: the veto now reaches only BARE operational clauses ('I ran the tests.', \"I'm checking the file.\", 'Let me open the file.', 'Corri os testes.'), terse status phrases ('All tests pass.', 'Done.'), and content made entirely of those. Chatter with ANY tail ('I ran the tests and all tests pass now.', 'I read the diff (nothing changed).', 'I have updated the file app/Services/Foo.php with the new signature.') escapes to the semantic judge, which scores it low. A missed veto costs one judge call; a false veto destroys knowledge forever. must_be_vetoed has therefore been PRUNED to only what the rule still reaches: the corpus states the truth about the rule, it does not assert a reach the rule does not have."
+    "v5_reach": "v5 INVERTS the shape-(a) predicate. Rounds 1-4 all defined agent narration by enumerating what BREAKS it: a marker list, then a progress-tail reader, then a class of clause-opening separators (',' ';' ':' en-dash, em-dash) plus a head-noun anchor. Every round, an adversarial reviewer found real facts hard-vetoed through the separator that had NOT been enumerated -- '(', '[', a quote, the ASCII '--', '/', a newline -- and the head-noun anchor additionally failed whenever the true head noun ended the sentence ('I updated the log format.'). A blacklist of the ways a sentence can carry a fact cannot be completed; the next round always finds one more. The blacklist WAS the bug. In v5, shape (a) is a WHITELIST carrying exactly the whole-sentence discipline shape (b) always had: ^ <first-person operational opener> <tooling-artefact object> <terminal punctuation only> $. NOTHING may follow the object -- no parenthetical, bracket, quote, dash, slash, newline, coordinated clause, preposition, second noun, code path or adverb. There is no separator class to under-list, because nothing is listed: the sentence must simply be OVER. ACCEPTED, DELIBERATE RECALL LOSS: the veto now reaches only BARE operational clauses ('I ran the tests.', \"I'm checking the file.\", 'Let me open the file.', 'Corri os testes.'), terse status phrases ('All tests pass.', 'Done.'), and content made entirely of those. Chatter with ANY tail ('I ran the tests and all tests pass now.', 'I read the diff (nothing changed).', 'I have updated the file app/Services/Foo.php with the new signature.') escapes to the semantic judge, which scores it low. A missed veto costs one judge call; a false veto destroys knowledge forever. must_be_vetoed has therefore been PRUNED to only what the rule still reaches: the corpus states the truth about the rule, it does not assert a reach the rule does not have.",
+    "v6_reach": "v6 closes the TITLE channel — the same failure class rounds 1-5 removed from the content channel, surviving in the title. The v5 narration predicate read `content` ALONE, while the hasKnowledgeAssertion() safety net read title+content. So when the durable fact lived in the TITLE and the content was bare narration (title: 'The worker restarts on every deploy' / content: 'I checked the logs.'), the GRAMMAR never saw the fact, and the hand-tuned GENERAL_ASSERTION_MARKERS lexicon was the only thing standing between real knowledge and a hard veto. It saved 'The parser rejects every uppercase key' (because 'rejects' happens to be listed) and destroyed 'The parser lowercases every key' (because 'lowercases' is not): same fact, different verb, opposite outcome — precision decided by a word list. THE FIX applies the round-5 whitelist principle to the title. A fourth condition requires the TITLE to be NON-INFORMATIVE: empty, a generic placeholder ('Note', 'Nota', 'Untitled', 'Sem título'), or itself agent narration / a terse status phrase under the very same grammar the content uses ('Ran the tests', 'Corri os testes'). ANY ordinary noun phrase or declarative sentence in the title means the title MAY carry the fact, and the candidate escapes structurally, with the lexicon never consulted. NOTE THE POLARITY, which is what makes a closed placeholder list safe HERE and made every earlier list a bug: PLACEHOLDER_TITLES is a WHITELIST OF WHAT PERMITS THE VETO. An unlisted title makes the rule REFUSE to fire — an escape, one judge call — never a veto. Under-listing cannot destroy knowledge; it can only cost a judge call. THE VETO REMAINS ALIVE for real chatter, whose titles are generic or are themselves narration, and the `chatter-title-*` probes below pin exactly that with REAL titles — every pre-v6 chatter probe hardcodes 'Note'/'Nota', so it exercises no title at all and could neither have caught this defect nor prove the fix leaves the veto with anything to catch."
   },
   "fixtures": [
     {
@@ -1170,6 +1171,96 @@
         "id": "veto-pt-head-noun-final-permissoes",
         "why": "PT twin of the sentence-final head-noun bug: the head is 'permissões', not 'ficheiro'.",
         "candidate": {"title": "As permissões do ficheiro", "content": "Verifiquei as permissões do ficheiro.", "entities": []}
+      },
+      {
+        "id": "veto-title-fact-worker-restarts",
+        "why": "CONFIRMED v5 FALSE VETO, title channel. The content IS bare narration and the grammar is right to say so; the durable fact lives ENTIRELY in the title, which v5's narration predicate never read. 'restarts' is in no marker list, so nothing caught it and real knowledge was destroyed. Under v6 the title is an ordinary declarative sentence, therefore it MAY carry the fact, therefore the veto cannot fire — decided structurally, with the lexicon never consulted.",
+        "candidate": {"title": "The worker restarts on every deploy", "content": "I checked the logs.", "entities": []}
+      },
+      {
+        "id": "veto-title-fact-seeder-populates",
+        "why": "CONFIRMED v5 FALSE VETO, title channel. 'populates' is in no marker list.",
+        "candidate": {"title": "The seeder populates the demo tenant", "content": "I ran the tests.", "entities": []}
+      },
+      {
+        "id": "veto-title-fact-pt-worker-reinicia",
+        "why": "CONFIRMED v5 FALSE VETO, title channel, PT twin of veto-title-fact-worker-restarts. The PT half of the assertion lexicon is materially thinner than the EN half, so the title channel exposed PT knowledge even harder than EN. The v6 title condition is language-independent because it whitelists what MAY be vetoed: an unrecognised PT title escapes.",
+        "candidate": {"title": "O worker reinicia a cada deploy", "content": "Verifiquei os logs.", "entities": []}
+      },
+      {
+        "id": "veto-title-fact-parser-lowercases",
+        "why": "The pair that exposed the defect, half one. Under v5 'The parser rejects every uppercase key' survived ONLY because 'rejects' happens to sit in GENERAL_ASSERTION_MARKERS, while this — the same fact, a different verb — was hard-vetoed. Precision must never be decided by a word list.",
+        "candidate": {"title": "The parser lowercases every key", "content": "I read the config file.", "entities": []}
+      },
+      {
+        "id": "veto-title-fact-parser-rejects-lexicon-control",
+        "why": "The pair that exposed the defect, half two: the CONTROL. Identical shape, but its verb IS in the lexicon. Both must escape, and under v6 both escape for the same STRUCTURAL reason. If this one ever escapes while veto-title-fact-parser-lowercases does not, the lexicon has silently become load-bearing again.",
+        "candidate": {"title": "The parser rejects every uppercase key", "content": "I read the config file.", "entities": []}
+      },
+      {
+        "id": "veto-title-fact-worker-reaps",
+        "why": "Fresh probe. 'reaps' is in no marker list in either language.",
+        "candidate": {"title": "The worker reaps orphans", "content": "I checked the logs.", "entities": []}
+      },
+      {
+        "id": "veto-title-fact-scheduler-coalesces",
+        "why": "Fresh probe. 'coalesces' is in no marker list.",
+        "candidate": {"title": "The scheduler coalesces duplicate jobs", "content": "I ran the tests.", "entities": []}
+      },
+      {
+        "id": "veto-title-fact-importer-transliterates",
+        "why": "Fresh probe. 'transliterates' is in no marker list; the content is a bare progressive narration.",
+        "candidate": {"title": "The importer transliterates accented slugs", "content": "I'm checking the file.", "entities": []}
+      },
+      {
+        "id": "veto-title-fact-linter-unfolds",
+        "why": "Fresh probe. 'unfolds' is in no marker list; the content is a bare let-form narration.",
+        "candidate": {"title": "The linter unfolds nested ternaries", "content": "Let me open the file.", "entities": []}
+      },
+      {
+        "id": "veto-title-fact-pt-parser-normaliza",
+        "why": "Fresh PT probe. 'normaliza' is in no marker list.",
+        "candidate": {"title": "O parser normaliza cada chave", "content": "Li o ficheiro.", "entities": []}
+      },
+      {
+        "id": "veto-title-fact-pt-worker-recicla",
+        "why": "Fresh PT probe. 'recicla' is in no marker list.",
+        "candidate": {"title": "O worker recicla os processos órfãos", "content": "Corri os testes.", "entities": []}
+      },
+      {
+        "id": "veto-title-fact-pt-agendador-funde",
+        "why": "Fresh PT probe. 'funde' is in no marker list.",
+        "candidate": {"title": "O agendador funde jobs duplicados", "content": "Executei os testes.", "entities": []}
+      },
+      {
+        "id": "veto-title-fact-pt-migracao-reindexa",
+        "why": "Fresh PT probe. 'reindexa' is in no marker list; the content is a bare PT progressive narration.",
+        "candidate": {"title": "A migração reindexa a tabela de pedidos", "content": "Estou a ler o ficheiro.", "entities": []}
+      },
+      {
+        "id": "veto-title-noun-phrase-retry-limit",
+        "why": "A title need not even be a sentence. A bare noun phrase names the thing the entry is about, so it may be carrying the fact, and the veto does not fire.",
+        "candidate": {"title": "Retry limit of the shipping worker", "content": "I ran the tests.", "entities": []}
+      },
+      {
+        "id": "veto-title-noun-phrase-deploy-order",
+        "why": "Noun-phrase title over the tersest possible narration content ('Done.'). Even here the veto must not fire: the title is where the knowledge is.",
+        "candidate": {"title": "Deploy order for the embeddings worker", "content": "Done.", "entities": []}
+      },
+      {
+        "id": "veto-title-noun-phrase-pt-ordem-do-deploy",
+        "why": "PT twin: a bare noun-phrase title over bare PT narration.",
+        "candidate": {"title": "Ordem do deploy", "content": "Corri os testes.", "entities": []}
+      },
+      {
+        "id": "veto-title-placeholder-word-inside-a-real-title",
+        "why": "PLACEHOLDER_TITLES is compared against the WHOLE title, never as a substring. A title that merely OPENS with a placeholder word is a real title and must escape.",
+        "candidate": {"title": "Notes on why the parser lowercases every key", "content": "I read the config file.", "entities": []}
+      },
+      {
+        "id": "veto-title-unanticipated-script",
+        "why": "The direction of failure under the title whitelist, pinned. A title in a shape or a language nobody enumerated is neither a listed placeholder nor recognised narration, so the veto REFUSES to fire and the candidate escapes — one judge call. An unanticipated title can only ever make this rule SAFER. That asymmetry is what licenses a closed list in PLACEHOLDER_TITLES and is the exact opposite of a marker blacklist.",
+        "candidate": {"title": "Задача выполнена", "content": "I ran the tests.", "entities": []}
       }
     ],
     "must_be_vetoed": [
@@ -1297,6 +1388,61 @@
         "id": "chatter-pt-verifiquei-os-logs",
         "why": "Bare PT first-person past over the logs.",
         "candidate": {"title": "Nota", "content": "Verifiquei os logs.", "entities": []}
+      },
+      {
+        "id": "chatter-title-ran-the-tests",
+        "why": "TITLE CHANNEL, and the probe that proves the v6 condition did not kill the veto. Every chatter probe above hardcodes the title 'Note'/'Nota', so none of them exercises the title at all — they could not have caught the title-channel defect and they cannot prove the fix leaves the veto alive either. This one carries the title chatter actually has: a terse status phrase, non-informative under the very same grammar the content channel uses. The veto still fires.",
+        "candidate": {"title": "Ran the tests", "content": "All tests pass. Done.", "entities": []}
+      },
+      {
+        "id": "chatter-title-all-tests-pass",
+        "why": "TITLE CHANNEL: status-phrase title over bare first-person narration.",
+        "candidate": {"title": "All tests pass", "content": "I ran the tests.", "entities": []}
+      },
+      {
+        "id": "chatter-title-first-person-narration",
+        "why": "TITLE CHANNEL: the title is itself a bare first-person operational clause, narration under the same whole-sentence whitelist as the content.",
+        "candidate": {"title": "I ran the tests", "content": "All tests pass.", "entities": []}
+      },
+      {
+        "id": "chatter-title-done",
+        "why": "TITLE CHANNEL: the tersest status phrase there is, as a title.",
+        "candidate": {"title": "Done", "content": "I ran the tests. All tests pass.", "entities": []}
+      },
+      {
+        "id": "chatter-title-untitled",
+        "why": "TITLE CHANNEL: a generic placeholder title. 'Untitled' names the note; it asserts nothing about the project.",
+        "candidate": {"title": "Untitled", "content": "Let me open the file.", "entities": []}
+      },
+      {
+        "id": "chatter-title-next-steps",
+        "why": "TITLE CHANNEL: a generic placeholder title.",
+        "candidate": {"title": "Next steps", "content": "I'm checking the file.", "entities": []}
+      },
+      {
+        "id": "chatter-title-empty",
+        "why": "TITLE CHANNEL: an empty title carries nothing at all — the first branch of isNonInformativeTitle().",
+        "candidate": {"title": "", "content": "I ran the tests.", "entities": []}
+      },
+      {
+        "id": "chatter-title-punctuated-placeholder",
+        "why": "TITLE CHANNEL: surrounding punctuation is stripped before the whole-title comparison, so 'Note:' is the same placeholder as 'Note'.",
+        "candidate": {"title": "Note:", "content": "I ran the tests.", "entities": []}
+      },
+      {
+        "id": "chatter-title-pt-corri-os-testes",
+        "why": "TITLE CHANNEL, PT: narration title over a PT status-phrase content.",
+        "candidate": {"title": "Corri os testes", "content": "Todos os testes passam.", "entities": []}
+      },
+      {
+        "id": "chatter-title-pt-estou-a-ler",
+        "why": "TITLE CHANNEL, PT: progressive narration title over the tersest PT status phrase.",
+        "candidate": {"title": "Estou a ler o ficheiro", "content": "Feito.", "entities": []}
+      },
+      {
+        "id": "chatter-title-pt-sem-titulo",
+        "why": "TITLE CHANNEL, PT: generic placeholder title over a PT announced-intent narration.",
+        "candidate": {"title": "Sem título", "content": "Vou executar os testes.", "entities": []}
       }
     ]
   }

@@ -23,7 +23,7 @@ namespace App\Services\Importance;
  */
 final class DeterministicImportanceRules
 {
-    public const string VERSION = 'v5';
+    public const string VERSION = 'v6';
 
     /**
      * A hard veto forces the final score to zero. It is exactly the negative of
@@ -139,13 +139,26 @@ final class DeterministicImportanceRules
      * is residual content, so the sentence escapes without any noun-phrase
      * analysis at all.
      *
+     * v6 applies the same whitelist principle to the TITLE. v5 read the narration
+     * grammar over `content` ALONE while hasKnowledgeAssertion() read title+content,
+     * so a candidate whose durable fact lived in the title over bare narration in
+     * the body ("The worker restarts on every deploy." / "I checked the logs.") had
+     * its fact invisible to the grammar, and only a lucky hit in the hand-tuned
+     * GENERAL_ASSERTION_MARKERS lexicon stood between it and a hard veto — the same
+     * failure class rounds 1..5 removed from the content channel, surviving in the
+     * title channel. The veto now additionally requires the title to be
+     * NON-INFORMATIVE: structurally incapable of carrying a fact. Same asymmetry as
+     * everywhere else in this rule — a title nobody anticipated causes an ESCAPE,
+     * never a veto.
+     *
      * `agent_operation_only` fires only when ALL of the following hold:
      *
      *   1. the candidate asserts no knowledge anywhere (hasKnowledgeAssertion()
      *      over the whole text — kept deliberately broad; it can only ever WEAKEN
-     *      a veto, so widening it is the safe direction). Since v5 the grammar
-     *      alone already rejects every probe in the calibration corpus, so this is
-     *      a genuine SECOND net rather than the last line of defence;
+     *      a veto, so widening it is the safe direction). Since v5 (content) and
+     *      v6 (title) the grammar alone already rejects every probe in the
+     *      calibration corpus, so this is a genuine SECOND net rather than the last
+     *      line of defence;
      *   2. EVERY sentence of the content is agent narration, not merely some
      *      sentence. A knowledge note with a trailing "All tests pass." keeps its
      *      knowledge, which kills the whole class of poisoning-by-one-line;
@@ -158,7 +171,15 @@ final class DeterministicImportanceRules
      *          LET_NARRATION_PATTERN, PT_LET_NARRATION_PATTERN);
      *      (b) a terse status phrase, or a comma/and-joined chain of them, that is
      *          the ENTIRE sentence — "All tests pass.", "Done.", "Ran the tests."
-     *          (AGENT_STATUS_PHRASES).
+     *          (AGENT_STATUS_PHRASES);
+     *   4. the TITLE is non-informative (isNonInformativeTitle()): empty, a
+     *      placeholder ("Note", "Nota", "Untitled", "Sem título"), or itself
+     *      narration under the very same grammar as (2)+(3) ("Ran the tests",
+     *      "All tests pass", "Corri os testes"). Any ordinary noun phrase or
+     *      declarative sentence in the title — "The worker restarts on every
+     *      deploy", "The parser lowercases every key", "O parser normaliza cada
+     *      chave" — means the title MAY carry the fact, and the candidate escapes
+     *      structurally, with the lexicon never consulted.
      *
      * The accepted, deliberate recall loss: the veto now reaches only BARE
      * operational clauses and content made entirely of them. Chatter with any tail
@@ -343,24 +364,63 @@ final class DeterministicImportanceRules
     ];
 
     /**
+     * Generic placeholder titles: a title that names the note instead of stating
+     * anything about the project. Together with "the title is itself narration"
+     * and "the title is empty", this is the whole of isNonInformativeTitle().
+     *
+     * A CLOSED LIST IS SAFE HERE, and it is the exact opposite of a marker
+     * blacklist. This is a WHITELIST of the titles that PERMIT the veto: a title
+     * that is not on it (and is not narration, and is not empty) makes the rule
+     * refuse to fire. Under-listing therefore costs one judge call on chatter
+     * whose title we did not anticipate; it can never destroy knowledge. Every
+     * previous list in this class had the opposite polarity, and that is precisely
+     * why every previous list was a bug.
+     *
+     * Matched as the WHOLE title (after case-folding and stripping surrounding
+     * punctuation), never as a substring: "Notes on why the parser lowercases
+     * every key" is a real title and must escape.
+     *
+     * @var list<string>
+     */
+    private const array PLACEHOLDER_TITLES = [
+        'note', 'notes', 'new note', 'quick note', 'agent note', 'session note', 'session notes',
+        'untitled', 'no title', 'title', 'entry', 'knowledge', 'memo', 'summary', 'update',
+        'info', 'information', 'misc', 'miscellaneous', 'general', 'log', 'notes to self',
+        'next steps', 'context', 'observations',
+        'nota', 'notas', 'nova nota', 'sem título', 'sem titulo', 'sem nome', 'título',
+        'titulo', 'entrada', 'conhecimento', 'resumo', 'atualização', 'atualizacao',
+        'informação', 'informacao', 'geral', 'diversos', 'contexto', 'observações',
+        'observacoes', 'próximos passos', 'proximos passos',
+    ];
+
+    /**
      * General assertion verbs. They are NOT a positive signal (they do not
      * change the score); they only widen the `hasKnowledgeAssertion()` escape
      * hatch, which can only ever WEAKEN a veto — the safe direction under a
      * precision-first veto.
      *
-     * Up to v3 this list was the LAST line of defence: a first-person sentence
-     * that reported a fact was structurally "narration", so only a verb that
-     * happened to be listed here saved it. That made precision hostage to a
+     * Up to v3 this list was the LAST line of defence in the CONTENT channel, and
+     * up to v5 it was still the last line of defence in the TITLE channel: a
+     * sentence that reported a fact was structurally "narration", so only a verb
+     * that happened to be listed here saved it. That made precision hostage to a
      * hand-tuned English word list, and the Portuguese half was materially
-     * thinner — the identical fact was destroyed in PT and kept in EN.
+     * thinner — the identical fact was destroyed in PT and kept in EN. "The parser
+     * rejects every uppercase key" survived on `rejects`; "The parser lowercases
+     * every key" died.
      *
-     * v4's tail discipline and head-noun anchoring make that escape structural,
-     * so this list is now a genuine SECOND net: no probe in the calibration
-     * corpus depends on it any more, and the test 'does not depend on the
-     * knowledge-assertion lexicon for its precision' pins that. It is kept —
-     * removing entries would NARROW an escape hatch, which is the one direction
-     * this rule must never move in — but it is deliberately never extended to
-     * paper over a structural hole. If a false veto appears, fix the grammar.
+     * Both channels are structural now. The grammar ALONE — v5's whole-sentence
+     * narration whitelist over the content, plus v6's non-informative-title
+     * whitelist — already refuses to call any probe in the calibration corpus
+     * narration, WITHOUT consulting this list; the test 'does not depend on the
+     * knowledge-assertion lexicon for its precision' bypasses the lexicon entirely
+     * and pins exactly that, over the full candidate, title included.
+     *
+     * So the list is a genuine SECOND net: it can now only weaken a veto that the
+     * grammar was already willing to let fire. It is kept — removing entries would
+     * NARROW an escape hatch, the one direction this rule must never move in — but
+     * it is deliberately never extended. Adding a word here to rescue a false veto
+     * is the failure mode of rounds 1..4: it fixes one sentence and leaves the
+     * class intact. If a false veto appears, fix the grammar.
      *
      * @var list<string>
      */
@@ -429,7 +489,7 @@ final class DeterministicImportanceRules
         $text = trim($data['title']."\n".$data['content']);
         $haystack = $this->haystack($text);
 
-        $vetoes = $this->vetoes($data['content'], $text, $haystack, $data['entities']);
+        $vetoes = $this->vetoes($data['title'], $data['content'], $text, $haystack, $data['entities']);
 
         if ($vetoes !== []) {
             return new RuleEvaluation(
@@ -459,7 +519,7 @@ final class DeterministicImportanceRules
      * @param  list<array{name:string, type:string}>  $entities
      * @return list<array{id:string, adjustment:int, reason:string}>
      */
-    private function vetoes(string $content, string $text, string $haystack, array $entities): array
+    private function vetoes(string $title, string $content, string $text, string $haystack, array $entities): array
     {
         $vetoes = [];
 
@@ -475,11 +535,76 @@ final class DeterministicImportanceRules
             $vetoes[] = $this->rule('unanswered_question', self::VETO_ADJUSTMENT, 'Content only asks questions and answers none.');
         }
 
-        if ($this->isAgentOperationNarration($this->haystack($content)) && ! $this->hasKnowledgeAssertion($haystack, $text, $entities)) {
+        if ($this->isAgentOperationOnly($title, $content) && ! $this->hasKnowledgeAssertion($haystack, $text, $entities)) {
             $vetoes[] = $this->rule('agent_operation_only', self::VETO_ADJUSTMENT, 'Content reports an agent operation without asserting knowledge.');
         }
 
         return $vetoes;
+    }
+
+    /**
+     * The WHOLE structural half of `agent_operation_only`, over the WHOLE
+     * candidate: the content must be nothing but narration AND the title must be
+     * incapable of carrying a fact. hasKnowledgeAssertion() is not consulted here
+     * and must not be — this predicate is what the structural-invariant test
+     * exercises with the lexicon bypassed, and it has to see exactly the text the
+     * lexicon sees (title included), or the title channel goes back to being
+     * pinned by nothing.
+     *
+     * Both channels have to be closed because a candidate is title+content: the
+     * fact can live in either one. v5 read the grammar over the content alone and
+     * so could not see "The worker restarts on every deploy." / "I checked the
+     * logs." — a fact, hard-vetoed.
+     */
+    private function isAgentOperationOnly(string $title, string $content): bool
+    {
+        return $this->isNonInformativeTitle($title)
+            && $this->isAgentOperationNarration($this->haystack($content));
+    }
+
+    /**
+     * True only when the title cannot be carrying the candidate's fact. Three
+     * ways, and no fourth:
+     *
+     *   - it is empty, or has no letters at all;
+     *   - it is a generic placeholder (PLACEHOLDER_TITLES, or the same
+     *     placeholder tokens PLACEHOLDER_PATTERN already recognises in content —
+     *     "TBD", "N/A", "WIP");
+     *   - it is itself agent narration or a terse status phrase, under the very
+     *     same whole-sentence grammar the content channel uses. A chatter entry's
+     *     title routinely IS one: "Ran the tests", "All tests pass", "Corri os
+     *     testes".
+     *
+     * ANYTHING else — an ordinary noun phrase, a declarative sentence, a title in
+     * a language or shape nobody enumerated — is treated as possibly carrying the
+     * fact, and the veto does not fire. Note the direction of the failure: an
+     * unrecognised title makes the rule SAFER (an escape, one judge call), never
+     * more dangerous. That is what licenses the closed list in PLACEHOLDER_TITLES
+     * and is the opposite of the marker blacklists of rounds 1..4.
+     */
+    private function isNonInformativeTitle(string $title): bool
+    {
+        $title = trim($title);
+
+        if ($title === '' || preg_match('/\p{L}/u', $title) !== 1) {
+            return true;
+        }
+
+        if (preg_match(self::PLACEHOLDER_PATTERN, $title) === 1) {
+            return true;
+        }
+
+        $haystack = $this->haystack($title);
+
+        // Strip surrounding punctuation and whitespace so "Note:", "[note]" and
+        // "— Nota —" are the same placeholder as "Note".
+        $bare = trim((string) preg_replace('/^[\s\p{P}\p{S}]+|[\s\p{P}\p{S}]+$/u', '', $haystack));
+
+        if (in_array($bare, self::PLACEHOLDER_TITLES, true)) {
+            return true;
+        }
+
+        return $this->isAgentOperationNarration($haystack);
     }
 
     /**

@@ -424,6 +424,87 @@ it('hard-vetoes agent narration with no knowledge assertion', function (string $
     'pt bare let-form' => 'Deixa-me ler o ficheiro.',
 ]);
 
+it('does not veto bare narration when the title carries the fact', function (string $title, string $content) {
+    // Round 6, and the last false-veto channel.
+    //
+    // Rounds 1-5 hardened the CONTENT channel until the grammar alone decided it.
+    // But the narration predicate read `content` only, while hasKnowledgeAssertion()
+    // read title+content -- so when the fact lived in the TITLE over bare narration
+    // in the body, the grammar never saw the fact at all, and the hand-tuned
+    // GENERAL_ASSERTION_MARKERS lexicon was the only thing between real knowledge
+    // and a hard veto. It saved 'The parser rejects every uppercase key' (because
+    // 'rejects' is listed) and destroyed 'The parser lowercases every key' (because
+    // 'lowercases' is not). Same fact, different verb, opposite outcome.
+    //
+    // The content in every case below IS bare narration, and the grammar is right
+    // about that. What has changed is that the veto now also requires the TITLE to
+    // be structurally incapable of carrying a fact. A declarative sentence or an
+    // ordinary noun phrase is not, so the candidate escapes -- structurally, with
+    // the lexicon never consulted. Not one word was added to any marker list to
+    // make these pass; several verbs here ('lowercases', 'reaps', 'coalesces',
+    // 'transliterates', 'unfolds', 'normaliza', 'recicla', 'funde', 'reindexa') are
+    // in no list in either language, and that is the point.
+    $evaluation = evaluateRules($content, $title);
+
+    expect($evaluation->vetoed)->toBeFalse(
+        'False-vetoed real knowledge by: '.implode(', ', triggeredRuleIds($evaluation)),
+    );
+})->with([
+    // The three confirmed round-5 title-channel false vetoes, verbatim.
+    'title: the worker restarts on every deploy' => ['The worker restarts on every deploy', 'I checked the logs.'],
+    'title: the seeder populates the demo tenant' => ['The seeder populates the demo tenant', 'I ran the tests.'],
+    'pt: title: o worker reinicia a cada deploy' => ['O worker reinicia a cada deploy', 'Verifiquei os logs.'],
+    // The pair that exposed the defect: identical shape, one verb listed, one not.
+    // Both must escape, and now both escape for the same structural reason.
+    'title verb NOT in the lexicon: lowercases' => ['The parser lowercases every key', 'I read the config file.'],
+    'title verb IS in the lexicon: rejects (control)' => ['The parser rejects every uppercase key', 'I read the config file.'],
+    // Fresh probes. Every verb is invented as far as the lexicon is concerned.
+    'title verb: reaps' => ['The worker reaps orphans', 'I checked the logs.'],
+    'title verb: coalesces' => ['The scheduler coalesces duplicate jobs', 'I ran the tests.'],
+    'title verb: transliterates' => ['The importer transliterates accented slugs', "I'm checking the file."],
+    'title verb: unfolds' => ['The linter unfolds nested ternaries', 'Let me open the file.'],
+    'pt: title verb: normaliza' => ['O parser normaliza cada chave', 'Li o ficheiro.'],
+    'pt: title verb: recicla' => ['O worker recicla os processos órfãos', 'Corri os testes.'],
+    'pt: title verb: funde' => ['O agendador funde jobs duplicados', 'Executei os testes.'],
+    'pt: title verb: reindexa' => ['A migração reindexa a tabela de pedidos', 'Estou a ler o ficheiro.'],
+    // A title need not be a sentence at all.
+    'noun-phrase title' => ['Retry limit of the shipping worker', 'I ran the tests.'],
+    'noun-phrase title over "Done."' => ['Deploy order for the embeddings worker', 'Done.'],
+    'pt: noun-phrase title' => ['Ordem do deploy', 'Corri os testes.'],
+    // A placeholder title is matched whole, never as a substring.
+    'placeholder word opening a real title' => ['Notes on why the parser lowercases every key', 'I read the config file.'],
+    // The direction of failure: an unanticipated title escapes, never vetoes.
+    'title nobody enumerated' => ['Задача выполнена', 'I ran the tests.'],
+]);
+
+it('still hard-vetoes chatter whose title is generic or is itself narration', function (string $title, string $content) {
+    // The veto must stay ALIVE. A rule that catches nothing is dead code and is its
+    // own defect, so the title condition is pinned from both sides: the titles below
+    // are the ones chatter actually has -- a generic placeholder, or narration, or
+    // nothing at all -- and every one of them still permits the veto.
+    //
+    // Note that the pre-v6 chatter probes all pass the default title 'Note', so they
+    // exercise the title channel only by accident. These are explicit.
+    $evaluation = evaluateRules($content, $title);
+
+    expect($evaluation->vetoed)->toBeTrue()
+        ->and(triggeredRuleIds($evaluation))->toContain('agent_operation_only');
+})->with([
+    'placeholder title' => ['Note', 'I ran the tests.'],
+    'placeholder title with punctuation' => ['Note:', 'I ran the tests.'],
+    'placeholder title: untitled' => ['Untitled', 'Let me open the file.'],
+    'placeholder title: next steps' => ['Next steps', "I'm checking the file."],
+    'empty title' => ['', 'I ran the tests.'],
+    'title is a status phrase' => ['All tests pass', 'I ran the tests.'],
+    'title is a subjectless tool run' => ['Ran the tests', 'All tests pass. Done.'],
+    'title is first-person narration' => ['I ran the tests', 'All tests pass.'],
+    'title is the tersest status phrase' => ['Done', 'I ran the tests. All tests pass.'],
+    'pt: placeholder title' => ['Nota', 'Corri os testes.'],
+    'pt: placeholder title: sem título' => ['Sem título', 'Vou executar os testes.'],
+    'pt: title is narration' => ['Corri os testes', 'Todos os testes passam.'],
+    'pt: title is progressive narration' => ['Estou a ler o ficheiro', 'Feito.'],
+]);
+
 it('rewards an explicit decision', function () {
     $evaluation = evaluateRules('We decided to serve reporting endpoints from the report_daily_totals projection instead of the write model, since one dashboard request issued 400 queries.');
 
@@ -642,7 +723,7 @@ it('hard-vetoes every unambiguous agent-chatter probe', function () {
 });
 
 it('does not depend on the knowledge-assertion lexicon for its precision', function () {
-    // The structural invariant, and the one that keeps rounds 1-4 from repeating.
+    // The structural invariant, and the one that keeps rounds 1-5 from repeating.
     //
     // Before v4 the assertion lexicon was the LAST line of defence: a first-person
     // sentence that reported a fact was structurally "narration", and only a verb
@@ -651,38 +732,58 @@ it('does not depend on the knowledge-assertion lexicon for its precision', funct
     // Portuguese half of that list was materially thinner, so PT knowledge was
     // systematically more exposed than the identical EN sentence.
     //
-    // The v5 whitelist makes the escape purely structural, which demotes the
-    // lexicon to a genuine SECOND net. This test asserts exactly that: the
-    // narration GRAMMAR alone, with hasKnowledgeAssertion() never consulted,
-    // already rejects every probe that must not be vetoed AND every reviewed
-    // must-keep fixture. If this fails, someone has re-introduced a structural
-    // hole and is relying on the word list to hide it -- fix the grammar, never
-    // the list.
+    // v5's whitelist made the escape structural in the CONTENT. v6 does the same
+    // for the TITLE, and this test is where the title channel got away with it for
+    // a whole round: it used to feed `$probe['candidate']['content']` alone into
+    // the grammar, exactly as v5's veto did -- so a candidate whose fact lived in
+    // the title over bare narration in the body looked like pure narration to both,
+    // and BOTH were blind to the same thing. A test that reproduces the rule's own
+    // blind spot cannot detect the rule's bug.
+    //
+    // It now exercises the FULL candidate through isAgentOperationOnly() -- the
+    // whole structural half of the veto, title included -- with the lexicon
+    // bypassed. Every probe that must not be vetoed, and every reviewed must-keep
+    // fixture, must be refused by the GRAMMAR alone. If this fails, someone has
+    // re-introduced a structural hole and is relying on the word list to hide it:
+    // fix the grammar, never the list.
     $rules = new DeterministicImportanceRules;
 
-    $isNarration = new ReflectionMethod($rules, 'isAgentOperationNarration');
-    $haystack = new ReflectionMethod($rules, 'haystack');
+    $isNarrationOnly = new ReflectionMethod($rules, 'isAgentOperationOnly');
 
     foreach (vetoProbeKnowledge() as $probe) {
-        $content = $haystack->invoke($rules, $probe['candidate']['content']);
-
-        expect($isNarration->invoke($rules, $content))->toBeFalse(
-            "Veto probe [{$probe['id']}] is structurally agent narration, so only the knowledge-assertion lexicon keeps it. The GRAMMAR must reject it -- do not widen the lexicon.",
+        expect($isNarrationOnly->invoke($rules, $probe['candidate']['title'], $probe['candidate']['content']))->toBeFalse(
+            "Veto probe [{$probe['id']}] is structurally agent narration (title AND content), so only the knowledge-assertion lexicon keeps it. The GRAMMAR must reject it -- do not widen the lexicon.",
         );
     }
 
     foreach (mustKeepFixtures() as $fixture) {
-        $content = $haystack->invoke($rules, $fixture['candidate']['content']);
+        expect($isNarrationOnly->invoke($rules, $fixture['candidate']['title'], $fixture['candidate']['content']))->toBeFalse(
+            "Must-keep fixture [{$fixture['id']}] is structurally agent narration (title AND content), so only the knowledge-assertion lexicon keeps it. The GRAMMAR must reject it -- do not widen the lexicon.",
+        );
+    }
+});
 
-        expect($isNarration->invoke($rules, $content))->toBeFalse(
-            "Must-keep fixture [{$fixture['id']}] is structurally agent narration, so only the knowledge-assertion lexicon keeps it. The GRAMMAR must reject it -- do not widen the lexicon.",
+it('keeps the agent-operation veto alive on the grammar alone', function () {
+    // The other half of the structural invariant, and the guard against fixing a
+    // false veto by quietly turning the veto into dead code. The grammar ALONE --
+    // no lexicon, no knowledge assertion -- must still call every chatter probe
+    // narration. If a precision fix ever widens far enough that the GRAMMAR stops
+    // recognising real chatter, the rule catches nothing and that is its own
+    // defect: report it, do not widen further.
+    $rules = new DeterministicImportanceRules;
+
+    $isNarrationOnly = new ReflectionMethod($rules, 'isAgentOperationOnly');
+
+    foreach (vetoProbeChatter() as $probe) {
+        expect($isNarrationOnly->invoke($rules, $probe['candidate']['title'], $probe['candidate']['content']))->toBeTrue(
+            "Chatter probe [{$probe['id']}] is no longer agent narration to the GRAMMAR, so the veto only still fires on it by accident of the lexicon -- or not at all.",
         );
     }
 });
 
 it('pins both directions of the agent-operation veto with enough probes', function () {
-    expect(count(vetoProbeKnowledge()))->toBeGreaterThanOrEqual(80)
-        ->and(count(vetoProbeChatter()))->toBeGreaterThanOrEqual(24);
+    expect(count(vetoProbeKnowledge()))->toBeGreaterThanOrEqual(100)
+        ->and(count(vetoProbeChatter()))->toBeGreaterThanOrEqual(34);
 
     foreach ([...vetoProbeKnowledge(), ...vetoProbeChatter()] as $probe) {
         expect(trim($probe['id']))->not->toBeEmpty()
