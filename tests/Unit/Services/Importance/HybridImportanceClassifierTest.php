@@ -99,6 +99,12 @@ function semanticAssessment(
     );
 }
 
+/**
+ * How long a `running` assessment may go without a write before it is treated as
+ * abandoned rather than as live contention.
+ */
+const STALE_AFTER_MINUTES = 15;
+
 function importanceClassifier(
     SemanticImportanceJudge $judge,
     string $model = 'claude-test',
@@ -111,6 +117,7 @@ function importanceClassifier(
         $judge,
         model: $model,
         promptVersion: $promptVersion,
+        staleAfterMinutes: STALE_AFTER_MINUTES,
     );
 }
 
@@ -428,6 +435,63 @@ it('raises a transient failure when another worker already owns the running asse
     expect($judge->calls)->toBe(0);
 });
 
+it('reclaims a running assessment abandoned by a crashed worker', function () {
+    setImportanceThreshold(70);
+    $judge = new RecordingJudge(semanticAssessment());
+    $candidate = neutralCandidate();
+
+    // A worker died mid-classification and left its `running` row behind: it is
+    // older than the stale interval, so it is not live contention.
+    $abandoned = runningAssessment($candidate, staleMinutes: STALE_AFTER_MINUTES + 5);
+
+    $result = importanceClassifier($judge)->classify('classifier', $candidate);
+
+    expect($judge->calls)->toBe(1)
+        ->and($result->cacheHit)->toBeFalse()
+        ->and($result->finalScore)->toBe(60)
+        ->and($result->verdict)->toBe(ImportanceVerdict::NotImportant)
+        ->and(ImportanceAssessment::query()->count())->toBe(1);
+
+    $abandoned->refresh();
+
+    expect($abandoned->status)->toBe(ImportanceAssessmentStatus::Succeeded)
+        ->and($abandoned->semantic_score)->toBe(60);
+});
+
+it('still steps aside for a running assessment that is not yet stale', function () {
+    setImportanceThreshold(70);
+    $judge = new RecordingJudge(semanticAssessment());
+    $candidate = neutralCandidate();
+
+    runningAssessment($candidate, staleMinutes: STALE_AFTER_MINUTES - 1);
+
+    expect(fn () => importanceClassifier($judge)->classify('classifier', $candidate))
+        ->toThrow(ImportanceAssessmentInProgressException::class);
+
+    expect($judge->calls)->toBe(0)
+        ->and(ImportanceAssessment::query()->sole()->status)->toBe(ImportanceAssessmentStatus::Running);
+});
+
+it('lets only one worker reclaim the same stale assessment', function () {
+    setImportanceThreshold(70);
+    $judge = new RecordingJudge(semanticAssessment());
+    $candidate = neutralCandidate();
+
+    $abandoned = runningAssessment($candidate, staleMinutes: STALE_AFTER_MINUTES + 5);
+
+    // A competing worker reclaims the stale row in the window between our lookup
+    // and our conditional update: our update must match no row, and we must step
+    // aside rather than run a second judgement against the same identity.
+    raceReclaimAssessment($abandoned);
+
+    expect(fn () => importanceClassifier($judge)->classify('classifier', $candidate))
+        ->toThrow(ImportanceAssessmentInProgressException::class);
+
+    expect($judge->calls)->toBe(0)
+        ->and(ImportanceAssessment::query()->count())->toBe(1)
+        ->and(ImportanceAssessment::query()->sole()->status)->toBe(ImportanceAssessmentStatus::Running);
+});
+
 it('rethrows a database failure that is not a unique-key race', function () {
     setImportanceThreshold(70);
     $judge = new RecordingJudge(semanticAssessment());
@@ -463,6 +527,55 @@ it('resolves from the container with the configured model and prompt version', f
     expect($result->model)->toBe((string) config('rag.importance.model'))
         ->and($result->promptVersion)->toBe((string) config('rag.importance.prompt_version'));
 });
+
+/**
+ * A `running` assessment for `$candidate` whose last write was `$staleMinutes`
+ * ago — i.e. a worker that is either still busy (fresh) or that crashed and left
+ * the row behind (older than the classifier's stale interval).
+ */
+function runningAssessment(ImportanceCandidate $candidate, int $staleMinutes): ImportanceAssessment
+{
+    $normalized = (new ImportanceCandidateNormalizer)->normalize($candidate);
+
+    $assessment = ImportanceAssessment::create([
+        'project_id' => 'classifier',
+        'candidate_hash' => $normalized->hash(),
+        'normalized_candidate' => $normalized->data(),
+        'model' => 'claude-test',
+        'prompt_version' => 'v1',
+        'rules_version' => DeterministicImportanceRules::VERSION,
+        'status' => ImportanceAssessmentStatus::Running,
+    ]);
+
+    // Backdate through the query builder so Eloquent's timestamps do not
+    // immediately overwrite it.
+    DB::table('importance_assessments')
+        ->where('id', $assessment->getKey())
+        ->update(['updated_at' => now()->subMinutes($staleMinutes)]);
+
+    return $assessment->refresh();
+}
+
+/**
+ * Simulate losing the reclamation race: a competing worker takes the stale row
+ * over (bumping `updated_at`) right after our lookup reads it.
+ */
+function raceReclaimAssessment(ImportanceAssessment $assessment): void
+{
+    $reclaimed = false;
+
+    DB::listen(function (QueryExecuted $query) use (&$reclaimed, $assessment): void {
+        if ($reclaimed || ! str_contains($query->sql, 'select * from "importance_assessments"')) {
+            return;
+        }
+
+        $reclaimed = true;
+
+        DB::table('importance_assessments')
+            ->where('id', $assessment->getKey())
+            ->update(['updated_at' => now()]);
+    });
+}
 
 /**
  * Simulate losing a cache-identity race: a competing worker writes the same

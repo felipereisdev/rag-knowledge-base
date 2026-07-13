@@ -2,6 +2,7 @@
 
 // tests/Unit/Observers/KnowledgeEntryObserverTest.php
 
+use App\Enums\KnowledgeStatus;
 use App\Jobs\IndexEntryJob;
 use App\Models\KnowledgeEntry;
 use App\Models\Project;
@@ -37,6 +38,72 @@ it('still indexes approved entries on create', function () {
     ]);
 
     Queue::assertPushed(IndexEntryJob::class);
+});
+
+it('does not index an entry that is still being classified', function () {
+    Queue::fake();
+
+    KnowledgeEntry::create([
+        'project_id' => 'p1', 'title' => 't', 'content' => 'c',
+        'category' => 'insight', 'source' => 'condense', 'status' => KnowledgeStatus::Classifying->value,
+    ]);
+
+    Queue::assertNotPushed(IndexEntryJob::class);
+});
+
+it('indexes exactly once when classification releases the entry to pending', function () {
+    Queue::fake();
+
+    $entry = KnowledgeEntry::create([
+        'project_id' => 'p1', 'title' => 't', 'content' => 'c',
+        'category' => 'insight', 'source' => 'condense', 'status' => KnowledgeStatus::Classifying->value,
+    ]);
+
+    Queue::fake();
+
+    // The classification job writes the verdict snapshot and the status in one
+    // save, exactly as ClassifyKnowledgeEntryJob does.
+    $entry->update([
+        'status' => KnowledgeStatus::Pending->value,
+        'metadata' => ['importance' => ['verdict' => 'important']],
+    ]);
+
+    Queue::assertPushed(
+        IndexEntryJob::class,
+        fn (IndexEntryJob $job) => $job->entryId === (int) $entry->id
+            && $job->afterCommit === true,
+    );
+    Queue::assertPushed(IndexEntryJob::class, 1);
+});
+
+it('does not index an entry rejected straight out of classification', function () {
+    Queue::fake();
+
+    $entry = KnowledgeEntry::create([
+        'project_id' => 'p1', 'title' => 't', 'content' => 'c',
+        'category' => 'insight', 'source' => 'condense', 'status' => KnowledgeStatus::Classifying->value,
+    ]);
+
+    Queue::fake();
+
+    $entry->update(['status' => KnowledgeStatus::Rejected->value]);
+
+    Queue::assertNotPushed(IndexEntryJob::class);
+});
+
+it('does not index a classifying entry whose content is edited mid-flight', function () {
+    Queue::fake();
+
+    $entry = KnowledgeEntry::create([
+        'project_id' => 'p1', 'title' => 't', 'content' => 'c',
+        'category' => 'insight', 'source' => 'condense', 'status' => KnowledgeStatus::Classifying->value,
+    ]);
+
+    Queue::fake();
+
+    $entry->update(['content' => 'edited while classifying']);
+
+    Queue::assertNotPushed(IndexEntryJob::class);
 });
 
 it('queues writer-created entries for indexing after commit', function () {

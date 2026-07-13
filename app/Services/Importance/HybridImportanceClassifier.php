@@ -23,8 +23,10 @@ use Illuminate\Support\Str;
  *  3. Acquire the assessment row for this cache identity
  *     (project + candidate hash + model + prompt version + rules version).
  *     A `succeeded` row is reused as-is; a `failed` row is reclaimed and retried;
- *     a `running` row belongs to another worker, so we raise the transient
- *     `ImportanceAssessmentInProgressException` and let the caller back off.
+ *     a fresh `running` row belongs to another worker, so we raise the transient
+ *     `ImportanceAssessmentInProgressException` and let the caller back off; a
+ *     `running` row abandoned by a crashed worker (older than `staleAfterMinutes`)
+ *     is reclaimed and re-judged.
  *  4. Call the judge OUTSIDE any transaction. The row is already `running`, so no
  *     database lock is held across a process/network call.
  *  5. Sum the criteria, apply the rule adjustments, clamp to 0..100, and compare
@@ -42,12 +44,17 @@ final class HybridImportanceClassifier
 
     private const string UNIQUE_VIOLATION = '23505';
 
+    /**
+     * @param  int  $staleAfterMinutes  How long a `running` assessment may go without a
+     *                                  write before it is considered abandoned rather than owned.
+     */
     public function __construct(
         private readonly ImportanceCandidateNormalizer $normalizer,
         private readonly DeterministicImportanceRules $rules,
         private readonly SemanticImportanceJudge $judge,
         private readonly string $model,
         private readonly string $promptVersion,
+        private readonly int $staleAfterMinutes = 15,
     ) {}
 
     /**
@@ -131,8 +138,16 @@ final class HybridImportanceClassifier
     }
 
     /**
-     * Reuse a finished assessment, take over a failed one, or step aside for the
-     * worker that currently owns it.
+     * Reuse a finished assessment, take over a failed or abandoned one, or step
+     * aside for the worker that currently owns it.
+     *
+     * A `running` row is only evidence of another worker while it is *fresh*. A
+     * worker that dies mid-classification (killed, timed out, host restarted)
+     * leaves its row `running` forever, and without reclamation every later job
+     * for that cache identity would raise the transient exception, exhaust its
+     * retries, fail open, and never classify that candidate again. So a `running`
+     * row whose last write is older than `staleAfterMinutes` is taken over and
+     * re-judged.
      */
     private function claim(ImportanceAssessment $assessment): ImportanceAssessment
     {
@@ -156,6 +171,27 @@ final class HybridImportanceClassifier
             $assessment->refresh();
 
             if ($claimed === 1 || $assessment->status === ImportanceAssessmentStatus::Succeeded) {
+                return $assessment;
+            }
+        }
+
+        if ($assessment->status === ImportanceAssessmentStatus::Running) {
+            // The same conditional-update discipline as above, keyed on the row's
+            // current state: the takeover bumps `updated_at`, so a second worker
+            // racing for the same stale row matches no row and steps aside.
+            $reclaimed = ImportanceAssessment::query()
+                ->whereKey($assessment->getKey())
+                ->where('status', ImportanceAssessmentStatus::Running->value)
+                ->where('updated_at', '<=', now()->subMinutes($this->staleAfterMinutes))
+                ->update([
+                    'error_code' => null,
+                    'error_message' => null,
+                    'updated_at' => now(),
+                ]);
+
+            $assessment->refresh();
+
+            if ($reclaimed === 1 || $assessment->status === ImportanceAssessmentStatus::Succeeded) {
                 return $assessment;
             }
         }

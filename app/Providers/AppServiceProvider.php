@@ -50,6 +50,7 @@ class AppServiceProvider extends ServiceProvider
             $app->make(SemanticImportanceJudge::class),
             model: (string) config('rag.importance.model'),
             promptVersion: (string) config('rag.importance.prompt_version'),
+            staleAfterMinutes: (int) config('rag.importance.stale_after_minutes'),
         ));
 
         $embeddingProvider = (string) config('rag.embeddings.provider', 'local-embedder');

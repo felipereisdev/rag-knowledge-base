@@ -8,6 +8,18 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
+/**
+ * @property int $id
+ * @property string $project_id
+ * @property string $title
+ * @property string $content
+ * @property string $category
+ * @property string $source
+ * @property string $author
+ * @property string $status
+ * @property array<string, mixed> $metadata
+ * @property int|null $importance_assessment_id
+ */
 class KnowledgeEntry extends Model
 {
     protected static function booted(): void
