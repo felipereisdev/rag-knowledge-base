@@ -89,6 +89,23 @@ describe('HybridSearcher', function () {
             ->and($results[0]->matchedBy)->toContain('keyword');
     });
 
+    it('uses the project language for keyword search', function () {
+        $this->project->update(['language' => 'pt']);
+
+        $entry = KnowledgeEntry::create([
+            'project_id' => $this->project->id,
+            'title' => 'Rotas portuguesas',
+            'content' => 'As migrações ficam na pasta database.',
+            'status' => 'approved',
+        ]);
+
+        $results = (new HybridSearcher(expandGraph: false))->search('ficar', $this->project->id);
+
+        expect($results)->not->toBeEmpty()
+            ->and($results[0]->entryId)->toBe($entry->id)
+            ->and($results[0]->matchedBy)->toContain('keyword');
+    });
+
     it('combines vector and keyword via RRF', function () {
         $entry = KnowledgeEntry::create([
             'project_id' => $this->project->id,

@@ -3,6 +3,8 @@
 namespace App\Services\Search;
 
 use App\Models\KnowledgeEntry;
+use App\Models\Project;
+use App\Support\Rag\PostgresTextSearch;
 use Illuminate\Support\Facades\DB;
 use Laravel\Ai\Embeddings;
 
@@ -48,6 +50,8 @@ class HybridSearcher
         ?string $projectId = null,
         ?string $category = null,
     ): array {
+        $textSearchConfig = $this->textSearchConfig($projectId);
+
         // 1. Generate query embedding
         $queryVector = $this->embedQuery($query);
 
@@ -55,7 +59,7 @@ class HybridSearcher
         $vectorResults = $this->vectorSearch($queryVector, $projectId, $category);
 
         // 3. Keyword (FTS) search
-        $ftsResults = $this->ftsSearch($query, $projectId, $category);
+        $ftsResults = $this->ftsSearch($query, $projectId, $category, $textSearchConfig);
 
         // 4. Reciprocal Rank Fusion
         $fused = $this->reciprocalRankFusion($vectorResults, $ftsResults);
@@ -68,7 +72,7 @@ class HybridSearcher
         // 6. Sort, limit, hydrate, highlight
         $fused = $this->sortAndLimit($fused);
 
-        return $this->hydrate($fused, $query);
+        return $this->hydrate($fused, $query, $textSearchConfig);
     }
 
     /**
@@ -144,14 +148,18 @@ class HybridSearcher
     /**
      * @return array<string, array{score: float, rank: int}>
      */
-    private function ftsSearch(string $query, ?string $projectId, ?string $category): array
-    {
-        $sql = "SELECT id as entry_id, ts_rank(search_vector, plainto_tsquery('english', ?)) as score
+    private function ftsSearch(
+        string $query,
+        ?string $projectId,
+        ?string $category,
+        string $textSearchConfig,
+    ): array {
+        $sql = "SELECT id as entry_id, ts_rank(search_vector, plainto_tsquery(?::regconfig, ?)) as score
                 FROM knowledge_entries
                 WHERE status = 'approved'
-                AND search_vector @@ plainto_tsquery('english', ?)";
+                AND search_vector @@ plainto_tsquery(?::regconfig, ?)";
 
-        $bindings = [$query, $query];
+        $bindings = [$textSearchConfig, $query, $textSearchConfig, $query];
 
         if ($projectId) {
             $sql .= ' AND project_id = ?';
@@ -284,7 +292,7 @@ class HybridSearcher
      * @param  array<string, array{score: float, matchedBy: array<string>, graphExpanded: bool}>  $fused
      * @return array<SearchResult>
      */
-    private function hydrate(array $fused, string $query): array
+    private function hydrate(array $fused, string $query, string $textSearchConfig): array
     {
         if (empty($fused)) {
             return [];
@@ -308,7 +316,7 @@ class HybridSearcher
                 continue;
             }
 
-            $snippet = $this->highlight($entry->content, $query);
+            $snippet = $this->highlight($entry->content, $query, $textSearchConfig);
 
             $results[] = new SearchResult(
                 entryId: (int) $entryId,
@@ -325,11 +333,11 @@ class HybridSearcher
         return $results;
     }
 
-    private function highlight(string $content, string $query): string
+    private function highlight(string $content, string $query, string $textSearchConfig): string
     {
         $result = DB::selectOne(
-            "SELECT ts_headline('english', ?, plainto_tsquery('english', ?)) as headline",
-            [$content, $query]
+            'SELECT ts_headline(?::regconfig, ?, plainto_tsquery(?::regconfig, ?)) as headline',
+            [$textSearchConfig, $content, $textSearchConfig, $query]
         );
 
         if ($result === null) {
@@ -337,5 +345,14 @@ class HybridSearcher
         }
 
         return $result->headline;
+    }
+
+    private function textSearchConfig(?string $projectId): string
+    {
+        $language = $projectId
+            ? Project::query()->whereKey($projectId)->value('language')
+            : null;
+
+        return PostgresTextSearch::configForLanguage($language);
     }
 }
