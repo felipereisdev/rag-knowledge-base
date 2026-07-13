@@ -23,6 +23,17 @@ describe('ProjectResource', function () {
         $this->assertDatabaseHas('projects', ['id' => 'new-repo']);
     });
 
+    it('rejects an unsupported project language', function () {
+        $response = $this->post('/martis/api/resources/projects', [
+            'id' => 'new-repo',
+            'name' => 'New Repo',
+            'root_path' => '/path/to/repo',
+            'language' => 'not-real',
+        ]);
+
+        $response->assertUnprocessable();
+    });
+
     it('can update a project', function () {
         $project = Project::create(['id' => 'r1', 'name' => 'R1', 'root_path' => '/p']);
 

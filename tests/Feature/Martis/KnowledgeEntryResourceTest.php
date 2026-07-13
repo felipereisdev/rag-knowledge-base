@@ -21,6 +21,19 @@ describe('KnowledgeEntryResource', function () {
         ]);
     });
 
+    it('rejects invalid category and status values', function () {
+        $project = Project::create(['id' => 'r1', 'name' => 'R1', 'root_path' => '/p']);
+
+        $response = $this->post('/martis/api/resources/knowledge-entries', [
+            'project_id' => $project->id,
+            'title' => 'Invalid entry',
+            'category' => 'not-real',
+            'status' => 'mystery',
+        ]);
+
+        $response->assertUnprocessable();
+    });
+
     it('can list entries', function () {
         $project = Project::create(['id' => 'r1', 'name' => 'R1', 'root_path' => '/p']);
         KnowledgeEntry::create(['project_id' => $project->id, 'title' => 'E1']);

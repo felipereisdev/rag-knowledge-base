@@ -14,7 +14,7 @@ class MainDashboard extends Dashboard
 {
     public function __construct(?string $name = null, ?string $uriKey = null)
     {
-        parent::__construct($name ?? 'Main', $uriKey ?? 'main');
+        parent::__construct($name ?? __('rag.dashboard.main'), $uriKey ?? 'main');
     }
 
     /**
@@ -31,7 +31,7 @@ class MainDashboard extends Dashboard
     public function cards(Request $request): array
     {
         return [
-            new class('Projects', 'projects-count') extends ValueMetric
+            new class(__('rag.dashboard.projects'), 'projects-count') extends ValueMetric
             {
                 public function calculate(Request $request): ValueResult
                 {
@@ -39,7 +39,7 @@ class MainDashboard extends Dashboard
                 }
             },
 
-            new class('Total Entries', 'entries-count') extends ValueMetric
+            new class(__('rag.dashboard.total_entries'), 'entries-count') extends ValueMetric
             {
                 public function calculate(Request $request): ValueResult
                 {
@@ -47,7 +47,7 @@ class MainDashboard extends Dashboard
                 }
             },
 
-            new class('Pending Approvals', 'pending-approvals') extends ValueMetric
+            new class(__('rag.dashboard.pending_approvals'), 'pending-approvals') extends ValueMetric
             {
                 public function calculate(Request $request): ValueResult
                 {
@@ -57,7 +57,7 @@ class MainDashboard extends Dashboard
                 }
             },
 
-            new class('Chunk Embeddings', 'chunk-embeddings') extends ValueMetric
+            new class(__('rag.dashboard.chunk_embeddings'), 'chunk-embeddings') extends ValueMetric
             {
                 public function calculate(Request $request): ValueResult
                 {

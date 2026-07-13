@@ -2,6 +2,7 @@
 
 namespace App\Martis\Filters;
 
+use App\Enums\KnowledgeStatus;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
@@ -18,11 +19,7 @@ class StatusFilter extends SelectFilter
      */
     public function options(Request $request): array
     {
-        return [
-            'Pending' => 'pending',
-            'Approved' => 'approved',
-            'Rejected' => 'rejected',
-        ];
+        return array_flip(KnowledgeStatus::options());
     }
 
     /**

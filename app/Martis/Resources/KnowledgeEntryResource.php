@@ -2,6 +2,8 @@
 
 namespace App\Martis\Resources;
 
+use App\Enums\KnowledgeCategory;
+use App\Enums\KnowledgeStatus;
 use App\Martis\Actions\ApproveEntries;
 use App\Martis\Actions\RejectEntries;
 use App\Martis\Filters\CategoryFilter;
@@ -9,6 +11,7 @@ use App\Martis\Filters\ProjectFilter;
 use App\Martis\Filters\StatusFilter;
 use App\Models\KnowledgeEntry;
 use Illuminate\Http\Request;
+use Illuminate\Validation\Rule;
 use Martis\Actions\Action;
 use Martis\Contracts\OverrideContract;
 use Martis\DrawerOverride;
@@ -82,12 +85,12 @@ class KnowledgeEntryResource extends Resource
     public function filters(Request $request): array
     {
         return [
-            ProjectFilter::make('Project')
+            ProjectFilter::make(__('rag.filters.project'))
                 ->searchable()
-                ->placeholder('Select…'),
-            CategoryFilter::make('Category'),
-            StatusFilter::make('Status'),
-            DateRangeFilter::make('Created Between')
+                ->placeholder(__('rag.filters.select')),
+            CategoryFilter::make(__('rag.filters.category')),
+            StatusFilter::make(__('rag.filters.status')),
+            DateRangeFilter::make(__('rag.filters.created_between'))
                 ->column('created_at'),
         ];
     }
@@ -102,36 +105,49 @@ class KnowledgeEntryResource extends Resource
     public function fields(Request $request): array
     {
         return [
-            BelongsTo::make('project', 'Project')
+            BelongsTo::make('project', __('rag.fields.project'))
                 ->searchable()
+                ->rules(['required', 'exists:projects,id'])
                 ->span(6),
-            Select::make('category')
-                ->options($this->categoryOptions())
+            Select::make('category', __('rag.fields.category'))
+                ->options(KnowledgeCategory::options())
+                ->default(KnowledgeCategory::Insight->value)
+                ->required()
+                ->rules(['sometimes', Rule::in(KnowledgeCategory::values())])
                 ->span(6),
-            Text::make('title')
+            Text::make('title', __('rag.fields.title'))
                 ->searchable()
                 ->required()
+                ->rules(['required', 'string', 'max:255'])
                 ->span(12),
-            Markdown::make('content')
+            Markdown::make('content', __('rag.fields.content'))
                 ->alwaysShow()
+                ->rules(['sometimes', 'string'])
                 ->span(12),
 
-            Select::make('status')
-                ->options($this->statusOptions())
-                ->default('pending')
+            Select::make('status', __('rag.fields.status'))
+                ->options(KnowledgeStatus::options())
+                ->default(KnowledgeStatus::Pending->value)
+                ->required()
+                ->rules(['sometimes', Rule::in(KnowledgeStatus::values())])
                 ->span(4),
-            Text::make('source')
-                ->help('manual, mcp, import, or cli.')
+            Text::make('source', __('rag.fields.source'))
+                ->help(__('rag.fields.source_help'))
+                ->rules(['sometimes', 'string', 'max:255'])
                 ->span(4),
-            Text::make('author')
+            Text::make('author', __('rag.fields.author'))
+                ->rules(['sometimes', 'string', 'max:255'])
                 ->span(4),
-            BelongsToMany::make('Tags', 'tags', TagResource::class)
+            BelongsToMany::make(__('rag.fields.tags'), 'tags', TagResource::class)
                 ->searchable()
+                ->rules(['sometimes', 'array'])
                 ->span(6),
-            BelongsToMany::make('Entities', 'entities', EntityResource::class)
+            BelongsToMany::make(__('rag.fields.entities'), 'entities', EntityResource::class)
                 ->searchable()
+                ->rules(['sometimes', 'array'])
                 ->span(6),
-            KeyValue::make('metadata')
+            KeyValue::make('metadata', __('rag.fields.metadata'))
+                ->rules(['sometimes', 'array'])
                 ->span(12),
         ];
     }
@@ -143,46 +159,18 @@ class KnowledgeEntryResource extends Resource
     {
         return [
             Id::make('id'),
-            BelongsTo::make('project', 'Project')
+            BelongsTo::make('project', __('rag.fields.project'))
                 ->sortable()
                 ->searchable(),
-            Text::make('title')
+            Text::make('title', __('rag.fields.title'))
                 ->sortable()
                 ->searchable(),
-            Select::make('category')
-                ->options($this->categoryOptions()),
-            Select::make('status')
-                ->options($this->statusOptions()),
-            DateTime::make('created_at')
+            Select::make('category', __('rag.fields.category'))
+                ->options(KnowledgeCategory::options()),
+            Select::make('status', __('rag.fields.status'))
+                ->options(KnowledgeStatus::options()),
+            DateTime::make('created_at', __('rag.fields.created_at'))
                 ->sortable(),
-        ];
-    }
-
-    /**
-     * @return array<string, string>
-     */
-    private function categoryOptions(): array
-    {
-        return [
-            'business-rule' => 'Business Rule',
-            'design-decision' => 'Design Decision',
-            'architecture' => 'Architecture',
-            'documentation' => 'Documentation',
-            'insight' => 'Insight',
-            'convention' => 'Convention',
-            'constraint' => 'Constraint',
-        ];
-    }
-
-    /**
-     * @return array<string, string>
-     */
-    private function statusOptions(): array
-    {
-        return [
-            'pending' => 'Pending',
-            'approved' => 'Approved',
-            'rejected' => 'Rejected',
         ];
     }
 }

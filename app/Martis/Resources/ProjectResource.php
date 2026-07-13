@@ -2,9 +2,11 @@
 
 namespace App\Martis\Resources;
 
+use App\Enums\ProjectLanguage;
 use App\Enums\ProjectTechnology;
 use App\Models\Project;
 use Illuminate\Http\Request;
+use Illuminate\Validation\Rule;
 use Martis\Contracts\OverrideContract;
 use Martis\DrawerOverride;
 use Martis\Fields\Id;
@@ -63,13 +65,10 @@ class ProjectResource extends Resource
                 ->displayUsingLabels()
                 ->help('Programming languages, frameworks and databases used in the project.'),
 
-            Select::make('language')
-                ->options([
-                    'en' => 'English',
-                    'pt' => 'Portuguese',
-                    'es' => 'Spanish',
-                ])
-                ->help('Affects FTS stemming.'),
+            Select::make('language', __('rag.fields.language'))
+                ->options(ProjectLanguage::options())
+                ->rules(['sometimes', Rule::in(ProjectLanguage::values())])
+                ->help(__('rag.fields.language_help')),
         ];
     }
 }

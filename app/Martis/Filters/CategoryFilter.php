@@ -2,6 +2,7 @@
 
 namespace App\Martis\Filters;
 
+use App\Enums\KnowledgeCategory;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
@@ -18,15 +19,7 @@ class CategoryFilter extends SelectFilter
      */
     public function options(Request $request): array
     {
-        return [
-            'Business Rule' => 'business-rule',
-            'Design Decision' => 'design-decision',
-            'Architecture' => 'architecture',
-            'Documentation' => 'documentation',
-            'Insight' => 'insight',
-            'Convention' => 'convention',
-            'Constraint' => 'constraint',
-        ];
+        return array_flip(KnowledgeCategory::options());
     }
 
     /**
