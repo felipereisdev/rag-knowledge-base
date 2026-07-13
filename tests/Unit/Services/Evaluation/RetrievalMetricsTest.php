@@ -56,6 +56,32 @@ it('does not count the same relevant title twice', function () {
         ->and($metrics['reciprocalRank'])->toBe(1.0);
 });
 
+it('matches and deduplicates canonically equivalent unicode titles', function () {
+    $metrics = (new RetrievalMetrics)->calculate(
+        rankedTitles: ["Cafe\u{0301}"],
+        expectedTitles: ['Café', "Cafe\u{0301}"],
+        k: 1,
+    );
+
+    expect($metrics['recall'])->toBe(1.0)
+        ->and($metrics['reciprocalRank'])->toBe(1.0)
+        ->and($metrics['ndcg'])->toBe(1.0);
+});
+
+it('discards blank expected titles before validation and metric calculation', function () {
+    $metrics = (new RetrievalMetrics)->calculate(
+        rankedTitles: ['Expected'],
+        expectedTitles: ['Expected', " \t ", "\u{2003}"],
+        k: 1,
+    );
+
+    expect(fn () => (new RetrievalMetrics)->calculate([], ['   ', "\u{2003}"], 5))
+        ->toThrow(InvalidArgumentException::class, 'expected_titles')
+        ->and($metrics['recall'])->toBe(1.0)
+        ->and($metrics['reciprocalRank'])->toBe(1.0)
+        ->and($metrics['ndcg'])->toBe(1.0);
+});
+
 it('rejects invalid metric inputs', function () {
     expect(fn () => (new RetrievalMetrics)->calculate([], [], 5))
         ->toThrow(InvalidArgumentException::class, 'expected_titles')
