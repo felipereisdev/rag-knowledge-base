@@ -7,6 +7,7 @@ use App\Services\Indexing\EntryIndexer;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
 use Laravel\Ai\Embeddings;
+use Laravel\Ai\Prompts\EmbeddingsPrompt;
 
 describe('EntryIndexer', function () {
     it('chunks and indexes an entry', function () {
@@ -32,6 +33,30 @@ describe('EntryIndexer', function () {
             ->and($chunks[1]->chunk_index)->toBe(1)
             ->and($chunks[0]->content)->toBe('First paragraph.')
             ->and($chunks[1]->content)->toBe('Second paragraph.');
+    });
+
+    it('uses the configured embedding provider', function () {
+        config([
+            'rag.embeddings.provider' => 'custom-embedder',
+            'ai.providers.custom-embedder' => config('ai.providers.local-embedder'),
+        ]);
+
+        $project = Project::create(['id' => 'r1', 'name' => 'R1', 'root_path' => '/p']);
+        $entry = KnowledgeEntry::create([
+            'project_id' => $project->id,
+            'title' => 'Test',
+            'content' => 'One paragraph.',
+        ]);
+
+        $fakeVector = array_fill(0, 768, 0.1);
+        Embeddings::fake([[$fakeVector]]);
+
+        (new EntryIndexer(new ParagraphChunker))->index($entry);
+
+        expect(DB::table('chunk_embeddings')->where('entry_id', $entry->id)->exists())->toBeTrue();
+        Embeddings::assertGenerated(
+            fn (EmbeddingsPrompt $prompt): bool => $prompt->provider->name() === 'custom-embedder',
+        );
     });
 
     it('deletes old chunks before re-indexing', function () {

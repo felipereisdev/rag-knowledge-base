@@ -31,13 +31,13 @@ class HybridSearcher
         ?int $ftsTopK = null,
         ?int $rrfK = null,
     ) {
-        $this->limit = $limit ?? (int) config('app.rag_search_limit', 10);
-        $this->minScore = $minScore ?? (float) config('app.rag_search_min_score', 0.30);
-        $this->expandGraph = $expandGraph ?? (bool) config('app.rag_search_graph_expand', true);
-        $this->graphWeight = $graphWeight ?? (float) config('app.rag_search_graph_weight', 0.3);
-        $this->vectorTopK = $vectorTopK ?? (int) config('app.rag_search_vector_top_k', 20);
-        $this->ftsTopK = $ftsTopK ?? (int) config('app.rag_search_fts_top_k', 20);
-        $this->rrfK = $rrfK ?? (int) config('app.rag_search_rrf_k', 60);
+        $this->limit = $limit ?? (int) config('rag.search.limit', 10);
+        $this->minScore = $minScore ?? (float) config('rag.search.min_score', 0.30);
+        $this->expandGraph = $expandGraph ?? (bool) config('rag.search.graph_expand', true);
+        $this->graphWeight = $graphWeight ?? (float) config('rag.search.graph_weight', 0.3);
+        $this->vectorTopK = $vectorTopK ?? (int) config('rag.search.vector_top_k', 20);
+        $this->ftsTopK = $ftsTopK ?? (int) config('rag.search.fts_top_k', 20);
+        $this->rrfK = $rrfK ?? (int) config('rag.search.rrf_k', 60);
     }
 
     /**
@@ -76,7 +76,7 @@ class HybridSearcher
      */
     private function embedQuery(string $query): array
     {
-        $response = Embeddings::for([$query])->generate('local-embedder');
+        $response = Embeddings::for([$query])->generate((string) config('rag.embeddings.provider', 'local-embedder'));
 
         return $response->embeddings[0];
     }

@@ -39,7 +39,7 @@ class EntryIndexer
         $texts = array_map(fn ($c) => $c->content, $chunks);
 
         try {
-            $response = Embeddings::for($texts)->generate(self::PROVIDER);
+            $response = Embeddings::for($texts)->generate((string) config('rag.embeddings.provider', self::PROVIDER));
             $vectors = $response->embeddings;
         } catch (Throwable $e) {
             Log::error('EntryIndexer: embedding generation failed', [

@@ -8,6 +8,7 @@ use App\Services\Search\HybridSearcher;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
 use Laravel\Ai\Embeddings;
+use Laravel\Ai\Prompts\EmbeddingsPrompt;
 
 describe('HybridSearcher', function () {
     beforeEach(function () {
@@ -42,6 +43,34 @@ describe('HybridSearcher', function () {
         expect($results)->not->toBeEmpty()
             ->and($results[0]->entryId)->toBe($entry->id)
             ->and($results[0]->matchedBy)->toContain('vector');
+    });
+
+    it('uses the configured embedding provider', function () {
+        config([
+            'rag.embeddings.provider' => 'custom-embedder',
+            'ai.providers.custom-embedder' => config('ai.providers.local-embedder'),
+        ]);
+
+        $entry = KnowledgeEntry::create([
+            'project_id' => $this->project->id,
+            'title' => 'Configured provider',
+            'content' => 'Search uses the configured embedding provider.',
+            'status' => 'approved',
+        ]);
+        DB::table('chunk_embeddings')->insert([
+            'entry_id' => $entry->id,
+            'project_id' => $this->project->id,
+            'chunk_index' => 0,
+            'content' => 'Search uses the configured embedding provider.',
+            'embedding' => '['.implode(',', $this->fakeVector).']',
+        ]);
+
+        $results = (new HybridSearcher)->search('configured provider', $this->project->id);
+
+        expect($results)->not->toBeEmpty();
+        Embeddings::assertGenerated(
+            fn (EmbeddingsPrompt $prompt): bool => $prompt->provider->name() === 'custom-embedder',
+        );
     });
 
     it('finds entries by keyword match', function () {

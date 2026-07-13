@@ -7,6 +7,8 @@ use Laravel\Ai\Embeddings;
 
 class CondenseDedup
 {
+    private const string PROVIDER = 'local-embedder';
+
     public function isDuplicate(string $projectId, string $title, string $content, float $threshold): bool
     {
         $vector = $this->embed($title."\n".$content);
@@ -39,6 +41,6 @@ class CondenseDedup
     /** Seam for testing; generates the query embedding. */
     protected function embed(string $text): array
     {
-        return Embeddings::for([$text])->generate('local-embedder')->embeddings[0];
+        return Embeddings::for([$text])->generate((string) config('rag.embeddings.provider', self::PROVIDER))->embeddings[0];
     }
 }
