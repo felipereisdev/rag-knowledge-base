@@ -302,6 +302,20 @@ final class HybridImportanceClassifier
      * rules version is part of the cache identity, so they cannot disagree with
      * the stored ones) — which is what keeps a hard veto binding even here.
      *
+     * The FRESH evaluation's rules are what the result carries, not the stored
+     * ones. The two halves of a result must come from one source: the verdict is
+     * already derived from `$evaluation->vetoed`, and `AutoApprovalPolicy` reads
+     * `triggeredRules` to decide whether an entry may be published to search with
+     * nobody reading it. They agree by construction as long as `VERSION` is bumped
+     * on every behavioural rule change — but that discipline is documented, not
+     * enforceable, and the failure it permits is the precise one this feature must
+     * never produce: a developer who widens a PENALTY without bumping `VERSION`
+     * leaves cached assessments whose stored `rules` carry no penalty, and every
+     * entry hitting that cache would be auto-approved while the current rules would
+     * have disqualified it. Re-evaluating is equivalent when the discipline holds
+     * (same normalized candidate, same `candidate_hash`) and strictly safer when it
+     * does not.
+     *
      * The stored row is deliberately NOT re-stamped with the re-derived verdict.
      * An assessment is shared by every entry with the same cache identity, and
      * the threshold is not part of that identity, so re-stamping would rewrite
@@ -325,7 +339,7 @@ final class HybridImportanceClassifier
             finalScore: $finalScore,
             verdict: $verdict,
             reasons: $assessment->reasons,
-            triggeredRules: $assessment->rules,
+            triggeredRules: $evaluation->triggeredRules,
             cacheHit: true,
             model: $assessment->model,
             promptVersion: $assessment->prompt_version,

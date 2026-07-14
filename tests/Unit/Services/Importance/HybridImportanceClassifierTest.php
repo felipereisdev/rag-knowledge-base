@@ -5,6 +5,7 @@ use App\Enums\ImportanceVerdict;
 use App\Models\ImportanceAssessment;
 use App\Models\ImportanceClassifierSetting;
 use App\Models\Project;
+use App\Services\Importance\AutoApprovalPolicy;
 use App\Services\Importance\DeterministicImportanceRules;
 use App\Services\Importance\HybridImportanceClassifier;
 use App\Services\Importance\ImportanceAssessmentInProgressException;
@@ -250,6 +251,66 @@ it('recalculates the verdict from the cached assessment when only the threshold 
         // `metadata.importance`, not here.
         ->and(ImportanceAssessment::query()->sole()->verdict)->toBe(ImportanceVerdict::NotImportant);
 });
+
+/**
+ * Content whose CURRENT rules are `normative_restriction` (+6),
+ * `causal_rationale` (+5) and `speculative_language` (-8) — verified directly
+ * against `DeterministicImportanceRules::evaluate()`, not assumed. The penalty is
+ * the point: it is what makes the candidate ineligible for auto-approval.
+ */
+function penalisedCandidate(): ImportanceCandidate
+{
+    return new ImportanceCandidate(
+        title: 'Signing key rotation',
+        content: 'We must probably rotate the SIGNING_KEY every 30 days, because the token cache maybe keeps stale entries around after a deploy.',
+        category: 'insight',
+        source: 'condense',
+    );
+}
+
+it('answers a cache hit with the FRESHLY evaluated rules, not the ones the row happens to store', function () {
+    setImportanceThreshold(70);
+
+    $candidate = penalisedCandidate();
+    $normalized = (new ImportanceCandidateNormalizer)->normalize($candidate);
+
+    // A stored assessment written by an EARLIER version of the rules that did not
+    // yet carry the penalty — the exact residue a developer leaves behind by
+    // widening a penalty rule without bumping `DeterministicImportanceRules::VERSION`.
+    // The row is keyed on the identity the classifier will look it up by, so it is a
+    // genuine cache hit; only its `rules` column is stale.
+    ImportanceAssessment::create([
+        'project_id' => 'classifier',
+        'candidate_hash' => $normalized->hash(),
+        'normalized_candidate' => $normalized->data(),
+        'model' => 'claude-test',
+        'prompt_version' => 'v1',
+        'rules_version' => DeterministicImportanceRules::VERSION,
+        'status' => ImportanceAssessmentStatus::Succeeded,
+        'semantic_score' => 97,
+        'final_score' => 95,
+        'verdict' => ImportanceVerdict::Important,
+        'reasons' => [],
+        'rules' => [
+            ['id' => 'normative_restriction', 'adjustment' => 6, 'reason' => 'States a rule or restriction to follow.'],
+            ['id' => 'causal_rationale', 'adjustment' => 5, 'reason' => 'Explains why, not only what.'],
+        ],
+    ]);
+
+    $judge = new RecordingJudge(semanticAssessment());
+    $result = importanceClassifier($judge)->classify('classifier', $candidate);
+
+    $ruleIds = array_column($result->triggeredRules, 'id');
+
+    expect($judge->calls)->toBe(0)
+        ->and($result->cacheHit)->toBeTrue()
+        ->and($ruleIds)->toContain('speculative_language')
+        // The threshold is 0 — the most permissive dial an administrator can set —
+        // so nothing but the rules can refuse this. With the stored rules it would
+        // be auto-approved into search with no human reading it; with the fresh ones
+        // the penalty disqualifies it.
+        ->and((new AutoApprovalPolicy)->isEligible($result, autoApproveThreshold: 0))->toBeFalse();
+})->note('A cached result must not carry one half of a decision from the row and the other half from a fresh evaluation: the policy reads the rules, and a stale rules column would auto-approve what the current rules penalise.');
 
 it('misses the cache when the candidate changes', function () {
     setImportanceThreshold(70);

@@ -493,7 +493,10 @@ it('keeps real knowledge reachable by auto-approval', function () {
         }
     }
 
-    expect($eligible)->toBeGreaterThanOrEqual(20,
+    // 25, not 20, against a live baseline of 27: two fixtures of slack, not seven.
+    // At 20 a rules change could knock six of the 27 out — a 22% loss of
+    // auto-approval recall — and this assertion would still pass in silence.
+    expect($eligible)->toBeGreaterThanOrEqual(25,
         "Only {$eligible} of the reviewed must-keep fixtures still satisfy the deterministic half of auto-approval eligibility. Auto-approval has stopped recognising real knowledge.",
     );
 })->note('Baseline when written: 27 of 28. If this collapses, auto-approval never fires and the feature is dead weight.');

@@ -694,7 +694,12 @@ it('auto-approves an eligible entry in enforce mode', function () {
         ->and($importance['would_approve'])->toBeTrue()
         ->and($importance['would_reject'])->toBeFalse()
         ->and($importance['verdict'])->toBe('important')
-        ->and($importance['final_score'])->toBe(99);
+        ->and($importance['final_score'])->toBe(99)
+        // The dial the decision was made against, recorded WITH the decision. It is
+        // the audit record of an approval no human read, and the readiness report
+        // cannot tell evidence about the current dial from evidence about a dial
+        // nobody is running any more without it.
+        ->and($importance['auto_approve_threshold'])->toBe(90);
 
     // "Approved" must be searchable, not just a status label: prove the
     // observer's transition-to-approved path actually fires the index job,
@@ -743,8 +748,13 @@ it('leaves an important entry that only trips a penalty rule to a human in enfor
 
     $entry->refresh();
 
-    expect($entry->metadata['importance']['rules'])->toBe([
-        ['id' => 'insufficient_substance', 'reason' => 'Too little substance to be useful in a later session.', 'adjustment' => -10],
+    // `toEqualCanonicalizing`, not `toBe`: `toBe` is assertSame, which compares the
+    // KEY ORDER of the stored rule too. The rules are constructed as id/adjustment/
+    // reason and come back as id/reason/adjustment because Postgres `jsonb`
+    // normalizes object keys by (length, bytes) — so a `toBe` here silently pins a
+    // storage detail of the database rather than the rule the job recorded.
+    expect($entry->metadata['importance']['rules'])->toEqualCanonicalizing([
+        ['id' => 'insufficient_substance', 'adjustment' => -10, 'reason' => 'Too little substance to be useful in a later session.'],
     ])
         ->and($entry->status)->toBe(KnowledgeStatus::Pending->value)
         ->and($entry->metadata['importance']['auto_approved'])->toBeFalse()
@@ -752,7 +762,7 @@ it('leaves an important entry that only trips a penalty rule to a human in enfor
 })->note('The penalty branch: a rule-tripping candidate is ineligible before the positive-signal check ever runs.');
 
 it('records would_approve in shadow but never approves', function () {
-    settings(mode: 'shadow', threshold: 70, autoApprove: 90);
+    settings(mode: 'shadow', threshold: 70, autoApprove: 95);
 
     $entry = classifyingEntry(content: ELIGIBLE_CONTENT);
 
@@ -764,8 +774,32 @@ it('records would_approve in shadow but never approves', function () {
 
     expect($entry->status)->toBe(KnowledgeStatus::Pending->value)
         ->and($entry->metadata['importance']['would_approve'])->toBeTrue()
-        ->and($entry->metadata['importance']['auto_approved'])->toBeFalse();
+        ->and($entry->metadata['importance']['auto_approved'])->toBeFalse()
+        // 95, not the default 90: this is the shadow evidence the readiness report
+        // counts, and it is only evidence about the dial it was computed against.
+        ->and($entry->metadata['importance']['auto_approve_threshold'])->toBe(95);
 })->note('Shadow measures. It never acts.');
+
+it('records a null auto-approve threshold when auto-approval is switched off', function () {
+    settings(mode: 'shadow', threshold: 70, autoApprove: null);
+
+    $entry = classifyingEntry(content: ELIGIBLE_CONTENT);
+
+    fakeJudge(semanticScore: 88);
+
+    runClassification($entry);
+
+    $importance = $entry->refresh()->metadata['importance'];
+
+    // `would_approve: false` here means "auto-approval was OFF", not "evaluated and
+    // refused" — and the difference is only legible because the dial is recorded
+    // next to it. Without the snapshot, weeks of shadow with auto-approval disabled
+    // read to the readiness report as a spotless record for whatever threshold the
+    // operator sets afterwards.
+    expect($importance['would_approve'])->toBeFalse()
+        ->and($importance)->toHaveKey('auto_approve_threshold')
+        ->and($importance['auto_approve_threshold'])->toBeNull();
+})->note('A false stamped under no dial is evidence about nothing. Recording the dial is what makes that readable.');
 
 it('never auto-approves when the threshold is null', function () {
     settings(mode: 'enforce', threshold: 70, autoApprove: null);

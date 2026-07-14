@@ -71,10 +71,19 @@ it('refuses a high score carrying any penalty, even alongside a positive signal'
 it('refuses a vetoed evaluation', function () {
     $policy = new AutoApprovalPolicy;
 
-    $vetoed = autoApprovalResult(0, [['id' => 'empty_content', 'adjustment' => -100, 'reason' => 'Empty.']], ImportanceVerdict::NotImportant);
+    // The score is deliberately ABOVE the threshold, and the verdict deliberately
+    // `important`, so the two earlier branches of `isEligible()` both wave this
+    // result through and the veto rule is the only thing left that can refuse it.
+    // A vetoed evaluation really scores 0, which is why the previous version of
+    // this test (finalScore: 0) never reached the loop at all: it was refused by
+    // the threshold comparison and asserted nothing whatsoever about the veto.
+    $vetoed = autoApprovalResult(95, [
+        positiveRule(),
+        ['id' => 'agent_operation_only', 'adjustment' => -100, 'reason' => 'Reports an agent operation.'],
+    ]);
 
     expect($policy->isEligible($vetoed, 90))->toBeFalse();
-});
+})->note('A veto is just a very large penalty, and it must be refused as one — not incidentally by the score.');
 
 it('refuses a failed classification with no score', function () {
     $policy = new AutoApprovalPolicy;

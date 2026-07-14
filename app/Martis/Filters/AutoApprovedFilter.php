@@ -2,6 +2,7 @@
 
 namespace App\Martis\Filters;
 
+use App\Services\Importance\ImportanceStatistics;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
@@ -47,7 +48,14 @@ class AutoApprovedFilter extends SelectFilter
      * `metadata.importance.auto_approved` is only ever written by
      * `ClassifyKnowledgeEntryJob::decide()`; an entry never
      * classified (or classified before this key existed) has no such key, and
-     * `coalesce(..., false)` treats that the same as "reviewed by a human".
+     * `coalesce(..., 'false')` treats that the same as "reviewed by a human".
+     *
+     * Compared as TEXT, never `::boolean` — the same discipline as
+     * {@see ImportanceStatistics::flagIs()}, and for the
+     * same reason: `->>` renders a JSON boolean as 'true'/'false', while a cast
+     * would throw on any row whose metadata was hand-edited to a non-boolean and
+     * take the whole index screen down with it. One row of bad metadata must not be
+     * able to break the admin's view of every other row.
      *
      * @param  Builder<Model>  $query
      * @return Builder<Model>
@@ -55,8 +63,8 @@ class AutoApprovedFilter extends SelectFilter
     public function apply(Request $request, Builder $query, mixed $value): Builder
     {
         return $query->whereRaw(
-            "coalesce((metadata->'importance'->>'auto_approved')::boolean, false) = ?",
-            [(bool) $value],
+            "coalesce(metadata->'importance'->>'auto_approved', 'false') = ?",
+            [(bool) $value ? 'true' : 'false'],
         );
     }
 }

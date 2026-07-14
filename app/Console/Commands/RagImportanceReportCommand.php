@@ -124,10 +124,18 @@ class RagImportanceReportCommand extends Command
             ? $review['approved_would_reject'] / $review['approved']
             : 0.0;
 
+        // The auto-approve dial is printed, not only the reject threshold: this
+        // report is the document an operator reads to decide whether to enforce,
+        // and two of its seven gates are about the dial. It also names the value
+        // the false-auto-approval floor counts evidence against, so "0 of 0" can
+        // be read for what it is.
         $this->line(__('importance.report.heading', [
             'project' => $projectId,
             'mode' => $setting->mode->value,
             'threshold' => $setting->threshold,
+            'auto_approve' => $autoApprovalEnabled
+                ? (string) $setting->auto_approve_threshold
+                : __('importance.report.auto_approve_off'),
         ]));
         $this->newLine();
 
@@ -149,9 +157,15 @@ class RagImportanceReportCommand extends Command
             'count' => $review['rejected_would_keep'],
             'rejected' => $review['rejected'],
         ]));
+        // Its own wording, not the `rejected_would_keep` line's: the two sit next to
+        // each other but count different populations. This one's denominator is only
+        // the rejections whose auto-approval eligibility was actually computed
+        // against the dial in force, so an operator who reads "15 of 15" above and
+        // "0 of 0" here is told why the population shrank instead of being left to
+        // guess.
         $this->line(__('importance.report.rejected_would_approve', [
             'count' => $review['rejected_would_approve'],
-            'rejected' => $review['rejected_classified_for_approval'],
+            'classified' => $review['rejected_classified_for_approval'],
         ]));
         // A benefit measure, not a gate: the reviews auto-approval would have
         // saved. Approving fewer entries than it could is never unsafe, so nothing
@@ -188,7 +202,9 @@ class RagImportanceReportCommand extends Command
             ],
             'must_keep' => [
                 'requirement' => '= '.self::MAX_MUST_KEEP_FALSE_REJECTS,
-                'actual' => $mustKeep === null ? '—' : (string) $mustKeep['false_rejects'],
+                'actual' => $mustKeep === null
+                    ? __('importance.report.corpus_unavailable')
+                    : (string) $mustKeep['false_rejects'],
                 // An unreadable corpus is not a pass: the gate cannot be shown to hold.
                 'passes' => $mustKeep !== null
                     && $mustKeep['false_rejects'] <= self::MAX_MUST_KEEP_FALSE_REJECTS,
@@ -218,10 +234,15 @@ class RagImportanceReportCommand extends Command
             //
             // The floor is measured against `rejected_classified_for_approval`,
             // not the raw `rejected` count: a shadow rejection classified before
-            // `would_approve` existed carries no such key, so it is not evidence
-            // that its false-approval risk was ever evaluated. Counting it here
-            // would let a base full of such legacy rows clear the floor while
-            // contributing nothing the gate actually reasoned about.
+            // `would_approve` existed carries no such key, and one classified
+            // under a different `auto_approve_threshold` (or while auto-approval
+            // was off entirely) was evaluated against a dial that is not the one
+            // being certified. Neither is evidence that THIS dial's false-approval
+            // risk was ever computed. Counting them would let a base full of such
+            // rows clear the floor while contributing nothing the gate actually
+            // reasoned about — which is why the gate FAILS after the dial moves,
+            // until fresh shadow evidence exists at the value now in force. That
+            // is the truthful answer, not an inconvenience.
             'false_auto_approvals' => [
                 'requirement' => '= '.self::MAX_FALSE_AUTO_APPROVALS
                     .' ('.__('importance.report.min_rejected', ['count' => self::MIN_REJECTED_SAMPLE]).')',

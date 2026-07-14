@@ -21,6 +21,12 @@ beforeEach(function () {
 
 /**
  * One entry as the classifier job would have left it.
+ *
+ * `$autoApproveThreshold` is the dial the eligibility decision was recorded
+ * against, exactly as `ClassifyKnowledgeEntryJob::decide()` snapshots it. It
+ * defaults to 90 — the production default of `ImportanceClassifierSetting` — and
+ * `null` models an entry classified while auto-approval was switched OFF, which
+ * carries the key with a null value rather than no key at all.
  */
 function reportEntry(
     string $status,
@@ -29,6 +35,7 @@ function reportEntry(
     string $mode = 'shadow',
     string $projectId = 'report-project',
     ?bool $wouldApprove = null,
+    ?int $autoApproveThreshold = 90,
 ): KnowledgeEntry {
     $importance = [
         'mode' => $mode,
@@ -43,9 +50,10 @@ function reportEntry(
     // need the false-auto-approval floor to see this entry (i.e. need it to
     // count as evidence auto-approval eligibility was actually computed) must
     // pass `wouldApprove` explicitly — mirroring ClassifyKnowledgeEntryJob,
-    // which writes the key unconditionally once it exists.
+    // which writes both keys, together and unconditionally, once they exist.
     if ($wouldApprove !== null) {
         $importance['would_approve'] = $wouldApprove;
+        $importance['auto_approve_threshold'] = $autoApproveThreshold;
     }
 
     return KnowledgeEntry::create([
@@ -89,9 +97,12 @@ function readySample(): void
  * `mode => shadow` and a non-null `verdict` are both deliberate:
  * ImportanceStatistics::shadowClassified() filters on exactly those two things,
  * so an entry missing either is invisible to the gate and the test would pass
- * in a vacuum.
+ * in a vacuum. `auto_approve_threshold` is the third: the floor counts only the
+ * rejections whose eligibility was computed against the dial CURRENTLY in force,
+ * so an entry recorded at another dial is evidence about that other dial, not
+ * this one.
  */
-function rejectedShadowEntries(int $count, bool $wouldApprove): void
+function rejectedShadowEntries(int $count, bool $wouldApprove, ?int $autoApproveThreshold = 90): void
 {
     for ($i = 0; $i < $count; $i++) {
         KnowledgeEntry::create([
@@ -106,12 +117,31 @@ function rejectedShadowEntries(int $count, bool $wouldApprove): void
                     'verdict' => $wouldApprove ? 'important' : 'not_important',
                     'would_reject' => ! $wouldApprove,
                     'would_approve' => $wouldApprove,
+                    'auto_approve_threshold' => $autoApproveThreshold,
                     'auto_approved' => false,
                     'final_score' => $wouldApprove ? 95 : 15,
                     'classified_at' => now()->toIso8601String(),
                 ],
             ],
         ]);
+    }
+}
+
+/**
+ * Everything except the rejected sample: 45 human-approved entries and 25
+ * unreviewed would-reject ones, which hold the queue-reduction gate above 30%
+ * without adding to the rejected population. Every gate but the two auto-approval
+ * ones is green, so whatever a test then adds as rejections is the ONLY thing
+ * gate 6 can fail on.
+ */
+function readySampleWithoutRejections(): void
+{
+    for ($i = 0; $i < 45; $i++) {
+        reportEntry('approved', wouldReject: false, score: 85);
+    }
+
+    for ($i = 0; $i < 25; $i++) {
+        reportEntry('pending', wouldReject: true, score: 12);
     }
 }
 
@@ -406,16 +436,8 @@ it('fails readiness when the classifier would have auto-approved something a hum
 })->note('Zero tolerance: one silently-approved piece of junk is the failure this feature must not produce.');
 
 it('fails readiness when too few entries were human-rejected to validate auto-approval', function () {
-    // A sample that clears every OTHER gate on nine rejections: 45 approved, 9
-    // rejected, and 25 unreviewed entries the classifier would reject (which lift
-    // the projected reduction without adding to the rejected population).
-    for ($i = 0; $i < 45; $i++) {
-        reportEntry('approved', wouldReject: false, score: 85);
-    }
-
-    for ($i = 0; $i < 25; $i++) {
-        reportEntry('pending', wouldReject: true, score: 12);
-    }
+    // A sample that clears every OTHER gate on nine rejections.
+    readySampleWithoutRejections();
 
     rejectedShadowEntries(count: 9, wouldApprove: false);
 
@@ -432,18 +454,10 @@ it('fails readiness when human-rejected entries predate would_approve and cannot
     // simply absent — not false, absent. `->>` on a missing JSON key yields
     // SQL NULL, matching neither 'true' nor 'false'.
     //
-    // A sample that clears every OTHER gate: 45 approved, 25 unreviewed
-    // would-reject entries (to hold the queue-reduction gate above 30% without
-    // adding to the rejected population), and 15 legacy shadow rejections —
+    // A sample that clears every OTHER gate, plus 15 legacy shadow rejections —
     // comfortably over the OLD `rejected >= 10` floor, but zero of them are
     // evidence the false-approval risk was ever computed.
-    for ($i = 0; $i < 45; $i++) {
-        reportEntry('approved', wouldReject: false, score: 85);
-    }
-
-    for ($i = 0; $i < 25; $i++) {
-        reportEntry('pending', wouldReject: true, score: 12);
-    }
+    readySampleWithoutRejections();
 
     for ($i = 0; $i < 15; $i++) {
         reportEntry('rejected', wouldReject: true, score: 15); // no wouldApprove: legacy shape
@@ -454,6 +468,100 @@ it('fails readiness when human-rejected entries predate would_approve and cannot
         ->expectsOutputToContain('NOT READY — 1 of 7 rollout gates fail')
         ->assertExitCode(1);
 })->note('The vacuous pass the floor exists to prevent, wearing a denominator of 15: `rejected` alone would have cleared the old floor on entries that carry no would_approve evidence at all.');
+
+it('fails readiness when the rejected sample was classified while auto-approval was disabled', function () {
+    // The cautious operator's most natural sequence, and the vacuous pass it used
+    // to buy:
+    //
+    //   1. set `auto_approve_threshold = null` — "let's not auto-approve while we
+    //      calibrate" — and run shadow for weeks;
+    //   2. `isEligible()` returns false for a null dial, so EVERY shadow entry is
+    //      stamped `would_approve: false` — and the key is present, so every one of
+    //      them used to count toward the floor;
+    //   3. set the dial to 90 and re-run the report. Gate 6 activates, reads a
+    //      spotless "0 of 15", and certifies auto-approval — against a base in which
+    //      not one entry ever had its eligibility evaluated at 90.
+    //
+    // The dial each entry was judged against is recorded now, so those 15 are
+    // evidence about `null` and about nothing else. The floor is not met, and gate 6
+    // says so.
+    readySampleWithoutRejections();
+
+    rejectedShadowEntries(count: 15, wouldApprove: false, autoApproveThreshold: null);
+
+    ImportanceClassifierSetting::query()->findOrFail(1)->update(['auto_approve_threshold' => 90]);
+
+    $this->artisan('rag:importance-report', ['--project' => 'report-project'])
+        ->expectsOutputToContain('auto-approve 90')
+        ->expectsOutputToContain('Human-rejected entries the classifier would have auto-approved: 0 of 0')
+        ->expectsOutputToContain('NOT READY — 1 of 7 rollout gates fail')
+        ->assertExitCode(1);
+})->note('Shadow evidence gathered with auto-approval OFF certifies nothing about a dial that was never applied to it.');
+
+it('fails readiness when the rejected sample was classified at a different auto-approve threshold', function () {
+    // The same hole, opened by the other natural operator act: reading the score
+    // distribution and moving the dial. Fifteen clean rejections were evaluated at
+    // 95; the operator now proposes 90. Every one of those entries was refused by a
+    // stricter dial than the one being certified, so none of them says what a 90
+    // would have done with it — and the gate refuses to pretend otherwise until
+    // fresh shadow evidence exists at 90.
+    readySampleWithoutRejections();
+
+    rejectedShadowEntries(count: 15, wouldApprove: false, autoApproveThreshold: 95);
+
+    ImportanceClassifierSetting::query()->findOrFail(1)->update(['auto_approve_threshold' => 90]);
+
+    $this->artisan('rag:importance-report', ['--project' => 'report-project'])
+        ->expectsOutputToContain('Human-rejected entries the classifier would have auto-approved: 0 of 0')
+        ->expectsOutputToContain('NOT READY — 1 of 7 rollout gates fail')
+        ->assertExitCode(1);
+})->note('Moving the dial invalidates the evidence gathered at the old one. That is the truthful answer, not an inconvenience.');
+
+it('counts the rejected sample recorded at the dial actually in force', function () {
+    // The control for the two tests above: the same 15 rejections, recorded at the
+    // dial the operator is certifying. NOW they are evidence, the floor is met, and
+    // the gate passes — so the two NOT READYs above are the filter doing its work,
+    // not the sample being too small or some other gate failing.
+    readySampleWithoutRejections();
+
+    rejectedShadowEntries(count: 15, wouldApprove: false, autoApproveThreshold: 90);
+
+    ImportanceClassifierSetting::query()->findOrFail(1)->update(['auto_approve_threshold' => 90]);
+
+    $this->artisan('rag:importance-report', ['--project' => 'report-project'])
+        ->expectsOutputToContain('Human-rejected entries the classifier would have auto-approved: 0 of 15')
+        ->expectsOutputToContain('READY')
+        ->assertExitCode(0);
+});
+
+it('fails readiness on a false auto-approval recorded at the dial in force', function () {
+    // And the other half of the control: with the population correct, one entry a
+    // human threw away that the classifier would have approved at THIS dial still
+    // fails the gate. The narrowed floor cannot hide a real false auto-approval.
+    readySampleWithoutRejections();
+
+    rejectedShadowEntries(count: 14, wouldApprove: false, autoApproveThreshold: 90);
+    rejectedShadowEntries(count: 1, wouldApprove: true, autoApproveThreshold: 90);
+
+    ImportanceClassifierSetting::query()->findOrFail(1)->update(['auto_approve_threshold' => 90]);
+
+    $this->artisan('rag:importance-report', ['--project' => 'report-project'])
+        ->expectsOutputToContain('Human-rejected entries the classifier would have auto-approved: 1 of 15')
+        ->expectsOutputToContain('NOT READY — 1 of 7 rollout gates fail')
+        ->assertExitCode(1);
+});
+
+it('prints the auto-approve dial the two approve-path gates depend on', function () {
+    // The report is the document an operator reads to decide whether to enforce.
+    // Half of what it gates is governed by a dial it used to omit entirely.
+    readySample();
+
+    ImportanceClassifierSetting::query()->findOrFail(1)->update(['auto_approve_threshold' => null]);
+
+    $this->artisan('rag:importance-report', ['--project' => 'report-project'])
+        ->expectsOutputToContain('auto-approve off')
+        ->assertExitCode(0);
+});
 
 it('passes the auto-approval gates with a clean rejected sample', function () {
     readySample();

@@ -6,6 +6,7 @@ use App\Enums\ImportanceAssessmentStatus;
 use App\Enums\ImportanceClassifierMode;
 use App\Enums\KnowledgeStatus;
 use App\Models\ImportanceAssessment;
+use App\Models\ImportanceClassifierSetting;
 use App\Models\KnowledgeEntry;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\DB;
@@ -173,6 +174,7 @@ final class ImportanceStatistics
     public function shadowReview(string $projectId): array
     {
         $reviewedStatuses = [KnowledgeStatus::Approved->value, KnowledgeStatus::Rejected->value];
+        $autoApproveThreshold = ImportanceClassifierSetting::current()->auto_approve_threshold;
 
         return [
             'classified' => $this->shadowClassified($projectId)->count(),
@@ -209,26 +211,53 @@ final class ImportanceStatistics
             // auto-approval count, and the gate built on it tolerates none:
             // rejecting wrongly costs one click, approving wrongly poisons the
             // knowledge base silently.
+            //
+            // Deliberately NOT narrowed to the current dial, unlike the floor
+            // population below. An entry stamped `would_approve: true` under ANY
+            // dial is a recorded intent to publish something a human threw away,
+            // and the only errors that asymmetry can produce are FAILures of a gate
+            // that would otherwise pass — the safe direction. Narrowing it could
+            // hide one.
             'rejected_would_approve' => $this->shadowClassified($projectId)
                 ->where('status', KnowledgeStatus::Rejected->value)
                 ->where($this->flagIs('would_approve', true))
                 ->count(),
             // The population the false-auto-approval floor is actually measured
-            // against: rejections whose eligibility was actually computed, i.e.
-            // those carrying a `would_approve` key at all (true OR false).
-            // `would_approve` is written unconditionally by
-            // `ClassifyKnowledgeEntryJob::decide()`, but only since Task 2 — a
-            // shadow rejection classified before that has `would_reject` and no
-            // `would_approve` key whatsoever, and `->>` on a missing key yields
-            // SQL NULL, matching neither `'true'` nor `'false'`. Counting such an
-            // entry in `rejected` (as the floor used to) lets a base full of
-            // legacy shadow rejections clear the anti-vacuity floor while
-            // contributing zero entries whose false-approval risk was ever
-            // evaluated — the exact vacuous pass the floor exists to prevent.
-            'rejected_classified_for_approval' => $this->shadowClassified($projectId)
-                ->where('status', KnowledgeStatus::Rejected->value)
-                ->whereRaw("metadata->'importance'->>'would_approve' IS NOT NULL")
-                ->count(),
+            // against: rejections whose eligibility was computed AT THE DIAL NOW
+            // IN FORCE. Two things must hold, and neither is redundant.
+            //
+            //  - The entry carries a `would_approve` key at all (true OR false).
+            //    It is written unconditionally by `ClassifyKnowledgeEntryJob::decide()`,
+            //    but only since Task 2 — a shadow rejection classified before that
+            //    has `would_reject` and no `would_approve` key whatsoever, and `->>`
+            //    on a missing key yields SQL NULL, matching neither `'true'` nor
+            //    `'false'`.
+            //  - The entry recorded the SAME `auto_approve_threshold` the
+            //    administrator has configured today. `would_approve` is computed
+            //    against whatever the dial was at classify time, so a `false` stamped
+            //    while auto-approval was OFF (`null`), or under a different number,
+            //    says nothing whatsoever about the dial being certified. This is the
+            //    cautious operator's most natural sequence — calibrate for weeks with
+            //    auto-approval disabled, then set the dial and read the report — and
+            //    without this filter every one of those rejections counts as clean
+            //    evidence for a threshold not one of them was ever evaluated against.
+            //
+            // Counting either kind lets a base clear the anti-vacuity floor while
+            // contributing zero entries whose false-approval risk was ever evaluated
+            // at the dial in force — the exact vacuous pass the floor exists to
+            // prevent. When auto-approval is off there is no dial to be evidence
+            // about, so the population is empty by definition; gate 6 is skipped in
+            // that case anyway.
+            //
+            // Compared as text, never cast: the same discipline as `flagIs()` —
+            // hand-edited metadata must not be able to take `rag_status` down.
+            'rejected_classified_for_approval' => $autoApproveThreshold === null
+                ? 0
+                : $this->shadowClassified($projectId)
+                    ->where('status', KnowledgeStatus::Rejected->value)
+                    ->whereRaw("metadata->'importance'->>'would_approve' IS NOT NULL")
+                    ->whereRaw("metadata->'importance'->>'auto_approve_threshold' = ?", [(string) $autoApproveThreshold])
+                    ->count(),
         ];
     }
 

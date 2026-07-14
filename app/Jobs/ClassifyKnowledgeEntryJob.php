@@ -253,6 +253,15 @@ class ClassifyKnowledgeEntryJob implements ShouldQueue
      * records both (`would_reject`, `would_approve`) but never acts: its status
      * is always `pending`. Eligibility itself is `AutoApprovalPolicy`'s call, not
      * this method's — it never re-derives that decision.
+     *
+     * The dial the eligibility decision was made against (`auto_approve_threshold`)
+     * is recorded alongside the decision. It is not a duplicate of the setting: the
+     * setting is what the dial is NOW, and the snapshot is what it was WHEN this
+     * entry was judged. Without it, `would_approve: false` is unreadable — it may
+     * mean "evaluated at 90 and refused" or "auto-approval was off, so nothing was
+     * evaluated at all" — and the readiness report cannot tell a shadow rejection
+     * that is evidence about the dial in force from one that is evidence about
+     * nothing. See ImportanceStatistics::shadowReview().
      */
     private function decide(
         KnowledgeEntry $entry,
@@ -287,6 +296,7 @@ class ClassifyKnowledgeEntryJob implements ShouldQueue
             'mode' => $mode->value,
             'would_reject' => $wouldReject,
             'would_approve' => $wouldApprove,
+            'auto_approve_threshold' => $setting->auto_approve_threshold,
             'auto_approved' => $autoApproved,
             'reasons' => $result->reasons,
             'rules' => $result->triggeredRules,
