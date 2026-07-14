@@ -120,4 +120,47 @@ describe('Search page', function () {
         $response->assertOk();
         $response->assertSee('RAG Knowledge Base');
     });
+
+    it('never renders an entry that is classifying or rejected', function (string $status) {
+        // The same guarantee as the searcher's, asserted where a human would
+        // actually see the leak: on the page. Both entries are indexed, so the
+        // only thing that can keep the hidden one off the page is the status
+        // filter, and the visible twin proves the query really does match.
+        Queue::fake();
+
+        $project = Project::create(['id' => 'r1', 'name' => 'R1', 'root_path' => '/p']);
+        $fakeVector = array_fill(0, 768, 0.1);
+        Embeddings::fake([[$fakeVector]]);
+
+        $approved = KnowledgeEntry::create([
+            'project_id' => $project->id,
+            'title' => 'Laravel routing',
+            'content' => 'Routes are defined in routes/web.php',
+            'status' => 'approved',
+        ]);
+        $hidden = KnowledgeEntry::create([
+            'project_id' => $project->id,
+            'title' => 'Unreleased routing note',
+            'content' => 'Routes are defined in routes/web.php',
+            'status' => $status,
+        ]);
+
+        foreach ([$approved, $hidden] as $entry) {
+            DB::table('chunk_embeddings')->insert([
+                'entry_id' => $entry->id,
+                'project_id' => $project->id,
+                'chunk_index' => 0,
+                'content' => 'Routes are defined in routes/web.php',
+                'embedding' => '['.implode(',', $fakeVector).']',
+            ]);
+        }
+
+        $this->get('/search?q=routing')
+            ->assertOk()
+            ->assertSee('Laravel routing')
+            ->assertDontSee('Unreleased routing note');
+    })->with([
+        'classifying' => 'classifying',
+        'rejected' => 'rejected',
+    ]);
 });

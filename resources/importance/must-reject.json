@@ -1,0 +1,544 @@
+{
+    "_meta": {
+        "purpose": "Reviewed calibration corpus of noise the importance classifier must REFUSE. It is the counterweight to must-keep.json: that file proves the rules never destroy knowledge, this one proves they still catch the garbage they exist for. A rule set that keeps everything is as broken as one that keeps nothing, it is just quieter about it.",
+        "content": "All examples are synthetic. No real credentials, hostnames, customer names, or private repository content.",
+        "rules_version_reviewed": "v6",
+        "reviewed_on": "2026-07-14",
+        "dispositions": "Every fixture declares an `expected.disposition`, and the two are NOT interchangeable.\n\n  - `veto`  — unequivocal noise the deterministic layer refuses on its own, with no model call at all. `expected.rules` names the veto that MUST fire (an entry vetoed by a DIFFERENT rule than the one reviewed is a finding, not a pass), and the verdict is `not_important` at EVERY threshold, including 0.\n  - `score` — noise the deterministic layer must NOT veto, because the text is not unambiguous garbage and a hard veto is irreversible. It escapes to the semantic judge, which scores it low. `expected.semantic_score` is the score a judge plausibly gives it, `expected.final_score` is that score after the deterministic adjustments, and `expected.verdict_at` asserts `not_important` at the default threshold of 70 AND at a lenient 40 — noise this plain must not be rescued merely by an administrator turning the dial down. These are the entries that keep the corpus honest: they document, and pin, the veto's deliberate recall loss.",
+        "escapes": "Three fixtures (`reject-chatter-with-coordinated-tail`, `reject-chatter-with-parenthetical`, `reject-pt-announced-intent-with-tail`) are chatter that the veto DELIBERATELY lets through — see the v4/v5 notes in must-keep.json. They carry a tail, and no rule can separate 'I ran the tests and all tests pass now.' from 'I ran the tests and the seeder populates the demo tenant.' without destroying the second. They are here as `score` fixtures on purpose: a missed veto costs one judge call, a false veto destroys knowledge forever, and the corpus must state the truth about the rule's reach rather than an ambition it does not have."
+    },
+    "fixtures": [
+        {
+            "id": "reject-empty-rule-only",
+            "kind": "empty",
+            "rejection_reason": "A separator line an agent emitted before it had anything to say. No letter in any script, so there is nothing to judge and nothing to lose.",
+            "expected": {
+                "disposition": "veto",
+                "vetoed": true,
+                "rules": [
+                    "empty_content"
+                ],
+                "verdict": "not_important"
+            },
+            "candidate": {
+                "title": "Session scratch",
+                "content": "--- *** ### ---",
+                "category": "insight",
+                "source": "condense",
+                "tags": [],
+                "entities": [],
+                "relations": []
+            },
+            "candidate_hash": "366b606df75af5f6013e14548cbc354ffd4e42ad910f086ad1a3b995d8cd0feb"
+        },
+        {
+            "id": "reject-empty-code-fence",
+            "kind": "empty",
+            "rejection_reason": "An empty markdown code fence. The candidate looks structured, which is exactly why it is worth pinning: structure is not content.",
+            "expected": {
+                "disposition": "veto",
+                "vetoed": true,
+                "rules": [
+                    "empty_content"
+                ],
+                "verdict": "not_important"
+            },
+            "candidate": {
+                "title": "Snippet",
+                "content": "```\n\n```",
+                "category": "insight",
+                "source": "mcp",
+                "tags": [],
+                "entities": [],
+                "relations": []
+            },
+            "candidate_hash": "ef5a2be763df5346792579f2ea3948af82925a987ebe8f710a019d24c94b523a"
+        },
+        {
+            "id": "reject-placeholder-tbd",
+            "kind": "placeholder",
+            "rejection_reason": "A stub entry created to be filled in later and never filled in. It states nothing and never will.",
+            "expected": {
+                "disposition": "veto",
+                "vetoed": true,
+                "rules": [
+                    "placeholder_only"
+                ],
+                "verdict": "not_important"
+            },
+            "candidate": {
+                "title": "Deployment notes",
+                "content": "TBD",
+                "category": "documentation",
+                "source": "mcp",
+                "tags": [
+                    "deployment"
+                ],
+                "entities": [],
+                "relations": []
+            },
+            "candidate_hash": "b800137fbcfef32ad1e7d80157dc8612be5ebf034f2841ab3f05952643f9334e"
+        },
+        {
+            "id": "reject-placeholder-lorem",
+            "kind": "placeholder",
+            "rejection_reason": "Filler text pasted from a template. Reads like prose, asserts nothing.",
+            "expected": {
+                "disposition": "veto",
+                "vetoed": true,
+                "rules": [
+                    "placeholder_only"
+                ],
+                "verdict": "not_important"
+            },
+            "candidate": {
+                "title": "Draft",
+                "content": "Lorem ipsum",
+                "category": "insight",
+                "source": "cli",
+                "tags": [],
+                "entities": [],
+                "relations": []
+            },
+            "candidate_hash": "7cc55c1e9ed5d716578f118d5af00c504d0e4031999d6bb4afdef10af7746bfa"
+        },
+        {
+            "id": "reject-placeholder-fixme-chain",
+            "kind": "placeholder",
+            "rejection_reason": "A chain of markers with no statement between them. Every token is a promise of content, none of them is content.",
+            "expected": {
+                "disposition": "veto",
+                "vetoed": true,
+                "rules": [
+                    "placeholder_only"
+                ],
+                "verdict": "not_important"
+            },
+            "candidate": {
+                "title": "Retry policy",
+                "content": "FIXME. TODO. WIP.",
+                "category": "convention",
+                "source": "condense",
+                "tags": [],
+                "entities": [],
+                "relations": []
+            },
+            "candidate_hash": "81a85d00a821b7cf4e88e0f7b8c2ac333093ae811098290e1e2e674b0df1ce11"
+        },
+        {
+            "id": "reject-placeholder-pt",
+            "kind": "placeholder",
+            "rejection_reason": "The Portuguese half of the same failure. The corpus has to reach as far in PT as in EN or the classifier is silently stricter in one language than the other.",
+            "expected": {
+                "disposition": "veto",
+                "vetoed": true,
+                "rules": [
+                    "placeholder_only"
+                ],
+                "verdict": "not_important"
+            },
+            "candidate": {
+                "title": "Regra de faturação",
+                "content": "A definir. Pendente.",
+                "category": "business-rule",
+                "source": "mcp",
+                "tags": [],
+                "entities": [],
+                "relations": []
+            },
+            "candidate_hash": "15211abba8a5e23674dc51b24a92aef483ff7058885e20ca77830ff35a5b47bb"
+        },
+        {
+            "id": "reject-open-questions",
+            "kind": "unanswered-question",
+            "rejection_reason": "A list of open questions from a planning session. Real questions, and worth asking — but a question that nobody answered teaches a future session nothing, and the knowledge base is not an inbox.",
+            "expected": {
+                "disposition": "veto",
+                "vetoed": true,
+                "rules": [
+                    "unanswered_question"
+                ],
+                "verdict": "not_important"
+            },
+            "candidate": {
+                "title": "Open questions on the shipping worker",
+                "content": "Should the worker back off exponentially after a 429? Do we cap the retry count per order or per batch? Is the 10-minute cooldown per API key or per account?",
+                "category": "insight",
+                "source": "condense",
+                "tags": [
+                    "shipping"
+                ],
+                "entities": [],
+                "relations": []
+            },
+            "candidate_hash": "046d093e4b9d401b3d5b35854dac79543c1d5b2aedb6a243edce242445d76c42"
+        },
+        {
+            "id": "reject-open-questions-pt",
+            "kind": "unanswered-question",
+            "rejection_reason": "Same shape in Portuguese, including the inverted-clause question form that has no question word at the front.",
+            "expected": {
+                "disposition": "veto",
+                "vetoed": true,
+                "rules": [
+                    "unanswered_question"
+                ],
+                "verdict": "not_important"
+            },
+            "candidate": {
+                "title": "Dúvidas sobre o importador",
+                "content": "O importador deve ignorar ficheiros vazios? E se o mesmo documento for importado duas vezes?",
+                "category": "insight",
+                "source": "condense",
+                "tags": [],
+                "entities": [],
+                "relations": []
+            },
+            "candidate_hash": "b26cbff67270935f0938f18f1d2ab4407ef69d654b2e6aa1bb91b57241309c68"
+        },
+        {
+            "id": "reject-chatter-let-me",
+            "kind": "agent-narration",
+            "rejection_reason": "Pure tool narration under a placeholder title. Every sentence is a bare operational clause or a status phrase, and nothing in the candidate asserts anything about the project.",
+            "expected": {
+                "disposition": "veto",
+                "vetoed": true,
+                "rules": [
+                    "agent_operation_only"
+                ],
+                "verdict": "not_important"
+            },
+            "candidate": {
+                "title": "Session notes",
+                "content": "Let me open the file. I checked the logs. Done.",
+                "category": "insight",
+                "source": "condense",
+                "tags": [],
+                "entities": [],
+                "relations": []
+            },
+            "candidate_hash": "6a919e603f778d7374139380d0e1470244ef52382039fe347cd3b4c1c809fd0c"
+        },
+        {
+            "id": "reject-chatter-bulleted-status",
+            "kind": "agent-narration",
+            "rejection_reason": "The bulleted form the same chatter takes when an agent summarizes its own turn. The bullets are stripped before the grammar reads the sentences, so the list markup buys it nothing.",
+            "expected": {
+                "disposition": "veto",
+                "vetoed": true,
+                "rules": [
+                    "agent_operation_only"
+                ],
+                "verdict": "not_important"
+            },
+            "candidate": {
+                "title": "Next steps",
+                "content": "- I updated the file.\n- I ran the linter.\n- All tests pass.",
+                "category": "insight",
+                "source": "cli",
+                "tags": [],
+                "entities": [],
+                "relations": []
+            },
+            "candidate_hash": "8dd842d1145dce49682414d8a3e4962d02d8d30043b17ebf730113ae8ee9ef68"
+        },
+        {
+            "id": "reject-chatter-title-is-narration",
+            "kind": "agent-narration",
+            "rejection_reason": "The title carries no fact either — it is itself a status phrase. This is the case v6's title condition has to keep catching: if the title condition were too strict the veto would become dead code, and a rule that catches nothing is its own defect.",
+            "expected": {
+                "disposition": "veto",
+                "vetoed": true,
+                "rules": [
+                    "agent_operation_only"
+                ],
+                "verdict": "not_important"
+            },
+            "candidate": {
+                "title": "Ran the tests",
+                "content": "All tests pass. No errors.",
+                "category": "insight",
+                "source": "condense",
+                "tags": [],
+                "entities": [],
+                "relations": []
+            },
+            "candidate_hash": "55d671b790b21d7825b3de58433b6e626b68c8db762c52b7b0392cc78f0a6f9e"
+        },
+        {
+            "id": "reject-chatter-pt",
+            "kind": "agent-narration",
+            "rejection_reason": "The Portuguese twin of reject-chatter-let-me: first-person past tool run, status phrase, sign-off.",
+            "expected": {
+                "disposition": "veto",
+                "vetoed": true,
+                "rules": [
+                    "agent_operation_only"
+                ],
+                "verdict": "not_important"
+            },
+            "candidate": {
+                "title": "Nota",
+                "content": "Corri os testes. Todos os testes passam. Feito.",
+                "category": "insight",
+                "source": "condense",
+                "tags": [],
+                "entities": [],
+                "relations": []
+            },
+            "candidate_hash": "7c8de4664500ff28ca2f8ea50d440599adbfb731f41850fa100dd561f8525ce1"
+        },
+        {
+            "id": "reject-chatter-announced-intent",
+            "kind": "agent-narration",
+            "rejection_reason": "Announced intent with nothing behind it. The turn's plan is not the project's knowledge.",
+            "expected": {
+                "disposition": "veto",
+                "vetoed": true,
+                "rules": [
+                    "agent_operation_only"
+                ],
+                "verdict": "not_important"
+            },
+            "candidate": {
+                "title": "Note",
+                "content": "I will run the tests. I'm checking the file.",
+                "category": "insight",
+                "source": "mcp",
+                "tags": [],
+                "entities": [],
+                "relations": []
+            },
+            "candidate_hash": "3fc7e0eda282632b03ae50e9fe814e79aeb291b376979d7d7a51a8a15b0014f6"
+        },
+        {
+            "id": "reject-chatter-with-coordinated-tail",
+            "kind": "accepted-escape",
+            "rejection_reason": "Chatter the hard veto deliberately does NOT reach: the clause after 'and' is a further finite clause, and the rule cannot tell it apart from 'I ran the tests and the seeder populates the demo tenant.', which is knowledge. It escapes to the judge, which scores it low, and the low score is what rejects it. Pinned here so nobody 'fixes' the veto to catch it and re-opens the false-veto class of rounds 1-4.",
+            "expected": {
+                "disposition": "score",
+                "vetoed": false,
+                "semantic_score": 18,
+                "final_score": 10,
+                "verdict_at": {
+                    "40": "not_important",
+                    "70": "not_important"
+                }
+            },
+            "candidate": {
+                "title": "Note",
+                "content": "I ran the tests and all tests pass now, the tool call returned successfully.",
+                "category": "insight",
+                "source": "condense",
+                "tags": [],
+                "entities": [],
+                "relations": []
+            },
+            "candidate_hash": "f20242287b101dd2f748c2f75db0e03f39e12cb20673fc0e2757700c17b93d95"
+        },
+        {
+            "id": "reject-chatter-with-parenthetical",
+            "kind": "accepted-escape",
+            "rejection_reason": "The same accepted escape through a parenthetical instead of a coordinator. 'I read the diff (nothing changed).' is chatter; 'I read the diff (the migration runs concurrently).' is a fact; no grammar separates them, so both escape and the judge sorts them out.",
+            "expected": {
+                "disposition": "score",
+                "vetoed": false,
+                "semantic_score": 15,
+                "final_score": 0,
+                "verdict_at": {
+                    "40": "not_important",
+                    "70": "not_important"
+                }
+            },
+            "candidate": {
+                "title": "Note",
+                "content": "I read the diff (nothing changed).",
+                "category": "insight",
+                "source": "condense",
+                "tags": [],
+                "entities": [],
+                "relations": []
+            },
+            "candidate_hash": "7d42ca561f3529c0c7e27f603af6076077f88cbba184d25bf67078c0694a76fc"
+        },
+        {
+            "id": "reject-pt-announced-intent-with-tail",
+            "kind": "accepted-escape",
+            "rejection_reason": "The PT half of the accepted escape, so the recall loss is symmetric across languages rather than an accident of which patterns happened to be written first.",
+            "expected": {
+                "disposition": "score",
+                "vetoed": false,
+                "semantic_score": 16,
+                "final_score": 8,
+                "verdict_at": {
+                    "40": "not_important",
+                    "70": "not_important"
+                }
+            },
+            "candidate": {
+                "title": "Nota",
+                "content": "Vou abrir o ficheiro de configuração e depois digo-te o que encontrei.",
+                "category": "insight",
+                "source": "condense",
+                "tags": [],
+                "entities": [],
+                "relations": []
+            },
+            "candidate_hash": "c587b66fdd583b4ab104420b9f9e49dcdeb8a158001b18d267ce858cbd1b55e6"
+        },
+        {
+            "id": "reject-transient-status",
+            "kind": "transient-status",
+            "rejection_reason": "True today, false next week. A disabled job and an open investigation are the state of the world, not knowledge about the system, and an entry like this rots into a lie. Not vetoed: it is a well-formed statement about a real component, and a hard veto on 'temporarily' would eventually eat a durable fact that happens to use the word.",
+            "expected": {
+                "disposition": "score",
+                "vetoed": false,
+                "semantic_score": 30,
+                "final_score": 18,
+                "verdict_at": {
+                    "40": "not_important",
+                    "70": "not_important"
+                }
+            },
+            "candidate": {
+                "title": "DailyTotalsJob is off",
+                "content": "The nightly DailyTotalsJob is temporarily disabled for now while we investigate the duplicate rows in report_daily_totals. We will re-enable it later this week once the dedup query lands.",
+                "category": "insight",
+                "source": "condense",
+                "tags": [
+                    "reporting"
+                ],
+                "entities": [],
+                "relations": []
+            },
+            "candidate_hash": "f6eaec323e5c00080dd5730fff7243fc682cb2e0696187048a1efdf515f2b190"
+        },
+        {
+            "id": "reject-speculation",
+            "kind": "speculation",
+            "rejection_reason": "A hypothesis, honestly labelled as one. Storing it as knowledge is how a guess becomes a fact three sessions later. Penalized, never vetoed: the hypothesis may be worth keeping in shadow mode, and a human should get to say so.",
+            "expected": {
+                "disposition": "score",
+                "vetoed": false,
+                "semantic_score": 34,
+                "final_score": 18,
+                "verdict_at": {
+                    "40": "not_important",
+                    "70": "not_important"
+                }
+            },
+            "candidate": {
+                "title": "Checkout latency spike",
+                "content": "The checkout latency spike might be the new partial index on orders, but I am not sure. Maybe the autovacuum schedule is the real reason; it seems to line up with the nightly window, and it could be that the two interact.",
+                "category": "insight",
+                "source": "condense",
+                "tags": [
+                    "performance"
+                ],
+                "entities": [],
+                "relations": []
+            },
+            "candidate_hash": "e5425feabc549666850bf2a96ece8311269b8e64848ac336d7c687ab0e644c67"
+        },
+        {
+            "id": "reject-generic-platitude",
+            "kind": "generic-platitude",
+            "rejection_reason": "True of every codebase that has ever existed, therefore useless to this one. A future session that reads it learns nothing it did not already believe.",
+            "expected": {
+                "disposition": "score",
+                "vetoed": false,
+                "semantic_score": 25,
+                "final_score": 28,
+                "verdict_at": {
+                    "40": "not_important",
+                    "70": "not_important"
+                }
+            },
+            "candidate": {
+                "title": "Code quality",
+                "content": "The team should always write clean, readable code and keep the system tidy, because quality matters and the users deserve a reliable product every single day.",
+                "category": "convention",
+                "source": "mcp",
+                "tags": [],
+                "entities": [],
+                "relations": []
+            },
+            "candidate_hash": "fac52fc864d60c4f46bfa857cb5c839a3e1d2aba78efe220972afa5436ebbc61"
+        },
+        {
+            "id": "reject-thin-restatement",
+            "kind": "thin-content",
+            "rejection_reason": "A sentence that restates its own title. Not wrong, not false, and worth nothing: it names a thing and says the thing exists. Too thin to help anybody later, but far too well-formed to hard-veto.",
+            "expected": {
+                "disposition": "score",
+                "vetoed": false,
+                "semantic_score": 20,
+                "final_score": 2,
+                "verdict_at": {
+                    "40": "not_important",
+                    "70": "not_important"
+                }
+            },
+            "candidate": {
+                "title": "Config file",
+                "content": "The config file holds the settings.",
+                "category": "documentation",
+                "source": "mcp",
+                "tags": [],
+                "entities": [],
+                "relations": []
+            },
+            "candidate_hash": "45168f4c5fb7178c872ac7f6bf790eecdeb6c2f667678326fcc9dc3557871a83"
+        },
+        {
+            "id": "reject-session-recap",
+            "kind": "transient-status",
+            "rejection_reason": "A recap of a turn, addressed to the human who was already there. It refers to 'this session' and to work 'so far', which are exactly the coordinates that stop meaning anything the moment the session ends.",
+            "expected": {
+                "disposition": "score",
+                "vetoed": false,
+                "semantic_score": 22,
+                "final_score": 2,
+                "verdict_at": {
+                    "40": "not_important",
+                    "70": "not_important"
+                }
+            },
+            "candidate": {
+                "title": "Where we got to",
+                "content": "Here is a summary of what we covered in this session: the importer, the retry policy, and the queue names. So far the importer is the only part we actually touched, and we will pick the rest up next time.",
+                "category": "insight",
+                "source": "condense",
+                "tags": [],
+                "entities": [],
+                "relations": []
+            },
+            "candidate_hash": "8dc8c6f52a7770292fb27a7721212447efd76f4728374574b87e1e932f3f0b12"
+        },
+        {
+            "id": "reject-progress-report",
+            "kind": "agent-narration",
+            "rejection_reason": "A gerund-subject progress report. v3 deleted the gerund branch of the veto outright, because 'Running the tests now, 3 failed.' and 'Running the tests in parallel corrupts the sqlite database.' are the same shape and only one of them is knowledge. So this escapes structurally and is rejected on its score — which is what the trade costs, stated plainly.",
+            "expected": {
+                "disposition": "score",
+                "vetoed": false,
+                "semantic_score": 12,
+                "final_score": 2,
+                "verdict_at": {
+                    "40": "not_important",
+                    "70": "not_important"
+                }
+            },
+            "candidate": {
+                "title": "Note",
+                "content": "Running the tests now, 3 failed and I am re-running them.",
+                "category": "insight",
+                "source": "condense",
+                "tags": [],
+                "entities": [],
+                "relations": []
+            },
+            "candidate_hash": "726e8c1be7c9a62c7c2718a1ef223271abb889979f768363e1a208d3c843ecc3"
+        }
+    ]
+}

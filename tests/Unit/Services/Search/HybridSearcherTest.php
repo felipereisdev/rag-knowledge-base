@@ -910,4 +910,50 @@ describe('HybridSearcher', function () {
             ->and(strip_tags($results[0]->snippet))->toContain('decisive answer')
             ->and(strip_tags($results[0]->snippet))->not->toContain('Unrelated introduction');
     });
+
+    it('never returns an entry that is classifying or rejected, even when it is indexed', function (string $status) {
+        // The importance classifier's guarantee on the read path, asserted against
+        // the searcher itself rather than against the observer that normally keeps
+        // these rows out of `chunk_embeddings`. The chunks below are inserted BY
+        // HAND for exactly that reason: if the only thing standing between a
+        // rejected entry and a search result were the observer, then one stale
+        // chunk row — from a crashed indexer, a restored backup, a manual fix —
+        // would put rejected knowledge back in front of a user. Search filters on
+        // the status too, and that is what this pins.
+        $approved = KnowledgeEntry::create([
+            'project_id' => $this->project->id,
+            'title' => 'Approved routing note',
+            'content' => 'Routes are defined in routes/web.php',
+            'status' => 'approved',
+        ]);
+        $hidden = KnowledgeEntry::create([
+            'project_id' => $this->project->id,
+            'title' => 'Hidden routing note',
+            'content' => 'Routes are defined in routes/web.php',
+            'status' => $status,
+        ]);
+
+        foreach ([$approved, $hidden] as $entry) {
+            DB::table('chunk_embeddings')->insert([
+                'entry_id' => $entry->id,
+                'project_id' => $this->project->id,
+                'chunk_index' => 0,
+                'content' => 'Routes are defined in routes/web.php',
+                'embedding' => '['.implode(',', $this->fakeVector).']',
+            ]);
+        }
+
+        $entryIds = array_map(
+            static fn ($result): int => $result->entryId,
+            (new HybridSearcher)->search('routing', $this->project->id),
+        );
+
+        // The approved twin proves the query matches: a search that found nothing
+        // at all would pass this test while filtering nothing.
+        expect($entryIds)->toContain($approved->id)
+            ->and($entryIds)->not->toContain($hidden->id);
+    })->with([
+        'classifying' => 'classifying',
+        'rejected' => 'rejected',
+    ]);
 });

@@ -1,0 +1,404 @@
+{
+    "_meta": {
+        "purpose": "Reviewed calibration corpus of the candidates a human reviewer had to think about. must-keep.json is the knowledge that must survive; must-reject.json is the noise that must not. This file is neither: it is the band around the threshold where reasonable reviewers disagree, and its job is to make the classifier's behaviour there EXPLICIT instead of incidental.",
+        "content": "All examples are synthetic. No real credentials, hostnames, customer names, or private repository content.",
+        "rules_version_reviewed": "v6",
+        "reviewed_on": "2026-07-14",
+        "invariant": "NOT ONE ENTRY HERE MAY BE HARD-VETOED. That is the point of the set. A borderline candidate is by definition arguable, and a hard veto is irreversible, threshold-proof, and (under `enforce`) silent. Anything a reviewer had to think about must reach the semantic judge and then a human — never a rule. A veto firing on any fixture in this file is a defect in the RULE, not in the fixture.",
+        "expectations": "Each fixture records `semantic_score` — the score a judge plausibly returns for it, fixed here so the corpus is reproducible without a model — and `final_score`, which is that score after the deterministic adjustments, clamped to 0..100. `verdict_at` then states the computed disposition at three administrator thresholds (40, 60, and the default 70). It is deliberately spelled out per threshold rather than asserted once: the threshold is the ONE dial an administrator turns, the semantic assessment is cached across a threshold change, and 'what moves when the dial moves' is exactly the behaviour that must not regress unnoticed.",
+        "reading_the_verdicts": "A fixture that is `important` at 40 and `not_important` at 70 is not a bug — it is the dial working, and eight of the fourteen fixtures here cross somewhere inside that band on purpose. What the set pins is that each candidate crosses at the score the reviewer signed off on, and that nothing other than that crossing decides it. `borderline-test-only-fact` sits at exactly 70 and is `important` there: the comparison is `>=`, and that boundary is pinned rather than left to luck."
+    },
+    "fixtures": [
+        {
+            "id": "borderline-third-party-quirk",
+            "kind": "external-behaviour",
+            "reviewer_note": "Argued for keeping. It is a fact about someone else's system, so it is not discoverable from this codebase and no future session will re-derive it — that is what makes it worth the row. It is also outside our control and could be fixed by the vendor tomorrow, which is the case against. Kept: a stale note about a vendor quirk costs a minute to disprove; rediscovering it costs an afternoon.",
+            "expected": {
+                "vetoed": false,
+                "semantic_score": 72,
+                "final_score": 78,
+                "verdict_at": {
+                    "40": "important",
+                    "60": "important",
+                    "70": "important"
+                }
+            },
+            "candidate": {
+                "title": "The shipping API returns 200 with an error body on a rejected label",
+                "content": "The shipping provider answers a rejected label request with HTTP 200 and an `errors` array in the body, not with a 4xx. Any client that branches on the status code alone treats a rejected label as a success and ships the order with no tracking number. ShipmentClient must inspect the body, never the status.",
+                "category": "constraint",
+                "source": "condense",
+                "tags": [
+                    "shipping",
+                    "integrations"
+                ],
+                "entities": [
+                    {
+                        "name": "ShipmentClient",
+                        "type": "class"
+                    }
+                ],
+                "relations": []
+            },
+            "candidate_hash": "ec4e0114dd9b09f1347bd29a0ee2ea25f2b3589e1a58e06e8e4d4f637a6a015a"
+        },
+        {
+            "id": "borderline-version-pin-with-reason",
+            "kind": "decision-with-expiry",
+            "reviewer_note": "A pin is a decision with a shelf life. The version number will be wrong within a year, but the REASON is what a future session needs, and without the note somebody unpins it and rediscovers the breakage. Kept, and the reason is why.",
+            "expected": {
+                "vetoed": false,
+                "semantic_score": 63,
+                "final_score": 74,
+                "verdict_at": {
+                    "40": "important",
+                    "60": "important",
+                    "70": "important"
+                }
+            },
+            "candidate": {
+                "title": "Node is pinned to 20.11 in the builder image",
+                "content": "We pinned Node to 20.11 in the builder stage because 20.12 ships a libvips that segfaults the thumbnailer on animated WebP. Do not bump it without re-running the thumbnail fixtures; the failure is a silent empty file, not a crash.",
+                "category": "constraint",
+                "source": "condense",
+                "tags": [
+                    "build",
+                    "docker"
+                ],
+                "entities": [],
+                "relations": []
+            },
+            "candidate_hash": "37d3ebc05f5546c61687ffa0b914b098cf478fc3fc34266422c340bf8910076b"
+        },
+        {
+            "id": "borderline-workaround-with-stated-expiry",
+            "kind": "decision-with-expiry",
+            "reviewer_note": "The hardest kind. It is a workaround, it names the condition under which it should be removed, and it will be wrong the moment that condition is met. A reviewer could defensibly reject it as transient. Kept in the corpus at a score that lands it just under the default threshold: the classifier should route it to a human, not decide it.",
+            "expected": {
+                "vetoed": false,
+                "semantic_score": 58,
+                "final_score": 63,
+                "verdict_at": {
+                    "40": "important",
+                    "60": "important",
+                    "70": "not_important"
+                }
+            },
+            "candidate": {
+                "title": "Webhook retries are capped at 3 until the provider fixes their idempotency key",
+                "content": "WebhookRetrier caps retries at 3 because the provider replays the same event with a new idempotency key on every retry, so a 5th attempt double-charges. Remove the cap once they honour the key across retries.",
+                "category": "constraint",
+                "source": "condense",
+                "tags": [
+                    "webhooks"
+                ],
+                "entities": [
+                    {
+                        "name": "WebhookRetrier",
+                        "type": "class"
+                    }
+                ],
+                "relations": []
+            },
+            "candidate_hash": "faac4dffa28adb15c0b36db4cc4a3d570c80e0386ca41a2af77b7774a181d13b"
+        },
+        {
+            "id": "borderline-incident-postmortem",
+            "kind": "incident",
+            "reviewer_note": "An incident is a past event, and past events are not knowledge. But the CAUSE is, and it is stated. The reviewer's test: strip the date and the drama, and does a durable sentence remain? Here it does — the connection pool is sized below the worker concurrency. Kept.",
+            "expected": {
+                "vetoed": false,
+                "semantic_score": 61,
+                "final_score": 72,
+                "verdict_at": {
+                    "40": "important",
+                    "60": "important",
+                    "70": "important"
+                }
+            },
+            "candidate": {
+                "title": "The queue backlog came from a pool smaller than the worker concurrency",
+                "content": "The 40k-job backlog was caused by 24 workers sharing a pool of 10 connections: every job above the tenth blocked on checkout until the 5s timeout, then failed and retried. The rule is that the pool must be sized at or above the worker concurrency, and the deploy manifest is where both numbers live.",
+                "category": "insight",
+                "source": "condense",
+                "tags": [
+                    "queue",
+                    "database"
+                ],
+                "entities": [],
+                "relations": []
+            },
+            "candidate_hash": "d1338de205f25dcb3d0eb0468525cdde7e24e12d53c831e13f7e7cf3d83e2e3a"
+        },
+        {
+            "id": "borderline-framework-fact",
+            "kind": "obvious-to-the-informed",
+            "reviewer_note": "True, correct, and in the framework's own documentation. Its durability is high and its non-obviousness is near zero, which is precisely the case the semantic criteria exist to separate. A knowledge base full of these is a worse search index than the framework docs it copies. Rejected at the default threshold — but never vetoed, because a rule cannot tell 'in the docs' from 'not in the docs'.",
+            "expected": {
+                "vetoed": false,
+                "semantic_score": 40,
+                "final_score": 43,
+                "verdict_at": {
+                    "40": "important",
+                    "60": "not_important",
+                    "70": "not_important"
+                }
+            },
+            "candidate": {
+                "title": "Migrations run in filename order",
+                "content": "Laravel runs migrations in ascending filename order, which is why the timestamp prefix matters. A migration that must run after another one has to carry a later timestamp.",
+                "category": "documentation",
+                "source": "mcp",
+                "tags": [
+                    "laravel"
+                ],
+                "entities": [],
+                "relations": []
+            },
+            "candidate_hash": "fc08c7649ede807575a5bf9a485812d64853caab32abdd70bf38e770f5171384"
+        },
+        {
+            "id": "borderline-personal-workflow-preference",
+            "kind": "preference",
+            "reviewer_note": "One person's habit, stated as if it were a project rule. The tell is that nothing bad happens if a reader ignores it. Rejected at the default threshold; not vetoed, because the same sentence with a consequence attached ('...because the shared sqlite database corrupts under --parallel') is real knowledge and no rule can see the difference from the vocabulary alone.",
+            "expected": {
+                "vetoed": false,
+                "semantic_score": 30,
+                "final_score": 32,
+                "verdict_at": {
+                    "40": "not_important",
+                    "60": "not_important",
+                    "70": "not_important"
+                }
+            },
+            "candidate": {
+                "title": "Running the suite with --parallel",
+                "content": "I prefer to run the suite with --parallel and --bail when I am iterating on a single feature, since it gives faster feedback than the full serial run.",
+                "category": "convention",
+                "source": "cli",
+                "tags": [
+                    "testing"
+                ],
+                "entities": [],
+                "relations": []
+            },
+            "candidate_hash": "d83dc16b2bcaa32373c11e29e32a4dcccd6740ad4c4e41c22c5d73a02bce3ac5"
+        },
+        {
+            "id": "borderline-measured-number",
+            "kind": "measurement",
+            "reviewer_note": "A measurement drifts: the number is true of one machine on one day. What survives is the SHAPE of the cost, and the reviewer kept it only because the note states the shape (linear in chunk count) and not just the number. Lands just under the default threshold: a human should look at it.",
+            "expected": {
+                "vetoed": false,
+                "semantic_score": 56,
+                "final_score": 61,
+                "verdict_at": {
+                    "40": "important",
+                    "60": "important",
+                    "70": "not_important"
+                }
+            },
+            "candidate": {
+                "title": "Embedding cost is linear in chunk count, roughly 40ms per chunk",
+                "content": "The local embedder takes about 40ms per chunk on the CI box, and the cost is linear in chunk count with no batching win above 32. A 200-chunk document therefore blocks its indexing job for roughly 8 seconds, which is why indexing runs on its own queue and not inline with the write.",
+                "category": "insight",
+                "source": "condense",
+                "tags": [
+                    "embeddings",
+                    "performance"
+                ],
+                "entities": [],
+                "relations": []
+            },
+            "candidate_hash": "ba78601f4824240b87222ad82754211036b156c958410265acabb6cc94903156"
+        },
+        {
+            "id": "borderline-plan-not-decision",
+            "kind": "intent",
+            "reviewer_note": "An intention, not a decision: nothing has been chosen and nothing constrains anybody. A future session that acts on it is acting on a wish. Rejected at the default threshold. Not vetoed — 'we are considering' is one word away from 'we decided', and a rule that vetoes on that word will eventually veto a decision.",
+            "expected": {
+                "vetoed": false,
+                "semantic_score": 35,
+                "final_score": 27,
+                "verdict_at": {
+                    "40": "not_important",
+                    "60": "not_important",
+                    "70": "not_important"
+                }
+            },
+            "candidate": {
+                "title": "Extracting billing into its own service",
+                "content": "We are considering extracting billing into its own service at some point, mostly to stop the invoice tables from being touched by the checkout code. Nothing has been agreed and there is no timeline.",
+                "category": "architecture",
+                "source": "condense",
+                "tags": [
+                    "billing"
+                ],
+                "entities": [],
+                "relations": []
+            },
+            "candidate_hash": "7f88045b0cfd9f6a61a78b97b13fb2789919ecae014e7ceaba6c57d73db08290"
+        },
+        {
+            "id": "borderline-terse-convention",
+            "kind": "convention",
+            "reviewer_note": "Nine words, and every one of them binding. The deterministic layer penalizes it for thinness, which is correct in general and wrong here — that penalty is exactly why a hard veto on length would have been a catastrophe, and why insufficient_substance is a penalty and not a veto. A human should see this.",
+            "expected": {
+                "vetoed": false,
+                "semantic_score": 66,
+                "final_score": 62,
+                "verdict_at": {
+                    "40": "important",
+                    "60": "important",
+                    "70": "not_important"
+                }
+            },
+            "candidate": {
+                "title": "Timestamps",
+                "content": "Every timestamp column must be stored in UTC.",
+                "category": "convention",
+                "source": "mcp",
+                "tags": [],
+                "entities": [],
+                "relations": []
+            },
+            "candidate_hash": "4bc22235070bbcb93506f7039c0c743d7ac47c3e5df995690bd4608f090d8716"
+        },
+        {
+            "id": "borderline-env-var-documentation",
+            "kind": "documentation",
+            "reviewer_note": "Documents a knob. Useful, and also the sort of thing that belongs in .env.example — the knowledge base is not a second config reference. It survives on the non-obvious half of the note (what happens when the knob is wrong), which is the half you cannot get from the config file.",
+            "expected": {
+                "vetoed": false,
+                "semantic_score": 52,
+                "final_score": 52,
+                "verdict_at": {
+                    "40": "important",
+                    "60": "not_important",
+                    "70": "not_important"
+                }
+            },
+            "candidate": {
+                "title": "RAG_IMPORTANCE_TIMEOUT bounds the model call, not the job",
+                "content": "RAG_IMPORTANCE_TIMEOUT bounds the model call only. The queue job's own timeout is derived from it with a margin, and the queue connection's retry_after is derived from that in turn, so raising the env var alone silently keeps the old job timeout and the job is killed mid-call.",
+                "category": "documentation",
+                "source": "condense",
+                "tags": [
+                    "configuration"
+                ],
+                "entities": [],
+                "relations": []
+            },
+            "candidate_hash": "a704ad4c563d2b13655ffa259138a473896acb4a4fbdf852bbeea84381858096"
+        },
+        {
+            "id": "borderline-superseded-decision",
+            "kind": "decision-with-expiry",
+            "reviewer_note": "A decision that announces its own reversal. Storing it means a future session finds a rule that is about to stop being true; not storing it means the same session re-litigates a question that was already settled once. The reviewer kept it and let the score land under the default threshold, so a human decides.",
+            "expected": {
+                "vetoed": false,
+                "semantic_score": 54,
+                "final_score": 45,
+                "verdict_at": {
+                    "40": "important",
+                    "60": "not_important",
+                    "70": "not_important"
+                }
+            },
+            "candidate": {
+                "title": "Search still runs on the single-node index",
+                "content": "We decided to keep search on the single-node index for now, because sharding it costs a rebuild and the corpus is under a million chunks. That reverses once the corpus passes that mark; the sharding branch is already written against it.",
+                "category": "architecture",
+                "source": "condense",
+                "tags": [
+                    "search"
+                ],
+                "entities": [],
+                "relations": []
+            },
+            "candidate_hash": "210d6973be5e3476777b1966920e52a52ddbe10d70a397df4610b3f7436bc96b"
+        },
+        {
+            "id": "borderline-test-only-fact",
+            "kind": "operational-constraint",
+            "reviewer_note": "It is about the test suite, not the product, and half the reviewers wanted it out on that basis. It stayed because a test-suite constraint costs a new contributor an hour, and the note names the exact failure they will see. The category argument ('it is only tests') is not an importance argument.",
+            "expected": {
+                "vetoed": false,
+                "semantic_score": 60,
+                "final_score": 70,
+                "verdict_at": {
+                    "40": "important",
+                    "60": "important",
+                    "70": "important"
+                }
+            },
+            "candidate": {
+                "title": "The feature suite needs the demo tenant seeded first",
+                "content": "The feature suite fails with a foreign-key violation on tenant_id unless the demo tenant is seeded first, because the factories resolve the tenant by slug rather than creating one. Run the seeder before the suite; the failure looks like a broken factory and is not one.",
+                "category": "constraint",
+                "source": "cli",
+                "tags": [
+                    "testing"
+                ],
+                "entities": [],
+                "relations": []
+            },
+            "candidate_hash": "f65e198672903d3d4093c82a74645f9b115f27f9f95dba5ff212e9a54c70d587"
+        },
+        {
+            "id": "borderline-pt-convention",
+            "kind": "convention",
+            "reviewer_note": "The Portuguese half of the band. A convention with a reason attached, of exactly the weight the EN conventions carry — pinned so a threshold that is right in one language is not quietly wrong in the other.",
+            "expected": {
+                "vetoed": false,
+                "semantic_score": 62,
+                "final_score": 66,
+                "verdict_at": {
+                    "40": "important",
+                    "60": "important",
+                    "70": "not_important"
+                }
+            },
+            "candidate": {
+                "title": "Migrações nunca alteram uma coluna em uso",
+                "content": "Uma migração nunca deve alterar o tipo de uma coluna que já está em uso: a decisão foi criar uma coluna nova, escrever nas duas durante um deploy, e só depois apagar a antiga. Alterar em vez disso bloqueia a tabela de pedidos e derruba o checkout.",
+                "category": "convention",
+                "source": "condense",
+                "tags": [
+                    "migrations"
+                ],
+                "entities": [],
+                "relations": []
+            },
+            "candidate_hash": "3340731461da84f156be993bc61a29eec2f387a2d4f5b01d89444b4c871f54c7"
+        },
+        {
+            "id": "borderline-debug-finding",
+            "kind": "non-obvious-fix",
+            "reviewer_note": "A debugging finding: true, specific, and about a code path that may not exist next quarter. Its value is entirely in the non-obviousness — nobody would guess it — and that is what carries it over the line.",
+            "expected": {
+                "vetoed": false,
+                "semantic_score": 68,
+                "final_score": 68,
+                "verdict_at": {
+                    "40": "important",
+                    "60": "important",
+                    "70": "not_important"
+                }
+            },
+            "candidate": {
+                "title": "The OOM in the worker is the PDF renderer, not the embedder",
+                "content": "The worker OOMs at 512Mi under the PDF importer, and the embedder is not the cause: the renderer holds every page bitmap until the document is closed, so a 300-page file peaks near 400Mi on its own. Close the document per page, or the memory limit has to grow with the largest document anybody uploads.",
+                "category": "insight",
+                "source": "condense",
+                "tags": [
+                    "memory",
+                    "importer"
+                ],
+                "entities": [],
+                "relations": []
+            },
+            "candidate_hash": "059ad886c615b194071d1b19ed2dafaca520a1ee241131516cf21169d7de3a03"
+        }
+    ]
+}

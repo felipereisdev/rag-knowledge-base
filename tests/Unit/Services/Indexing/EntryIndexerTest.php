@@ -191,4 +191,52 @@ describe('EntryIndexer', function () {
         expect($chunks)->toHaveCount(1)
             ->and($chunks[0]->content)->toBe('New content.');
     });
+
+    it('does not index an entry that is still being classified', function () {
+        // The importance classifier's first invariant on the read path: an entry
+        // awaiting its verdict is not in the index. The observer already declines
+        // to schedule the job, so nothing normally calls this — but a stale job, a
+        // manual re-index, or a retry that lands after the entry went BACK to
+        // `classifying` all can, and the indexer must refuse on its own.
+        Queue::fake();
+
+        $project = Project::create(['id' => 'r1', 'name' => 'R1', 'root_path' => '/p']);
+        $entry = KnowledgeEntry::create([
+            'project_id' => $project->id,
+            'title' => 'Awaiting a verdict',
+            'content' => 'Orders above 1000 EUR need a manager approval before the label is bought.',
+            'status' => 'classifying',
+        ]);
+
+        (new EntryIndexer(new ParagraphChunker))->index($entry);
+
+        expect(DB::table('chunk_embeddings')->where('entry_id', $entry->id)->exists())->toBeFalse();
+    });
+
+    it('drops the chunks of an entry that becomes classifying again mid-embedding', function () {
+        // The race the status guard exists for, in the one direction the classifier
+        // added: the embedder is slow, and while it runs the entry is put back into
+        // `classifying`. The work in flight was computed for an entry that no longer
+        // belongs in the index, and it must not be written.
+        Queue::fake();
+
+        $project = Project::create(['id' => 'r1', 'name' => 'R1', 'root_path' => '/p']);
+        $entry = KnowledgeEntry::create([
+            'project_id' => $project->id,
+            'title' => 'Re-queued for classification',
+            'content' => 'One paragraph.',
+            'status' => 'pending',
+        ]);
+
+        $fakeVector = array_fill(0, 768, 0.1);
+        Embeddings::fake(function () use ($entry, $fakeVector): array {
+            DB::table('knowledge_entries')->where('id', $entry->id)->update(['status' => 'classifying']);
+
+            return [$fakeVector];
+        });
+
+        (new EntryIndexer(new ParagraphChunker))->index($entry);
+
+        expect(DB::table('chunk_embeddings')->where('entry_id', $entry->id)->exists())->toBeFalse();
+    });
 });
