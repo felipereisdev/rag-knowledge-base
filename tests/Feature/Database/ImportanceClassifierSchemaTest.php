@@ -97,6 +97,71 @@ it('persists assessment cache identity and accepts a classifying entry state', f
     expect(DB::table('knowledge_entries')->where('id', $entryId)->value('status'))->toBe('classifying');
 });
 
+it('rolls the classifier back and forward again without stranding in-flight entries', function () {
+    $migration = require database_path('migrations/2026_07_13_000003_add_importance_classifier.php');
+
+    $statusConstraint = function (): string {
+        return DB::selectOne(<<<'SQL'
+            SELECT pg_get_constraintdef(oid) AS definition
+            FROM pg_constraint
+            WHERE conname = 'chk_status'
+              AND conrelid = 'knowledge_entries'::regclass
+            SQL)->definition;
+    };
+
+    Project::create([
+        'id' => 'importance-rollback',
+        'name' => 'Importance rollback',
+        'root_path' => '/importance-rollback',
+    ]);
+
+    // An entry mid-flight through the classifier -- the state the pipeline puts
+    // entries in during normal operation, and the state an operator is most
+    // likely to be rolling back *from*.
+    $entryId = DB::table('knowledge_entries')->insertGetId([
+        'project_id' => 'importance-rollback',
+        'title' => 'In-flight entry',
+        'content' => 'Hard-won knowledge that must survive a rollback.',
+        'status' => 'classifying',
+    ]);
+
+    expect($statusConstraint())->toContain("'classifying'");
+
+    // --- DOWN -------------------------------------------------------------
+    $migration->down();
+
+    expect($statusConstraint())->not->toContain("'classifying'")
+        ->and(Schema::hasTable('importance_assessments'))->toBeFalse()
+        ->and(Schema::hasTable('importance_classifier_settings'))->toBeFalse()
+        ->and(Schema::hasColumn('knowledge_entries', 'importance_assessment_id'))->toBeFalse();
+
+    // The in-flight entry is unjudged, not unwanted: it must survive with its
+    // content intact and fall back into the normal human review queue.
+    $rolledBack = DB::table('knowledge_entries')->where('id', $entryId)->first();
+
+    expect($rolledBack)->not->toBeNull()
+        ->and($rolledBack->status)->toBe('pending')
+        ->and($rolledBack->content)->toBe('Hard-won knowledge that must survive a rollback.');
+
+    // --- UP again ---------------------------------------------------------
+    $migration->up();
+
+    expect($statusConstraint())->toContain("'classifying'")
+        ->and(Schema::hasTable('importance_assessments'))->toBeTrue()
+        ->and(Schema::hasColumn('knowledge_entries', 'importance_assessment_id'))->toBeTrue();
+
+    $setting = DB::table('importance_classifier_settings')->where('id', 1)->first();
+
+    expect($setting)->not->toBeNull()
+        ->and($setting->mode)->toBe('shadow')
+        ->and((int) $setting->threshold)->toBe(70);
+
+    // The widened constraint really accepts `classifying` again after the round trip.
+    DB::table('knowledge_entries')->where('id', $entryId)->update(['status' => 'classifying']);
+
+    expect(DB::table('knowledge_entries')->where('id', $entryId)->value('status'))->toBe('classifying');
+});
+
 it('casts assessment fields and relates an entry to its assessment', function () {
     Queue::fake();
 

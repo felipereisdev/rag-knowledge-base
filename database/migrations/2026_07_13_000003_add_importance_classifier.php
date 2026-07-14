@@ -81,6 +81,21 @@ return new class extends Migration
 
     public function down(): void
     {
+        // Rolling the classifier back removes `classifying` from the allowed
+        // status set, but entries legitimately sit there whenever the pipeline
+        // is mid-flight -- which is exactly the state an operator is most
+        // likely to be rolling back *from* (a stuck or unsupervised
+        // `classification` worker). Narrowing the constraint first would abort
+        // the whole rollback with a check violation and strand the deployment.
+        //
+        // Fail open, consistent with the rest of the feature: an entry whose
+        // classification never completed is unjudged, not unwanted. Demote it
+        // to `pending` so it lands back in the normal human review queue with
+        // its content intact. Never delete it.
+        DB::table('knowledge_entries')
+            ->where('status', 'classifying')
+            ->update(['status' => 'pending']);
+
         Schema::table('knowledge_entries', function (Blueprint $table) {
             $table->dropForeign('knowledge_entries_importance_assessment_id_foreign');
             $table->dropIndex('knowledge_entries_importance_assessment_id_index');
