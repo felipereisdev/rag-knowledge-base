@@ -91,6 +91,50 @@ class KnowledgeEntryResource extends Resource
     }
 
     /**
+     * The status field is normally restricted to the admin-editable subset so
+     * a human can never *enter* `classifying` by hand (see the comment above
+     * its use in fields()). But the shipped drawer (`DrawerUpdate.tsx:95-108`)
+     * seeds form state from the row's raw value and resubmits every scalar
+     * field on save (`:197-218`), and `SelectField.tsx` does no on-mount
+     * normalisation — so a row already parked in `classifying` needs the
+     * field to actually contain that value, or two things break at once: the
+     * Select shows no matching option, and the round-tripped
+     * `status: "classifying"` gets rejected by `Rule::in(adminEditableValues())`
+     * on a save that never touched status at all (previously a 422 on every
+     * edit to a `classifying` row).
+     *
+     * So a `classifying` row gets the full option set (so the true value
+     * renders), `->rules()` widened to accept `classifying` unchanged, and
+     * `->immutable()` — Martis's `fillFields()` silently skips immutable
+     * fields on update (`vendor/martis/martis/src/Http/Controllers/
+     * ResourceController.php`, `fillFields()`), so even if this field's value
+     * came back changed it would never be written. That's belt-and-braces:
+     * self::authorizedToUpdate() already 403s a genuine attempt to move the
+     * row to a different status, before validation or filling ever run.
+     */
+    private function statusField(): Select
+    {
+        $classifying = $this->model instanceof KnowledgeEntry
+            && $this->model->getAttribute('status') === KnowledgeStatus::Classifying->value;
+
+        $field = Select::make('status', __('rag.fields.status'))
+            ->default(KnowledgeStatus::Pending->value)
+            ->required()
+            ->span(4);
+
+        if ($classifying) {
+            return $field
+                ->optionsFromMap(KnowledgeStatus::options())
+                ->rules(['sometimes', Rule::in(KnowledgeStatus::values())])
+                ->immutable();
+        }
+
+        return $field
+            ->optionsFromMap(KnowledgeStatus::adminEditableOptions())
+            ->rules(['sometimes', Rule::in(KnowledgeStatus::adminEditableValues())]);
+    }
+
+    /**
      * Per-row inline ✓/✗ buttons AND the bulk "Actions" dropdown from a single
      * action each. Martis v1.28.3 made ->showInline() additive (it keeps
      * showOnIndex=true), so one showInline action appears in both surfaces — no
@@ -168,20 +212,20 @@ class KnowledgeEntryResource extends Resource
                 })
                 ->span(12),
 
-            // `classifying` is deliberately absent: it is the classifier
-            // pipeline's status, not a human's. An entry parked there by hand
-            // has no job to move it on, is excluded from indexing by the
-            // observer, and is refused by the approve/reject actions — it would
-            // be stuck and invisible forever. Filtering by it is still allowed
-            // (see StatusFilter); only *setting* it is not. Leaving *out* of
-            // classifying through this same field is refused too, but at the
-            // request level — see self::authorizedToUpdate().
-            Select::make('status', __('rag.fields.status'))
-                ->optionsFromMap(KnowledgeStatus::adminEditableOptions())
-                ->default(KnowledgeStatus::Pending->value)
-                ->required()
-                ->rules(['sometimes', Rule::in(KnowledgeStatus::adminEditableValues())])
-                ->span(4),
+            // `classifying` is deliberately absent from the settable options: it
+            // is the classifier pipeline's status, not a human's. An entry
+            // parked there by hand has no job to move it on, is excluded from
+            // indexing by the observer, and is refused by the approve/reject
+            // actions — it would be stuck and invisible forever. Filtering by
+            // it is still allowed (see StatusFilter); only *setting* it is not.
+            // Leaving *out* of classifying through this same field is refused
+            // too, but at the request level — see self::authorizedToUpdate().
+            //
+            // A row already *in* classifying still needs this field to render
+            // its true value and to survive a save that never touched status —
+            // see self::statusField() for why the option set and rules widen
+            // for that one row.
+            $this->statusField(),
             // Constrained to the enum the ingestion paths actually write. Left
             // free-text, an administrator could type "mcp" and produce an entry
             // no pipeline owns.

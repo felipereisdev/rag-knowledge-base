@@ -201,6 +201,22 @@ describe('KnowledgeEntryResource', function () {
             ->and(collect($indexOptions)->pluck('value')->all())->toContain('classifying');
     });
 
+    it('shows the true classifying value and marks it immutable when editing a classifying entry', function () {
+        Project::create(['id' => 'r1', 'name' => 'R1', 'root_path' => '/p']);
+        $entry = KnowledgeEntry::create([
+            'project_id' => 'r1',
+            'title' => 'Stuck entry',
+            'status' => KnowledgeStatus::Classifying->value,
+        ]);
+
+        $statusField = collect((new KnowledgeEntryResource($entry))->fields(request()))
+            ->keyBy(fn ($field) => $field->attribute())['status']
+            ->toArray();
+
+        expect(collect($statusField['options'])->pluck('value')->all())->toBe(KnowledgeStatus::values())
+            ->and($statusField['immutable'])->toBeTrue();
+    });
+
     it('refuses to create or update an entry into classifying through the API', function () {
         Project::create(['id' => 'r1', 'name' => 'R1', 'root_path' => '/p']);
 
@@ -442,6 +458,38 @@ describe('KnowledgeEntryResource', function () {
 
         $this->putJson("/martis/api/resources/knowledge-entries/{$entry->id}", [
             'title' => 'Typo in the title',
+        ])->assertOk();
+
+        $entry->refresh();
+
+        expect($entry->title)->toBe('Typo in the title')
+            ->and($entry->status)->toBe(KnowledgeStatus::Classifying->value);
+    });
+
+    it('accepts the full drawer payload the shipped edit form actually sends for a classifying entry', function () {
+        // The real DrawerUpdate seeds every scalar field from the row's raw
+        // values (including `status: "classifying"`, which SelectField never
+        // normalises) and resubmits all of them on save — not just the ones
+        // the admin touched. This is that payload, verbatim, for a title fix.
+        Project::create(['id' => 'r1', 'name' => 'R1', 'root_path' => '/p']);
+        $entry = KnowledgeEntry::create([
+            'project_id' => 'r1',
+            'title' => 'Tpyo in the title',
+            'category' => 'insight',
+            'content' => 'Some content',
+            'status' => KnowledgeStatus::Classifying->value,
+            'source' => 'manual',
+            'author' => 'Agent',
+        ]);
+
+        $this->putJson("/martis/api/resources/knowledge-entries/{$entry->id}", [
+            'project_id' => 'r1',
+            'category' => 'insight',
+            'title' => 'Typo in the title',
+            'content' => 'Some content',
+            'status' => KnowledgeStatus::Classifying->value,
+            'source' => 'manual',
+            'author' => 'Agent',
         ])->assertOk();
 
         $entry->refresh();
