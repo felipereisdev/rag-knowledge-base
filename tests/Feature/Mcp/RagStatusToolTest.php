@@ -52,8 +52,8 @@ function statusAssessment(string $status, string $projectId = 'test-project'): I
         'candidate_hash' => hash('sha256', $projectId.$status.str()->random(8)),
         'normalized_candidate' => ['title' => 'x'],
         'model' => (string) config('rag.importance.model'),
-        'prompt_version' => (string) config('rag.importance.prompt_version'),
-        'rules_version' => (string) config('rag.importance.rules_version'),
+        'prompt_version' => ImportancePrompt::VERSION,
+        'rules_version' => DeterministicImportanceRules::VERSION,
         'status' => $status,
     ]);
 }
@@ -201,8 +201,8 @@ it('reports the importance classifier health', function () {
             ->where('mode', 'shadow')
             ->where('threshold', 65)
             ->where('model', (string) config('rag.importance.model'))
-            ->where('prompt_version', (string) config('rag.importance.prompt_version'))
-            ->where('rules_version', (string) config('rag.importance.rules_version'))
+            ->where('prompt_version', ImportancePrompt::VERSION)
+            ->where('rules_version', DeterministicImportanceRules::VERSION)
             ->where('classifying', 2)
             ->where('stale_classifying', 1)
             ->where('stale_after_minutes', 15)

@@ -13,7 +13,9 @@ use App\Models\ImportanceAssessment;
 use App\Models\ImportanceClassifierSetting;
 use App\Models\KnowledgeEntry;
 use App\Models\Project;
+use App\Services\Importance\DeterministicImportanceRules;
 use App\Services\Importance\ImportanceClassificationException;
+use App\Services\Importance\ImportancePrompt;
 use App\Services\Importance\NormalizedImportanceCandidate;
 use App\Services\Importance\SemanticImportanceAssessment;
 use App\Services\Importance\SemanticImportanceJudge;
@@ -222,8 +224,8 @@ describe('workflow 2: the classification job writes an audit assessment', functi
             ->and($assessment->project_id)->toBe('wf')
             ->and($assessment->candidate_hash)->toBe($expectedHash)
             ->and($assessment->model)->toBe(config('rag.importance.model'))
-            ->and($assessment->prompt_version)->toBe(config('rag.importance.prompt_version'))
-            ->and($assessment->rules_version)->toBe(config('rag.importance.rules_version'))
+            ->and($assessment->prompt_version)->toBe(ImportancePrompt::VERSION)
+            ->and($assessment->rules_version)->toBe(DeterministicImportanceRules::VERSION)
             ->and($assessment->semantic_score)->toBe(80)
             // The content states a rule and a reason: +6 and +5.
             ->and($assessment->final_score)->toBe(91)

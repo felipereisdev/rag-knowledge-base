@@ -7,6 +7,8 @@ use App\Mcp\Tools\Concerns\ResolvesProjectId;
 use App\Models\ImportanceClassifierSetting;
 use App\Models\KnowledgeEntry;
 use App\Models\Project;
+use App\Services\Importance\DeterministicImportanceRules;
+use App\Services\Importance\ImportancePrompt;
 use App\Services\Importance\ImportanceStatistics;
 use Illuminate\Contracts\JsonSchema\JsonSchema;
 use Illuminate\JsonSchema\Types\Type;
@@ -162,8 +164,11 @@ class RagStatusTool extends Tool
             'mode' => $setting->mode->value,
             'threshold' => $setting->threshold,
             'model' => (string) config('rag.importance.model'),
-            'prompt_version' => (string) config('rag.importance.prompt_version'),
-            'rules_version' => (string) config('rag.importance.rules_version'),
+            // Class constants, not `config('rag.importance.*_version')`: a stale
+            // `config:cache` snapshot taken before a version bump would make this
+            // status surface disagree with the version the code actually stamps.
+            'prompt_version' => ImportancePrompt::VERSION,
+            'rules_version' => DeterministicImportanceRules::VERSION,
             'classifying' => $classifying['total'],
             'stale_classifying' => $classifying['stale'],
             'stale_after_minutes' => $classifying['stale_after_minutes'],

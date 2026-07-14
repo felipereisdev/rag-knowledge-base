@@ -4,6 +4,8 @@ namespace App\Martis\Resources;
 
 use App\Enums\ImportanceClassifierMode;
 use App\Models\ImportanceClassifierSetting;
+use App\Services\Importance\DeterministicImportanceRules;
+use App\Services\Importance\ImportancePrompt;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
 use Martis\Fields\Id;
@@ -20,11 +22,13 @@ use Martis\Resource;
  * resource only ever *edits* that row: creation and deletion are refused, which
  * is what keeps a second, silently ignored settings row from ever existing.
  *
- * Only `mode` and `threshold` are editable. The model, the prompt version and
- * the rules version are code-owned (`config/rag.php` → `importance`, and the
- * VERSION constants the prompt and the rule set declare): they are part of the
- * assessment cache identity, so an administrator changing them from a form
- * would silently invalidate every cached assessment. They are shown read-only.
+ * Only `mode` and `threshold` are editable. The model is code-owned via
+ * `config('rag.importance.model')`; the prompt version and the rules version
+ * are code-owned via the `VERSION` constants the prompt and the rule set
+ * declare (never through config — see `config/rag.php` → `importance` for
+ * why). All three are part of the assessment cache identity, so an
+ * administrator changing them from a form would silently invalidate every
+ * cached assessment. They are shown read-only.
  */
 class ImportanceClassifierSettingResource extends Resource
 {
@@ -81,14 +85,17 @@ class ImportanceClassifierSettingResource extends Resource
                 ->resolveUsing(static fn (): string => (string) config('rag.importance.model'))
                 ->help(__('importance.fields.active_model_help')),
 
+            // Class constants, not `config('rag.importance.*_version')`: a stale
+            // `config:cache` snapshot taken before a version bump would make this
+            // read-only display disagree with the version the code actually stamps.
             Text::make('prompt_version', __('importance.fields.prompt_version'))
                 ->exceptOnForms()
-                ->resolveUsing(static fn (): string => (string) config('rag.importance.prompt_version'))
+                ->resolveUsing(static fn (): string => ImportancePrompt::VERSION)
                 ->help(__('importance.fields.prompt_version_help')),
 
             Text::make('rules_version', __('importance.fields.rules_version'))
                 ->exceptOnForms()
-                ->resolveUsing(static fn (): string => (string) config('rag.importance.rules_version'))
+                ->resolveUsing(static fn (): string => DeterministicImportanceRules::VERSION)
                 ->help(__('importance.fields.rules_version_help')),
         ];
     }

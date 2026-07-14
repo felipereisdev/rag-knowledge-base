@@ -568,7 +568,7 @@ it('resolves from the container with the configured model and prompt version', f
     ));
 
     expect($result->model)->toBe((string) config('rag.importance.model'))
-        ->and($result->promptVersion)->toBe((string) config('rag.importance.prompt_version'));
+        ->and($result->promptVersion)->toBe(ImportancePrompt::VERSION);
 });
 
 it('keys the cache identity on the class constants, not on a config value that may be stale', function () {

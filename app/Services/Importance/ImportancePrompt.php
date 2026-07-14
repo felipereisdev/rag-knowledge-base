@@ -6,10 +6,9 @@ namespace App\Services\Importance;
  * The fixed system prompt sent to the Claude importance judge process.
  *
  * `VERSION` is the single source of truth for the prompt version stamped
- * onto every assessment (see `rag.importance.prompt_version`). Bump it
- * whenever the wording below changes meaningfully, and never edit the
- * prompt without bumping it — historical assessments must stay attributable
- * to the exact prompt that produced them.
+ * onto every assessment. Bump it whenever the wording below changes
+ * meaningfully, and never edit the prompt without bumping it — historical
+ * assessments must stay attributable to the exact prompt that produced them.
  */
 final class ImportancePrompt
 {

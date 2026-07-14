@@ -111,7 +111,7 @@ return new class extends Migration
             ->update(['status' => 'pending']);
 
         foreach ($stranded as $id) {
-            IndexEntryJob::dispatch((int) $id);
+            IndexEntryJob::dispatch((int) $id)->afterCommit();
         }
 
         Schema::table('knowledge_entries', function (Blueprint $table) {

@@ -3,6 +3,8 @@
 use App\Enums\ImportanceClassifierMode;
 use App\Martis\Resources\ImportanceClassifierSettingResource;
 use App\Models\ImportanceClassifierSetting;
+use App\Services\Importance\DeterministicImportanceRules;
+use App\Services\Importance\ImportancePrompt;
 use Illuminate\Http\Request;
 use Martis\FieldContext;
 use Martis\Fields\Field;
@@ -47,14 +49,14 @@ describe('ImportanceClassifierSettingResource', function () {
         expect(array_keys(settingFields(FieldContext::UPDATE)))->toBe(['mode', 'threshold']);
     });
 
-    it('shows the code-owned model and versions read-only, resolved from config', function () {
+    it('shows the code-owned model and versions read-only, resolved from config and the class constants', function () {
         $fields = settingFields();
         $setting = ImportanceClassifierSetting::current();
 
         expect($fields)->toHaveKeys(['active_model', 'prompt_version', 'rules_version'])
             ->and($fields['active_model']->resolve($setting))->toBe(config('rag.importance.model'))
-            ->and($fields['prompt_version']->resolve($setting))->toBe(config('rag.importance.prompt_version'))
-            ->and($fields['rules_version']->resolve($setting))->toBe(config('rag.importance.rules_version'));
+            ->and($fields['prompt_version']->resolve($setting))->toBe(ImportancePrompt::VERSION)
+            ->and($fields['rules_version']->resolve($setting))->toBe(DeterministicImportanceRules::VERSION);
     });
 
     it('feeds the mode select from the enum with translated labels', function () {

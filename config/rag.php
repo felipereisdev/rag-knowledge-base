@@ -1,8 +1,6 @@
 <?php
 
 use App\Jobs\ClassifyKnowledgeEntryJob;
-use App\Services\Importance\DeterministicImportanceRules;
-use App\Services\Importance\ImportancePrompt;
 
 return [
     'embeddings' => [
@@ -31,14 +29,15 @@ return [
     'importance' => [
         'model' => env('RAG_IMPORTANCE_MODEL', 'claude-haiku-4-5-20251001'),
         'timeout' => (int) env('RAG_IMPORTANCE_TIMEOUT', ClassifyKnowledgeEntryJob::DEFAULT_MODEL_TIMEOUT_SECONDS),
-        // DISPLAY ONLY (rag_status, the Martis setting screen). These two are
-        // deliberately NOT load-bearing: `config:cache` snapshots them, and the
-        // `bootstrap/cache` volume can outlive the image, so a cached value can
-        // lag the code. Everything that stamps or keys on a version (the cache
-        // identity in HybridImportanceClassifier, the audit record in
-        // ClassifyKnowledgeEntryJob) reads the class constant directly instead.
-        'prompt_version' => ImportancePrompt::VERSION,
-        'rules_version' => DeterministicImportanceRules::VERSION,
+        // No `prompt_version` / `rules_version` keys here on purpose. A
+        // `config:cache` snapshot can outlive the image it was built from, so
+        // anything that read a version through config() risked stamping or
+        // displaying a stale value after a code-only version bump. Every
+        // consumer (the cache identity in HybridImportanceClassifier, the audit
+        // record in ClassifyKnowledgeEntryJob, and the rag_status / Martis
+        // setting-screen displays) reads `ImportancePrompt::VERSION` /
+        // `DeterministicImportanceRules::VERSION` directly instead. Do not
+        // reintroduce these as config keys.
         'max_reason_count' => (int) env('RAG_IMPORTANCE_MAX_REASON_COUNT', 5),
         'max_reason_length' => (int) env('RAG_IMPORTANCE_MAX_REASON_LENGTH', 280),
         'stale_after_minutes' => (int) env('RAG_IMPORTANCE_STALE_AFTER_MINUTES', 15),

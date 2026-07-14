@@ -15,6 +15,7 @@ use App\Services\Importance\ImportanceAssessmentInProgressException;
 use App\Services\Importance\ImportanceCandidate;
 use App\Services\Importance\ImportanceCandidateNormalizer;
 use App\Services\Importance\ImportanceClassificationException;
+use App\Services\Importance\ImportancePrompt;
 use App\Services\Importance\NormalizedImportanceCandidate;
 use App\Services\Importance\SemanticImportanceAssessment;
 use App\Services\Importance\SemanticImportanceJudge;
@@ -175,7 +176,7 @@ it('keeps a shadow-mode important entry pending with its verdict snapshot', func
         ->and($importance['mode'])->toBe(ImportanceClassifierMode::Shadow->value)
         ->and($importance['would_reject'])->toBeFalse()
         ->and($importance['model'])->toBe((string) config('rag.importance.model'))
-        ->and($importance['prompt_version'])->toBe((string) config('rag.importance.prompt_version'))
+        ->and($importance['prompt_version'])->toBe(ImportancePrompt::VERSION)
         ->and($importance['rules_version'])->toBe(DeterministicImportanceRules::VERSION)
         ->and($importance['candidate_hash'])->toBe($assessment->candidate_hash)
         ->and($importance['cache_hit'])->toBeFalse()
@@ -218,7 +219,7 @@ it('keeps an enforce-mode important entry pending', function () {
         ->and($importance['verdict'])->toBe(ImportanceVerdict::Important->value)
         ->and($importance['mode'])->toBe(ImportanceClassifierMode::Enforce->value)
         ->and($importance['would_reject'])->toBeFalse()
-        ->and($importance['prompt_version'])->toBe((string) config('rag.importance.prompt_version'))
+        ->and($importance['prompt_version'])->toBe(ImportancePrompt::VERSION)
         ->and($importance['rules_version'])->toBe(DeterministicImportanceRules::VERSION);
 
     Queue::assertPushed(IndexEntryJob::class, 1);
@@ -395,7 +396,7 @@ it('fails open to pending with a sanitized error on every terminal technical fai
         ->and($error['message'])->not->toContain('speculative reasoning')
         ->and($error['message'])->not->toContain(CLASSIFIABLE_CONTENT)
         ->and($error['model'])->toBe((string) config('rag.importance.model'))
-        ->and($error['prompt_version'])->toBe((string) config('rag.importance.prompt_version'))
+        ->and($error['prompt_version'])->toBe(ImportancePrompt::VERSION)
         ->and($error['rules_version'])->toBe(DeterministicImportanceRules::VERSION);
 
     Queue::assertPushed(IndexEntryJob::class, 1);
@@ -426,6 +427,37 @@ it('fails open to pending with a sanitized error on every terminal technical fai
         'The importance classifier failed unexpectedly.',
     ],
 ]);
+
+it('stamps the failOpen audit record with the class constants, not a config value that may be stale', function () {
+    // `php artisan config:cache` snapshots config/rag.php, and the
+    // `bootstrap/cache` volume can outlive the image it was built from — so the
+    // snapshot can lag the code by a whole version bump. failOpen() is the
+    // one-hop-away instance of that same bug: if it read the versions through
+    // config() instead of the class constants, a stale cache would attribute a
+    // technical-failure audit record to the wrong prompt/rules. Simulate
+    // exactly that stale cache and drive a TERMINAL failure through in
+    // `enforce` mode, mirroring the success-path pin in
+    // HybridImportanceClassifierTest ("keys the cache identity on the class
+    // constants...").
+    config([
+        'rag.importance.prompt_version' => 'stale-cached-v0',
+        'rag.importance.rules_version' => 'stale-cached-v0',
+    ]);
+
+    classifierMode(ImportanceClassifierMode::Enforce);
+    spyJudge(ImportanceClassificationException::timedOut());
+    $entry = classifyingEntry();
+
+    runClassification($entry);
+
+    $entry->refresh();
+    $error = $entry->metadata['importance']['classification_error'];
+
+    expect($error['prompt_version'])->toBe(ImportancePrompt::VERSION)
+        ->and($error['rules_version'])->toBe(DeterministicImportanceRules::VERSION)
+        ->and($error['prompt_version'])->not->toBe('stale-cached-v0')
+        ->and($error['rules_version'])->not->toBe('stale-cached-v0');
+});
 
 it('never logs the raw failure text of an unexpected exception', function () {
     classifierMode(ImportanceClassifierMode::Shadow);
@@ -586,7 +618,7 @@ function runningAssessmentFor(KnowledgeEntry $entry): ImportanceAssessment
         'candidate_hash' => $normalized->hash(),
         'normalized_candidate' => $normalized->data(),
         'model' => (string) config('rag.importance.model'),
-        'prompt_version' => (string) config('rag.importance.prompt_version'),
+        'prompt_version' => ImportancePrompt::VERSION,
         'rules_version' => DeterministicImportanceRules::VERSION,
         'status' => ImportanceAssessmentStatus::Running,
     ]);
