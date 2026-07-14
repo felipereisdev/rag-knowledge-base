@@ -1,8 +1,13 @@
 <?php
 
+use App\Enums\ImportanceClassifierMode;
+use App\Enums\KnowledgeSource;
+use App\Enums\KnowledgeStatus;
+use App\Jobs\ClassifyKnowledgeEntryJob;
 use App\Mcp\Servers\RagServer;
 use App\Mcp\Tools\RagStoreKnowledgeTool;
 use App\Models\Entity;
+use App\Models\ImportanceClassifierSetting;
 use App\Models\KnowledgeEntry;
 use App\Models\Project;
 use App\Models\Relation;
@@ -25,7 +30,14 @@ beforeEach(function () {
     ]);
 });
 
+function toolMode(ImportanceClassifierMode $mode): void
+{
+    ImportanceClassifierSetting::query()->findOrFail(1)->update(['mode' => $mode->value]);
+}
+
 it('stores a knowledge entry with tags and entities', function () {
+    toolMode(ImportanceClassifierMode::Off);
+
     $response = RagServer::tool(RagStoreKnowledgeTool::class, [
         'project_id' => 'test-project',
         'title' => 'Orders over 1000 require manager approval',
@@ -45,7 +57,8 @@ it('stores a knowledge entry with tags and entities', function () {
 
     $entry = KnowledgeEntry::where('title', 'Orders over 1000 require manager approval')->first();
     expect($entry)->not->toBeNull()
-        ->and($entry->status)->toBe('pending')
+        ->and($entry->status)->toBe(KnowledgeStatus::Pending->value)
+        ->and($entry->source)->toBe(KnowledgeSource::Mcp->value)
         ->and($entry->category)->toBe('business-rule');
 
     expect($entry->tags->pluck('name')->all())->toBe(['orders', 'approval']);
@@ -58,6 +71,51 @@ it('stores a knowledge entry with tags and entities', function () {
     $response->assertSee('Knowledge entry stored (pending approval)');
     $response->assertSee($entry->id);
 });
+
+it('reports the entry as pending approval and dispatches nothing when the classifier is off', function () {
+    toolMode(ImportanceClassifierMode::Off);
+
+    $response = RagServer::tool(RagStoreKnowledgeTool::class, [
+        'project_id' => 'test-project',
+        'title' => 'Unclassified',
+        'content' => 'Body.',
+    ]);
+
+    $entry = KnowledgeEntry::where('title', 'Unclassified')->firstOrFail();
+
+    $response->assertOk();
+    $response->assertSee('Knowledge entry stored (pending approval)');
+    $response->assertSee($entry->id);
+
+    expect($entry->status)->toBe(KnowledgeStatus::Pending->value);
+    Queue::assertNotPushed(ClassifyKnowledgeEntryJob::class);
+});
+
+it('reports the entry as being classified and dispatches classification when the classifier is on', function (ImportanceClassifierMode $mode) {
+    toolMode($mode);
+
+    $response = RagServer::tool(RagStoreKnowledgeTool::class, [
+        'project_id' => 'test-project',
+        'title' => 'Classified',
+        'content' => 'Body.',
+    ]);
+
+    $entry = KnowledgeEntry::where('title', 'Classified')->firstOrFail();
+
+    $response->assertOk();
+    $response->assertSee('being classified for importance');
+    // The identifier the caller needs is still returned.
+    $response->assertSee($entry->id);
+
+    expect($entry->status)->toBe(KnowledgeStatus::Classifying->value);
+    Queue::assertPushed(
+        ClassifyKnowledgeEntryJob::class,
+        fn (ClassifyKnowledgeEntryJob $job): bool => $job->entryId === (int) $entry->id,
+    );
+})->with([
+    'shadow' => ImportanceClassifierMode::Shadow,
+    'enforce' => ImportanceClassifierMode::Enforce,
+]);
 
 it('skips malformed entities and reports count', function () {
     $response = RagServer::tool(RagStoreKnowledgeTool::class, [

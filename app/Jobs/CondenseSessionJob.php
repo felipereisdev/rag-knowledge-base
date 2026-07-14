@@ -2,6 +2,7 @@
 
 namespace App\Jobs;
 
+use App\Enums\KnowledgeSource;
 use App\Models\CondenseRun;
 use App\Models\CondenseSetting;
 use App\Services\Condense\CondenseDedup;
@@ -88,7 +89,7 @@ final class CondenseSessionJob implements ShouldQueue
                 }
                 $writer->store(
                     $this->projectId, $c['title'], $c['content'], $c['category'],
-                    'condense', [], $c['entities'], $c['relations'],
+                    KnowledgeSource::Condense, [], $c['entities'], $c['relations'],
                 );
                 $created++;
             }

@@ -2,6 +2,7 @@
 
 namespace App\Services\Importing;
 
+use App\Enums\KnowledgeSource;
 use App\Services\Knowledge\KnowledgeWriter;
 
 class DocumentImporter
@@ -41,7 +42,10 @@ class DocumentImporter
                 title: $section['title'],
                 content: $section['content'],
                 category: $category,
-                source: 'import',
+                // Bulk-imported documents are never classified: the classifier
+                // judges captured insight, not the corpus a human deliberately
+                // fed in, so these always start `pending` for approval.
+                source: KnowledgeSource::Import,
                 tags: $tags ?? [],
             );
 

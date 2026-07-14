@@ -436,8 +436,6 @@ class ClassifyKnowledgeEntryJob implements ShouldQueue
 
     private function mode(): ImportanceClassifierMode
     {
-        $setting = ImportanceClassifierSetting::query()->find(1) ?? new ImportanceClassifierSetting;
-
-        return $setting->mode;
+        return ImportanceClassifierSetting::current()->mode;
     }
 }

@@ -2,13 +2,11 @@
 
 namespace App\Console\Commands;
 
-use App\Models\Entity;
-use App\Models\KnowledgeEntry;
+use App\Enums\KnowledgeSource;
+use App\Enums\KnowledgeStatus;
 use App\Models\Project;
-use App\Models\Relation;
-use App\Models\Tag;
+use App\Services\Knowledge\KnowledgeWriter;
 use Illuminate\Console\Command;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
 class RagStoreCommand extends Command
@@ -25,7 +23,7 @@ class RagStoreCommand extends Command
 
     protected $description = 'Store a knowledge entry in the RAG knowledge base (pending approval).';
 
-    public function handle(): int
+    public function handle(KnowledgeWriter $writer): int
     {
         $content = $this->resolveContent();
         if ($content === null) {
@@ -37,49 +35,27 @@ class RagStoreCommand extends Command
         $pid = $this->resolveProjectId();
         $title = (string) $this->argument('title');
         $category = (string) $this->option('category');
-        $tags = $this->parseCsv((string) $this->option('tags'));
-        $entities = $this->parseCsv((string) $this->option('entities'));
-        $relations = $this->parseRelations((string) $this->option('relations'));
 
-        $entry = DB::transaction(function () use ($pid, $title, $content, $category, $tags, $entities, $relations) {
-            $entry = KnowledgeEntry::create([
-                'project_id' => $pid,
-                'title' => $title,
-                'content' => $content,
-                'category' => $category,
-                'source' => 'cli',
-                'status' => 'pending',
-            ]);
+        // The writer owns the write: the transaction, the tag/entity/relation
+        // graph, the initial status, and whether this entry gets classified.
+        // The command only parses options.
+        $entry = $writer->store(
+            projectId: $pid,
+            title: $title,
+            content: $content,
+            category: $category,
+            source: KnowledgeSource::Cli,
+            tags: $this->parseCsv((string) $this->option('tags')),
+            entities: array_map(
+                static fn (string $name): array => ['name' => $name],
+                $this->parseCsv((string) $this->option('entities')),
+            ),
+            relations: $this->parseRelations((string) $this->option('relations')),
+        );
 
-            foreach ($tags as $tagName) {
-                $tag = Tag::firstOrCreate(['project_id' => $pid, 'name' => $tagName]);
-                $entry->tags()->attach($tag->id);
-            }
-
-            foreach ($entities as $entityName) {
-                $entity = Entity::firstOrCreate(
-                    ['project_id' => $pid, 'name' => $entityName],
-                    ['type' => ''],
-                );
-                $entry->entities()->attach($entity->id);
-            }
-
-            foreach ($relations as $r) {
-                $subject = Entity::firstOrCreate(['project_id' => $pid, 'name' => $r['subject']], ['type' => '']);
-                $object = Entity::firstOrCreate(['project_id' => $pid, 'name' => $r['object']], ['type' => '']);
-                Relation::create([
-                    'project_id' => $pid,
-                    'subject_id' => $subject->id,
-                    'predicate' => $r['predicate'],
-                    'object_id' => $object->id,
-                    'entry_id' => $entry->id,
-                ]);
-            }
-
-            return $entry;
-        });
-
-        $this->info('Knowledge entry stored (pending approval).');
+        $this->info($entry->status === KnowledgeStatus::Classifying->value
+            ? 'Knowledge entry stored (classifying importance).'
+            : 'Knowledge entry stored (pending approval).');
         $this->line("  ID: {$entry->id}");
         $this->line("  Title: {$title}");
         $this->line("  Project: {$pid}");
@@ -133,7 +109,7 @@ class RagStoreCommand extends Command
     }
 
     /**
-     * @return array<string>
+     * @return list<string>
      */
     private function parseCsv(string $value): array
     {
@@ -145,7 +121,7 @@ class RagStoreCommand extends Command
     }
 
     /**
-     * @return array<array{subject: string, predicate: string, object: string}>
+     * @return list<array{subject: string, predicate: string, object: string}>
      */
     private function parseRelations(string $value): array
     {

@@ -28,4 +28,14 @@ class ImportanceClassifierSetting extends Model
             'threshold' => 'integer',
         ];
     }
+
+    /**
+     * The singleton, or an unsaved instance carrying the code defaults when the
+     * row is missing. Read-only by design: nothing on the ingestion path should
+     * create administrator settings as a side effect of storing an entry.
+     */
+    public static function current(): self
+    {
+        return static::query()->find(1) ?? new self;
+    }
 }

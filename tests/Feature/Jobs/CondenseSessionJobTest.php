@@ -1,8 +1,13 @@
 <?php
 
+use App\Enums\ImportanceClassifierMode;
+use App\Enums\KnowledgeSource;
+use App\Enums\KnowledgeStatus;
+use App\Jobs\ClassifyKnowledgeEntryJob;
 use App\Jobs\CondenseSessionJob;
 use App\Models\CondenseRun;
 use App\Models\CondenseSetting;
+use App\Models\ImportanceClassifierSetting;
 use App\Models\KnowledgeEntry;
 use App\Models\Project;
 use App\Services\Condense\CondenseDedup;
@@ -58,7 +63,9 @@ beforeEach(function () {
     });
 });
 
-it('creates a pending entry and records a done run', function () {
+it('creates a classifying entry, dispatches classification, and records a done run', function () {
+    // The seeded classifier mode is `shadow`, so a condensed entry is captured
+    // for classification rather than going straight to a human.
     $path = tempnam(sys_get_temp_dir(), 'tr').'.jsonl';
     file_put_contents($path, "{}\n");
 
@@ -67,10 +74,35 @@ it('creates a pending entry and records a done run', function () {
         app(CondenseDedup::class), app(KnowledgeWriter::class),
     );
 
-    expect(KnowledgeEntry::where('project_id', 'p1')->where('status', 'pending')->count())->toBe(1);
+    $entry = KnowledgeEntry::where('project_id', 'p1')->firstOrFail();
+    expect($entry->source)->toBe(KnowledgeSource::Condense->value)
+        ->and($entry->status)->toBe(KnowledgeStatus::Classifying->value);
+    Queue::assertPushed(
+        ClassifyKnowledgeEntryJob::class,
+        fn (ClassifyKnowledgeEntryJob $job): bool => $job->entryId === (int) $entry->id,
+    );
+
     $run = CondenseRun::where('session_id', 'sess-1')->first();
     expect($run->status)->toBe('done');
     expect($run->entries_created)->toBe(1);
+});
+
+it('creates a pending entry and dispatches nothing when the classifier is off', function () {
+    ImportanceClassifierSetting::query()->findOrFail(1)->update([
+        'mode' => ImportanceClassifierMode::Off->value,
+    ]);
+
+    $path = tempnam(sys_get_temp_dir(), 'tr').'.jsonl';
+    file_put_contents($path, "{}\n");
+
+    (new CondenseSessionJob('p1', $path, 'sess-off'))->handle(
+        app(TranscriptParser::class), app(KnowledgeExtractorFactory::class),
+        app(CondenseDedup::class), app(KnowledgeWriter::class),
+    );
+
+    expect(KnowledgeEntry::where('project_id', 'p1')->where('status', KnowledgeStatus::Pending->value)->count())->toBe(1);
+    Queue::assertNotPushed(ClassifyKnowledgeEntryJob::class);
+    expect(CondenseRun::where('session_id', 'sess-off')->first()->status)->toBe('done');
 });
 
 it('is idempotent for the same session_id', function () {

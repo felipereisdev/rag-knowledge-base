@@ -2,6 +2,8 @@
 
 namespace App\Mcp\Tools;
 
+use App\Enums\KnowledgeSource;
+use App\Enums\KnowledgeStatus;
 use App\Exceptions\ProjectNotIdentifiedException;
 use App\Mcp\Tools\Concerns\ResolvesProjectId;
 use App\Models\KnowledgeEntry;
@@ -40,7 +42,7 @@ class RagStoreKnowledgeTool extends Tool
             + (count($rawRelations) - count($relations));
 
         $entry = app(KnowledgeWriter::class)->store(
-            $pid, $title, $content, $category, 'mcp', $tags, $entities, $relations,
+            $pid, $title, $content, $category, KnowledgeSource::Mcp, $tags, $entities, $relations,
         );
 
         $project = Project::find($pid);
@@ -55,7 +57,15 @@ class RagStoreKnowledgeTool extends Tool
             $graphLine = '  Graph: '.count($entities).' entities, '.count($relations)." relations{$skippedStr}\n";
         }
 
-        $text = "Knowledge entry stored (pending approval).\n".
+        // The writer decides the entry's initial status from the classifier
+        // mode and the source; the tool only reports what it decided, so the
+        // caller is never told "pending approval" about an entry that is still
+        // being judged (and may yet be rejected under `enforce`).
+        $headline = $entry->status === KnowledgeStatus::Classifying->value
+            ? "Knowledge entry stored (being classified for importance; it appears for approval once classified).\n"
+            : "Knowledge entry stored (pending approval).\n";
+
+        $text = $headline.
             "  Title: {$title}\n".
             "  Category: {$category}\n".
             '  Tags: '.($tags ? implode(', ', $tags) : '(none)')."\n".

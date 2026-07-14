@@ -1,5 +1,10 @@
 <?php
 
+use App\Enums\ImportanceClassifierMode;
+use App\Enums\KnowledgeSource;
+use App\Enums\KnowledgeStatus;
+use App\Jobs\ClassifyKnowledgeEntryJob;
+use App\Models\ImportanceClassifierSetting;
 use App\Models\KnowledgeEntry;
 use App\Models\Project;
 use App\Services\Importing\DocumentImporter;
@@ -75,6 +80,35 @@ it('imports through the shared writer flow', function () {
         @unlink($path);
     }
 });
+
+it('keeps imported entries pending and never classifies them', function (ImportanceClassifierMode $mode) {
+    // Regression: a bulk import is a human's deliberate corpus, not captured
+    // insight. Whatever the classifier mode, imported entries go straight to
+    // approval and no classification job is ever dispatched for them.
+    ImportanceClassifierSetting::query()->findOrFail(1)->update(['mode' => $mode->value]);
+
+    $path = tempnam(sys_get_temp_dir(), 'rag_test_').'.md';
+    file_put_contents($path, "# A\n\nContent A.\n\n# B\n\nContent B.");
+
+    try {
+        $entryIds = $this->importer->import($this->project->id, $path, 'documentation', ['docs']);
+
+        expect($entryIds)->toHaveCount(2);
+        foreach ($entryIds as $id) {
+            $entry = KnowledgeEntry::findOrFail($id);
+            expect($entry->source)->toBe(KnowledgeSource::Import->value)
+                ->and($entry->status)->toBe(KnowledgeStatus::Pending->value);
+        }
+
+        Queue::assertNotPushed(ClassifyKnowledgeEntryJob::class);
+    } finally {
+        @unlink($path);
+    }
+})->with([
+    'shadow' => ImportanceClassifierMode::Shadow,
+    'enforce' => ImportanceClassifierMode::Enforce,
+    'off' => ImportanceClassifierMode::Off,
+]);
 
 it('imports a .txt file as a single entry', function () {
     $path = tempnam(sys_get_temp_dir(), 'rag_test_').'.txt';
