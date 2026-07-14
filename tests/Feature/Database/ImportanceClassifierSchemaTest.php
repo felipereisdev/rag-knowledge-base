@@ -4,6 +4,7 @@ use App\Enums\ImportanceAssessmentStatus;
 use App\Enums\ImportanceVerdict;
 use App\Jobs\IndexEntryJob;
 use App\Models\ImportanceAssessment;
+use App\Models\ImportanceClassifierSetting;
 use App\Models\KnowledgeEntry;
 use App\Models\Project;
 use Illuminate\Database\QueryException;
@@ -237,3 +238,15 @@ it('casts assessment fields and relates an entry to its assessment', function ()
         ->and($freshAssessment->duration_ms)->toBe(42)
         ->and($freshEntry->importanceAssessment->is($freshAssessment))->toBeTrue();
 });
+
+it('stores a nullable auto-approve threshold defaulting to 90', function () {
+    expect(Schema::hasColumn('importance_classifier_settings', 'auto_approve_threshold'))->toBeTrue();
+
+    $setting = ImportanceClassifierSetting::query()->find(1);
+
+    expect($setting->auto_approve_threshold)->toBe(90);
+
+    $setting->update(['auto_approve_threshold' => null]);
+
+    expect($setting->fresh()->auto_approve_threshold)->toBeNull();
+})->note('null disables auto-approval without disabling rejection.');

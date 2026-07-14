@@ -11,14 +11,16 @@ use Illuminate\Database\Eloquent\Model;
  * @property int $id
  * @property ImportanceClassifierMode $mode
  * @property int $threshold
+ * @property ?int $auto_approve_threshold
  */
 class ImportanceClassifierSetting extends Model
 {
-    protected $fillable = ['mode', 'threshold'];
+    protected $fillable = ['mode', 'threshold', 'auto_approve_threshold'];
 
     protected $attributes = [
         'mode' => 'shadow',
         'threshold' => 70,
+        'auto_approve_threshold' => 90,
     ];
 
     protected function casts(): array
@@ -26,6 +28,7 @@ class ImportanceClassifierSetting extends Model
         return [
             'mode' => ImportanceClassifierMode::class,
             'threshold' => 'integer',
+            'auto_approve_threshold' => 'integer',
         ];
     }
 
