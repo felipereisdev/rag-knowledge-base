@@ -20,9 +20,12 @@ beforeEach(function () {
 
 afterEach(function () {
     // The probe connection commits for real (see useSeparateQueueConnection()),
-    // so RefreshDatabase's rollback does not clean up after it.
+    // so RefreshDatabase's rollback does not clean up after it. Scoped to the
+    // `classification` queue: under `pest --parallel` against a shared
+    // `rag_test` database, an unfiltered delete would also wipe rows another
+    // worker's suite pushed onto unrelated queues on the same connection.
     if (array_key_exists('queue_probe', (array) config('database.connections'))) {
-        DB::connection('queue_probe')->table('jobs')->delete();
+        DB::connection('queue_probe')->table('jobs')->where('queue', 'classification')->delete();
     }
 });
 
@@ -126,6 +129,58 @@ it('reuses an existing entity for relations referenced by name', function () {
     // No duplicate typed entity created; a bare 'pgvector' placeholder is added.
     expect(Entity::where('project_id', 'p1')->where('name', 'HybridSearcher')->count())->toBe(1);
     expect(Entity::where('project_id', 'p1')->where('name', 'pgvector')->count())->toBe(1);
+});
+
+/**
+ * The entities loop and the relations loop must agree on what "no type" means.
+ * A caller (the CLI) that supplies an entity with no type is not asking for a
+ * new, untyped node — it means "this entity, whatever type it already has".
+ */
+it('reuses an existing typed entity when the caller supplies no type', function () {
+    Queue::fake();
+    Entity::create(['project_id' => 'p1', 'name' => 'Order', 'type' => 'concept']);
+
+    app(KnowledgeWriter::class)->store('p1', 't', 'c', 'insight', KnowledgeSource::Condense,
+        entities: [['name' => 'Order']]);
+
+    $orders = Entity::where('project_id', 'p1')->where('name', 'Order')->get();
+    expect($orders)->toHaveCount(1)
+        ->and($orders->first()->type)->toBe('concept');
+});
+
+/**
+ * An explicit, non-empty type is a real request for that specific node and
+ * must not be silently merged into an existing entity of a different type.
+ */
+it('creates a distinct entity when the caller supplies an explicit different type', function () {
+    Queue::fake();
+    Entity::create(['project_id' => 'p1', 'name' => 'Order', 'type' => 'concept']);
+
+    app(KnowledgeWriter::class)->store('p1', 't', 'c', 'insight', KnowledgeSource::Mcp,
+        entities: [['name' => 'Order', 'type' => 'model']]);
+
+    expect(Entity::where('project_id', 'p1')->where('name', 'Order')->count())->toBe(2);
+    expect(Entity::where('project_id', 'p1')->where('name', 'Order')->where('type', 'concept')->exists())->toBeTrue();
+    expect(Entity::where('project_id', 'p1')->where('name', 'Order')->where('type', 'model')->exists())->toBeTrue();
+});
+
+/**
+ * The collision the CLI's old (name-only) matching used to avoid, and that
+ * the writer's entities loop regressed: attaching the entry to one `Order`
+ * node while a relation naming `Order` in the same call resolves to a
+ * different one. Both loops must land on the same single node.
+ */
+it('resolves an untyped entity and a same-call relation to the same node', function () {
+    Queue::fake();
+    Entity::create(['project_id' => 'p1', 'name' => 'Order', 'type' => 'concept']);
+
+    $entry = app(KnowledgeWriter::class)->store('p1', 't', 'c', 'insight', KnowledgeSource::Cli,
+        entities: [['name' => 'Order']],
+        relations: [['subject' => 'Order', 'predicate' => 'bills', 'object' => 'Invoice']]);
+
+    $order = Entity::where('project_id', 'p1')->where('name', 'Order')->sole();
+    expect($entry->entities()->pluck('entities.id')->all())->toBe([$order->id]);
+    expect(Relation::where('entry_id', $entry->id)->first()->subject_id)->toBe($order->id);
 });
 
 it('accepts a raw string source and normalizes it through the enum', function () {

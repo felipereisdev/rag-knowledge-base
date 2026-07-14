@@ -75,15 +75,28 @@ final class KnowledgeWriter
             }
 
             foreach ($entities as $entityData) {
-                // Search on name+type to match the unique constraint and
-                // preserve the caller's requested type. Without `type` in the
-                // search, an existing entity with a different type would be
-                // returned and the requested type silently lost.
-                $entity = Entity::firstOrCreate([
-                    'project_id' => $projectId,
-                    'name' => $entityData['name'],
-                    'type' => $entityData['type'] ?? '',
-                ]);
+                $type = $entityData['type'] ?? '';
+
+                // A caller that supplies an explicit, non-empty type (the MCP
+                // tool, when the model fills it in) means it: match/create on
+                // (name, type) so a different type for the same name is a
+                // distinct node, and the requested type is never silently
+                // lost by matching on name alone.
+                //
+                // A caller that supplies no type (or an empty one — the CLI's
+                // `--entities` never supplies one) does NOT intend a new,
+                // untyped node; it means "this entity, whatever type it may
+                // already have". Route it through the same name-only lookup
+                // the relations loop uses below, so it reuses an existing
+                // typed entity instead of splitting the graph into two nodes
+                // for one concept.
+                $entity = $type === ''
+                    ? $this->findOrCreateNamedEntity($projectId, $entityData['name'])
+                    : Entity::firstOrCreate([
+                        'project_id' => $projectId,
+                        'name' => $entityData['name'],
+                        'type' => $type,
+                    ]);
                 $entry->entities()->attach($entity->id);
             }
 

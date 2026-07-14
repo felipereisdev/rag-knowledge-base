@@ -21,7 +21,7 @@ class RagStoreCommand extends Command
         {--entities= : Comma-separated entity names}
         {--relations= : Comma-separated subject:predicate:object triples}';
 
-    protected $description = 'Store a knowledge entry in the RAG knowledge base (pending approval).';
+    protected $description = 'Store a knowledge entry in the RAG knowledge base (pending approval or classification).';
 
     public function handle(KnowledgeWriter $writer): int
     {

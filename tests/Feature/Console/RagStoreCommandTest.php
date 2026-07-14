@@ -127,6 +127,34 @@ it('reuses an existing entity when a relation references it by name', function (
     expect(Relation::where('predicate', 'bills')->first()->subject_id)->toBe($orders->first()->id);
 });
 
+/**
+ * `--entities` never supplies a type, so a bare `--entities=Order` must not
+ * fragment an existing typed `Order` into two nodes. It must also resolve to
+ * the SAME node a relation naming `Order` in the same call resolves to —
+ * otherwise the entry attaches to one `Order` while the relation's subject
+ * points at another.
+ */
+it('reuses an existing typed entity when --entities supplies no type', function () {
+    Project::create(['id' => 'test-project', 'name' => 'Test', 'root_path' => '/tmp/test']);
+    Entity::create(['project_id' => 'test-project', 'name' => 'Order', 'type' => 'concept']);
+
+    $this->artisan('rag:store', [
+        'title' => 'Entity Collision Rule',
+        '--project' => 'test-project',
+        '--content' => 'Body.',
+        '--entities' => 'Order',
+        '--relations' => 'Order:bills:Invoice',
+    ])->assertSuccessful();
+
+    $orders = Entity::where('project_id', 'test-project')->where('name', 'Order')->get();
+    expect($orders)->toHaveCount(1)
+        ->and($orders->first()->type)->toBe('concept');
+
+    $entry = KnowledgeEntry::where('title', 'Entity Collision Rule')->firstOrFail();
+    expect($entry->entities->pluck('id')->all())->toBe([$orders->first()->id])
+        ->and(Relation::where('predicate', 'bills')->first()->subject_id)->toBe($orders->first()->id);
+});
+
 it('reads content from --content-file when used', function () {
     Project::create([
         'id' => 'test-project',
