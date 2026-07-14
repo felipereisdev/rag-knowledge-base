@@ -58,6 +58,39 @@ class KnowledgeEntryResource extends Resource
     }
 
     /**
+     * Blocks the same race the bulk actions block (see
+     * `App\Martis\Actions\Concerns\RefusesClassifyingEntries`), but for the row
+     * edit form: `classifying` is absent from the settable status options
+     * ({@see KnowledgeStatus::adminEditableOptions()}), which stops an admin from
+     * *entering* it, but does nothing to stop them *leaving* it — a `PUT` with
+     * any other status on a row still `classifying` would pass validation and
+     * apply, racing `App\Jobs\ClassifyKnowledgeEntryJob` for the same row.
+     *
+     * So a `status` key in the payload that disagrees with the row's current
+     * `classifying` value is refused outright (403), before validation runs.
+     * A payload that never touches `status` — editing the title, say — is
+     * unaffected: Martis's `ResourceController::fillFields()` only fills a
+     * field the request actually sent, so leaving `status` out already leaves
+     * the column untouched.
+     */
+    public function authorizedToUpdate(Request $request): bool
+    {
+        if ($this->leavesClassifyingViaStatus($request)) {
+            return false;
+        }
+
+        return parent::authorizedToUpdate($request);
+    }
+
+    private function leavesClassifyingViaStatus(Request $request): bool
+    {
+        return $this->model instanceof KnowledgeEntry
+            && $this->model->getAttribute('status') === KnowledgeStatus::Classifying->value
+            && $request->has('status')
+            && $request->input('status') !== KnowledgeStatus::Classifying->value;
+    }
+
+    /**
      * Per-row inline ✓/✗ buttons AND the bulk "Actions" dropdown from a single
      * action each. Martis v1.28.3 made ->showInline() additive (it keeps
      * showOnIndex=true), so one showInline action appears in both surfaces — no
@@ -140,7 +173,9 @@ class KnowledgeEntryResource extends Resource
             // has no job to move it on, is excluded from indexing by the
             // observer, and is refused by the approve/reject actions — it would
             // be stuck and invisible forever. Filtering by it is still allowed
-            // (see StatusFilter); only *setting* it is not.
+            // (see StatusFilter); only *setting* it is not. Leaving *out* of
+            // classifying through this same field is refused too, but at the
+            // request level — see self::authorizedToUpdate().
             Select::make('status', __('rag.fields.status'))
                 ->optionsFromMap(KnowledgeStatus::adminEditableOptions())
                 ->default(KnowledgeStatus::Pending->value)

@@ -413,4 +413,65 @@ describe('KnowledgeEntryResource', function () {
             'status' => 'approved',
         ]);
     });
+
+    it('refuses a PUT that moves a classifying entry to approved, rejected or pending', function () {
+        Project::create(['id' => 'r1', 'name' => 'R1', 'root_path' => '/p']);
+
+        foreach ([KnowledgeStatus::Approved, KnowledgeStatus::Rejected, KnowledgeStatus::Pending] as $target) {
+            $entry = KnowledgeEntry::create([
+                'project_id' => 'r1',
+                'title' => 'Stuck entry',
+                'status' => KnowledgeStatus::Classifying->value,
+            ]);
+
+            $this->putJson("/martis/api/resources/knowledge-entries/{$entry->id}", [
+                'status' => $target->value,
+            ])->assertForbidden();
+
+            expect($entry->refresh()->status)->toBe(KnowledgeStatus::Classifying->value);
+        }
+    });
+
+    it('still applies an unrelated field edit to a classifying entry without clobbering its status', function () {
+        Project::create(['id' => 'r1', 'name' => 'R1', 'root_path' => '/p']);
+        $entry = KnowledgeEntry::create([
+            'project_id' => 'r1',
+            'title' => 'Tpyo in the title',
+            'status' => KnowledgeStatus::Classifying->value,
+        ]);
+
+        $this->putJson("/martis/api/resources/knowledge-entries/{$entry->id}", [
+            'title' => 'Typo in the title',
+        ])->assertOk();
+
+        $entry->refresh();
+
+        expect($entry->title)->toBe('Typo in the title')
+            ->and($entry->status)->toBe(KnowledgeStatus::Classifying->value);
+    });
+
+    it('keeps normal status transitions working for entries not stuck in classifying', function () {
+        Project::create(['id' => 'r1', 'name' => 'R1', 'root_path' => '/p']);
+
+        $transitions = [
+            [KnowledgeStatus::Pending, KnowledgeStatus::Approved],
+            [KnowledgeStatus::Pending, KnowledgeStatus::Rejected],
+            [KnowledgeStatus::Rejected, KnowledgeStatus::Pending],
+            [KnowledgeStatus::Approved, KnowledgeStatus::Rejected],
+        ];
+
+        foreach ($transitions as [$from, $to]) {
+            $entry = KnowledgeEntry::create([
+                'project_id' => 'r1',
+                'title' => 'Entry '.$from->value.' to '.$to->value,
+                'status' => $from->value,
+            ]);
+
+            $this->putJson("/martis/api/resources/knowledge-entries/{$entry->id}", [
+                'status' => $to->value,
+            ])->assertOk();
+
+            expect($entry->refresh()->status)->toBe($to->value);
+        }
+    });
 });

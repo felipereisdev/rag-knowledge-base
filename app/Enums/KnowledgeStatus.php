@@ -2,10 +2,6 @@
 
 namespace App\Enums;
 
-use App\Jobs\ClassifyKnowledgeEntryJob;
-use App\Observers\KnowledgeEntryObserver;
-use App\Services\KnowledgeWriter;
-
 enum KnowledgeStatus: string
 {
     case Pending = 'pending';
@@ -46,12 +42,14 @@ enum KnowledgeStatus: string
     /**
      * The statuses a human may assign by hand.
      *
-     * `classifying` is owned by the classifier pipeline: only {@see KnowledgeWriter}
-     * puts an entry there, and only {@see ClassifyKnowledgeEntryJob} takes
-     * it out. An entry parked in `classifying` from the admin panel has no job to
-     * drive it anywhere, is excluded from indexing by
-     * {@see KnowledgeEntryObserver::INDEXED_STATUSES}, and is refused
-     * by the approve/reject actions — it would be stuck and invisible forever.
+     * `classifying` is owned by the classifier pipeline: only
+     * `App\Services\KnowledgeWriter` puts an entry there, and only
+     * `App\Jobs\ClassifyKnowledgeEntryJob` takes it out. An entry parked
+     * in `classifying` from the admin panel has no job to drive it anywhere, is
+     * excluded from indexing by
+     * `App\Observers\KnowledgeEntryObserver::INDEXED_STATUSES`, and is
+     * refused by the approve/reject actions — it would be stuck and invisible
+     * forever.
      *
      * @return list<self>
      */

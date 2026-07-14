@@ -3,6 +3,7 @@
 namespace App\Martis\Actions;
 
 use App\Enums\KnowledgeStatus;
+use App\Martis\Actions\Concerns\RefusesClassifyingEntries;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
@@ -13,6 +14,8 @@ use Martis\Contracts\FieldContract;
 
 class RejectEntries extends Action
 {
+    use RefusesClassifyingEntries;
+
     public function name(): string
     {
         return __('rag.actions.reject.name');
@@ -23,40 +26,26 @@ class RejectEntries extends Action
      *
      * An entry still in `classifying` is refused, for the same reason approval
      * refuses it: the classifier job owns that status and its transition guard
-     * would overwrite the human's decision when it lands.
+     * would overwrite the human's decision when it lands. See
+     * {@see RefusesClassifyingEntries}.
      *
      * @param  Collection<int, Model>  $models
      */
     public function handle(ActionFields $fields, Collection $models): ActionResponse|Action|null
     {
-        [$classifying, $actionable] = $models->partition(
-            static fn (Model $model): bool => $model->getAttribute('status') === KnowledgeStatus::Classifying->value,
-        );
+        [$classifying, $actionable] = $this->partitionClassifying($models);
 
         foreach ($actionable as $model) {
             $model->update(['status' => KnowledgeStatus::Rejected->value]);
         }
 
-        $blocked = $classifying->count();
-        $rejected = $actionable->count();
-
-        if ($blocked === 0) {
-            return ActionResponse::message(
-                trans_choice('rag.actions.reject.success', $rejected, ['count' => $rejected]),
-            );
-        }
-
-        if ($rejected === 0) {
-            return ActionResponse::danger(
-                trans_choice('importance.actions.reject_blocked', $blocked, ['count' => $blocked]),
-            );
-        }
-
-        return ActionResponse::danger(
-            trans_choice('importance.actions.reject_partial', $blocked, [
-                'count' => $blocked,
-                'rejected' => $rejected,
-            ]),
+        return $this->respondToClassifyingGuard(
+            $classifying,
+            $actionable->count(),
+            successKey: 'rag.actions.reject.success',
+            blockedKey: 'importance.actions.reject_blocked',
+            partialKey: 'importance.actions.reject_partial',
+            partialActionedParam: 'rejected',
         );
     }
 
