@@ -73,7 +73,7 @@
 
 ### Test and fixture files
 
-- `tests/Fixtures/importance/must-keep.json`
+- `resources/importance/must-keep.json`
 - `tests/Feature/Console/RagImportanceReportCommandTest.php`
 - `tests/Feature/Console/RagStoreCommandTest.php`
 - `tests/Feature/Jobs/ClassifyKnowledgeEntryJobTest.php`
@@ -269,7 +269,7 @@ git commit -m "feat: add strict Claude importance judge"
 - Create: `app/Services/Importance/HybridImportanceClassifier.php`
 - Test: `tests/Unit/Services/Importance/DeterministicImportanceRulesTest.php`
 - Test: `tests/Unit/Services/Importance/HybridImportanceClassifierTest.php`
-- Create: `tests/Fixtures/importance/must-keep.json`
+- Create: `resources/importance/must-keep.json`
 
 - [ ] Build a reviewed `must-keep.json` corpus with at least 20 examples covering architectural decisions, business rules, operational constraints, conventions, non-obvious fixes, and decisions with rationale. Each fixture must contain candidate fields and a short human reason for retention.
 
@@ -313,7 +313,7 @@ Expected: all focused tests pass, including the must-keep corpus assertions.
 - [ ] Commit the hybrid classifier:
 
 ```bash
-git add app/Services/Importance tests/Unit/Services/Importance tests/Fixtures/importance/must-keep.json
+git add app/Services/Importance tests/Unit/Services/Importance resources/importance/must-keep.json
 git commit -m "feat: combine semantic and deterministic importance rules"
 ```
 
