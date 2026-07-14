@@ -243,7 +243,7 @@ When a token is set, pass the same value as `--token` to `rag:install`. Client-s
 
 | Tool | Purpose |
 |---|---|
-| `rag_status` | Project status (entry counts, tags, categories). Auto-creates the project from the working directory. |
+| `rag_status` | Project status (entry counts, tags, categories) plus importance-classifier health (mode, threshold, entries in flight, shadow verdicts, `classification` queue). Auto-creates the project from the working directory. |
 | `rag_store_knowledge` | Store a **pending** entry with tags/entities/relations. Requires approval before it's searchable. |
 | `rag_search` | Hybrid search: vector + full-text + RRF + knowledge-graph expansion. |
 | `rag_query_graph` | Explore entity relationships in the knowledge graph. |
@@ -260,6 +260,7 @@ docker compose exec app php artisan rag:store "Title" --content="..." --category
 docker compose exec app php artisan rag:import path/to/file.md --project=my-project
 docker compose exec app php artisan rag:search "query" --project=my-project --limit=5
 docker compose exec app php artisan rag:reindex --project=my-project
+docker compose exec app php artisan rag:importance-report --project=my-project
 ```
 
 ---
@@ -273,6 +274,134 @@ docker compose exec app php artisan rag:reindex --project=my-project
    waiting for the optional session-condensation worker.
 
 This keeps the assistant from polluting the knowledge base with unverified claims — you stay in control of what's searchable.
+
+---
+
+## The importance classifier
+
+Captured knowledge is judged before it reaches your review queue, so the queue stays
+worth reading. The classifier is **hybrid**: versioned deterministic rules plus a
+semantic judge (a Claude model), combined into a 0–100 score and compared with a
+threshold.
+
+It has three modes, set in **Martis → Importance Classifier**
+(<http://localhost:8090/martis/resources/importance-classifier-settings>):
+
+| Mode | Behaviour |
+|---|---|
+| `off` | Capture everything; never judge. Entries go straight to **pending**. |
+| `shadow` | Judge every entry and record the verdict, but **never reject**. Entries still go to **pending**. This is the default. |
+| `enforce` | Judge, and reject entries scored below the threshold. |
+
+**Fail open.** A technical failure (no `claude` on the worker host, a timeout, an
+unparseable answer) never rejects an entry: it is released to **pending** with a
+`classification_error` in its metadata. Only a computed `not_important` verdict under
+`enforce` rejects anything.
+
+### 1. Setup: the worker runs on a trusted host, not in Docker
+
+The classifier judges by shelling out to the host's authenticated `claude` CLI (no API
+key), exactly like the condense worker in `claude_sdk` mode. **The production Docker
+image does not provide Claude.** The classification worker therefore runs on a trusted
+host where Claude Code is installed and authenticated, with the host `.env` pointed at
+the exposed services (`DB_HOST=127.0.0.1`, `DB_PORT=5433`).
+
+```sh
+./bin/classification-worker.sh
+```
+
+The helper resolves the repo root from its own location, refuses to start when `claude`
+is missing, and runs exactly:
+
+```bash
+php artisan queue:work classification --queue=classification --tries=3 --timeout=120
+```
+
+> **The leading `classification` is the queue *connection*, not a typo.** The job runs
+> on a dedicated connection whose `retry_after` (150s) is sized above the job's own
+> `$timeout` (120s). Start the worker without that argument and it reserves the same
+> rows under the default connection's 90s `retry_after` — *below* the job timeout — so
+> the queue re-delivers a classification that is still in flight, a second worker burns
+> the attempt counter, and the real verdict is thrown away. The ordering is derived, one
+> value from the next, and must hold:
+>
+> **Claude process timeout (`RAG_IMPORTANCE_TIMEOUT`, 90s) < job `$timeout` (120s) < `classification` connection `retry_after` (150s).**
+
+**Supervision.** Keep the worker running under your host's supervisor (launchd, systemd,
+`supervisord`, or a `tmux` session). While it is down, entries captured in `shadow` or
+`enforce` sit in **classifying** — invisible to search and to the approval queue. They
+are picked up when the worker comes back; the ones that were abandoned mid-flight show
+up as **stale** in `rag_status` and in the calibration report. If you must stop
+classifying for a while, set the mode to `off` (see rollback below) rather than leaving
+entries stranded.
+
+### 2. Roll out in shadow
+
+Start in `shadow` and leave it there until the numbers justify enforcing. Every entry is
+scored and carries its verdict in `metadata.importance`, but nothing is rejected, so a
+bad rule or a bad threshold costs you nothing.
+
+Watch it through MCP — `rag_status` reports the classifier next to the rest of the
+project's health:
+
+```
+  Importance classifier: mode shadow, threshold 70
+    Model: claude-haiku-4-5-20251001 | Prompt: v2 | Rules: v6
+    Classifying: 3; stale over 15 min: 0
+    Assessments: 128 succeeded, 2 failed
+    Shadow verdicts: 84 would keep, 44 would reject
+    Classification queue (global): 3 pending, 0 failed
+```
+
+The same numbers are returned as a nested `importance_classifier` object in the tool's
+structured content. Read them as:
+
+- **Classifying / stale** — stale entries mean the worker is not draining the queue.
+- **Assessments failed** — a failing model call; the entries still reached you (fail open).
+- **Shadow verdicts** — what `enforce` *would* have done.
+- **Classification queue** — pending and failed jobs on the `classification` queue.
+
+### 3. Calibrate
+
+```bash
+php artisan rag:importance-report --project=my-project
+# --min-sample=50   minimum classified entries a human has since reviewed
+```
+
+The report prints the score distribution of the shadow sample, the projected queue
+reduction, the entries the classifier and the human disagreed about, and an explicit
+readiness verdict. Readiness holds **only when all five rollout gates hold**:
+
+| Gate | Requirement |
+|---|---|
+| Reviewed sample | ≥ 50 classified entries a human has since approved or rejected (`--min-sample`) |
+| Must-keep corpus | 0 false rejects when the current rules re-run the reviewed must-keep corpus |
+| False rejects | ≤ 5% of human-**approved** entries marked `would_reject` |
+| Queue reduction | ≥ 30% of classified entries would not have reached the review queue |
+| Stale classifications | 0 entries stranded in `classifying` |
+
+The command exits `0` when every gate passes and `1` otherwise, so it can gate a script.
+**It never changes the mode** — enabling `enforce` is a deliberate human act.
+
+### 4. Enable `enforce` (by hand)
+
+When the report says READY: open **Martis → Importance Classifier**, set **Mode** to
+`enforce`, and save. Adjust **Threshold** there too — the score distribution in the
+report tells you whether the threshold sits in a valley or cuts through a cluster.
+From then on, entries scored below the threshold are rejected instead of queued; every
+rejection keeps its full audit trail (score, verdict, reasons, triggered rules, model,
+prompt and rules version) on the entry.
+
+### 5. Rollback
+
+Rolling back is a mode change, not a deployment:
+
+- **`enforce` → `shadow`**: stop rejecting immediately; keep collecting verdicts.
+- **`shadow` → `off`**: stop judging altogether. Entries already in `classifying` are
+  released to **pending** without a verdict by the worker, so keep the worker running
+  briefly after switching to `off` to drain them.
+
+Entries already rejected stay rejected — reinstate them from the knowledge-entries panel.
 
 ---
 
@@ -333,6 +462,10 @@ The embedding identity variables are interpolated from the host environment or `
 | `RAG_EMBEDDING_DIM` | `768` | Embedding dimension; persistence currently requires 768 |
 | `RAG_SEARCH_MIN_SCORE` | `0.30` | Minimum score cutoff for search results |
 | `RAG_SEARCH_LIMIT` | `10` | Default result limit |
+| `RAG_IMPORTANCE_MODEL` | `claude-haiku-4-5-20251001` | Model the importance judge calls through the host's `claude` CLI |
+| `RAG_IMPORTANCE_TIMEOUT` | `90` | Claude process timeout (s). The job's `$timeout` (+30s) and the `classification` connection's `retry_after` (+60s) are derived from it — see [the importance classifier](#the-importance-classifier) |
+| `RAG_IMPORTANCE_STALE_AFTER_MINUTES` | `15` | After this long in `classifying`, an entry is reported stale |
+| `RAG_IMPORTANCE_QUEUE` / `RAG_IMPORTANCE_QUEUE_CONNECTION` | `classification` | Queue name and dedicated connection the classification worker drains |
 | `MARTIS_AUTH_MIDDLEWARE` | (empty) | Auth middleware for admin routes (empty = no auth — **localhost only**) |
 
 > **Security.** By default the server has no authentication — it is intended for **localhost** use. If you expose it on a network, set `MARTIS_AUTH_MIDDLEWARE` and put the MCP endpoint behind a reverse proxy with auth.
@@ -467,8 +600,10 @@ app/
 │   ├── Graph/                     # Knowledge graph explorer
 │   ├── Importing/                 # Document importer (.md/.txt splitting)
 │   ├── Indexing/                  # Embedding + indexing pipeline
+│   ├── Importance/                # Hybrid importance classifier (rules + judge)
 │   └── Chunking/                  # Text chunking strategies
-└── Console/Commands/             # rag:store, rag:import, rag:search, rag:reindex
+└── Console/Commands/             # rag:store, rag:import, rag:search, rag:reindex, rag:importance-report
+bin/                               # Host-side workers: condense-worker.sh, classification-worker.sh
 routes/
 └── ai.php                         # Registers the RAG MCP server (local + HTTP)
 services/
