@@ -14,9 +14,9 @@ class ApiExtractor implements KnowledgeExtractor
         private readonly ?string $override,
     ) {}
 
-    public function extract(string $transcript): array
+    public function extract(string $transcript, ?string $language): array
     {
-        $instructions = $this->prompt->instructions($this->override);
+        $instructions = $this->prompt->instructions($this->override, $language);
         $text = $this->respond($instructions, $transcript);
 
         return $this->parser->parse($text);

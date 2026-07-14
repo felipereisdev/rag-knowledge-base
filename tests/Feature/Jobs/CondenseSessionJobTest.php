@@ -42,7 +42,7 @@ beforeEach(function () {
         {
             return new class implements KnowledgeExtractor
             {
-                public function extract(string $transcript): array
+                public function extract(string $transcript, ?string $language): array
                 {
                     return [[
                         'title' => 'Use database queue', 'content' => '# c', 'category' => 'design-decision',
@@ -103,6 +103,44 @@ it('creates a pending entry and dispatches nothing when the classifier is off', 
     expect(KnowledgeEntry::where('project_id', 'p1')->where('status', KnowledgeStatus::Pending->value)->count())->toBe(1);
     Queue::assertNotPushed(ClassifyKnowledgeEntryJob::class);
     expect(CondenseRun::where('session_id', 'sess-off')->first()->status)->toBe('done');
+});
+
+it('hands the project language to the extractor', function () {
+    // The whole point of `projects.language`: the worker must extract in the
+    // language the project is configured for, not in the prompt's own language.
+    Project::query()->whereKey('p1')->update(['language' => 'pt-BR']);
+
+    $spy = new class implements KnowledgeExtractor
+    {
+        public ?string $language = 'not-called';
+
+        public function extract(string $transcript, ?string $language): array
+        {
+            $this->language = $language;
+
+            return [];
+        }
+    };
+
+    app()->bind(KnowledgeExtractorFactory::class, fn () => new class($spy) extends KnowledgeExtractorFactory
+    {
+        public function __construct(private readonly KnowledgeExtractor $spy) {}
+
+        public function make($setting): KnowledgeExtractor
+        {
+            return $this->spy;
+        }
+    });
+
+    $path = tempnam(sys_get_temp_dir(), 'tr').'.jsonl';
+    file_put_contents($path, "{}\n");
+
+    (new CondenseSessionJob('p1', $path, 'sess-lang'))->handle(
+        app(TranscriptParser::class), app(KnowledgeExtractorFactory::class),
+        app(CondenseDedup::class), app(KnowledgeWriter::class),
+    );
+
+    expect($spy->language)->toBe('pt-BR');
 });
 
 it('is idempotent for the same session_id', function () {

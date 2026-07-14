@@ -14,6 +14,6 @@ it('returns empty and logs when the claude binary is missing', function () {
         binary: 'claude-binary-that-does-not-exist-xyz',
     );
 
-    expect($extractor->extract('USER: hi'))->toBe([]);
+    expect($extractor->extract('USER: hi', null))->toBe([]);
     Log::shouldHaveReceived('warning')->once();
 });

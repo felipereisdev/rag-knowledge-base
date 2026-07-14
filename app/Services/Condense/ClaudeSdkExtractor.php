@@ -17,7 +17,7 @@ class ClaudeSdkExtractor implements KnowledgeExtractor
         private readonly string $binary = 'claude',
     ) {}
 
-    public function extract(string $transcript): array
+    public function extract(string $transcript, ?string $language): array
     {
         $bin = (new ExecutableFinder)->find($this->binary);
         if ($bin === null) {
@@ -28,7 +28,7 @@ class ClaudeSdkExtractor implements KnowledgeExtractor
             return [];
         }
 
-        $fullPrompt = $this->prompt->instructions($this->override)
+        $fullPrompt = $this->prompt->instructions($this->override, $language)
             ."\n\n---TRANSCRIPT---\n".$transcript;
 
         $process = new Process([$bin, '-p', $fullPrompt, '--output-format', 'json', '--model', $this->model]);

@@ -5,6 +5,7 @@ namespace App\Jobs;
 use App\Enums\KnowledgeSource;
 use App\Models\CondenseRun;
 use App\Models\CondenseSetting;
+use App\Models\Project;
 use App\Services\Condense\CondenseDedup;
 use App\Services\Condense\KnowledgeExtractorFactory;
 use App\Services\Condense\TranscriptParser;
@@ -75,7 +76,11 @@ final class CondenseSessionJob implements ShouldQueue
                 return;
             }
 
-            $candidates = $factory->make($setting)->extract($text);
+            // The extractor writes in the project's configured content language;
+            // the condense settings are global and carry no language of their own.
+            $language = Project::query()->whereKey($this->projectId)->value('language');
+
+            $candidates = $factory->make($setting)->extract($text, $language);
 
             // Dedup queries chunk_embeddings, but a candidate written earlier in
             // THIS same loop is indexed asynchronously (IndexEntryJob on the

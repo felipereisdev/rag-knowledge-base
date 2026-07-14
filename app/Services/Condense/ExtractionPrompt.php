@@ -2,15 +2,28 @@
 
 namespace App\Services\Condense;
 
+use App\Enums\ProjectLanguage;
+
 final class ExtractionPrompt
 {
-    public function instructions(?string $override): string
+    /**
+     * Build the extractor's system instructions for a project.
+     *
+     * The language directive is appended to the override as well: an override
+     * replaces the base instructions wholesale, so folding the directive into
+     * the base text alone would silently drop the project language for every
+     * operator who customises the prompt.
+     */
+    public function instructions(?string $override, ?string $language): string
     {
         $override = $override !== null ? trim($override) : '';
-        if ($override !== '') {
-            return $override;
-        }
+        $base = $override !== '' ? $override : $this->base();
 
+        return $base."\n\n".$this->languageDirective($language);
+    }
+
+    private function base(): string
+    {
         return <<<'PROMPT'
         You condense a coding-session transcript into durable project knowledge.
 
@@ -29,5 +42,26 @@ final class ExtractionPrompt
 
         If there is nothing durable, output exactly: []
         PROMPT;
+    }
+
+    /**
+     * An unknown or empty code falls back to English, matching both the
+     * `projects.language` column default and PostgresTextSearch's own fallback,
+     * so what gets written and what gets stemmed agree.
+     */
+    private function languageDirective(?string $language): string
+    {
+        $resolved = ProjectLanguage::tryFromCode($language) ?? ProjectLanguage::English;
+        $name = $resolved->promptName();
+        $code = $resolved->value;
+
+        return <<<DIRECTIVE
+        Write the "title" and "content" values in {$name} ({$code}) — the project's
+        configured content language — whatever language the transcript itself is in.
+
+        The JSON keys and the "category" value must stay in English, exactly as
+        spelled above: they are a fixed vocabulary the parser matches on, not prose.
+        Entity and relation names stay verbatim as they appear in the code.
+        DIRECTIVE;
     }
 }
