@@ -105,9 +105,19 @@ function judgement(int $durability, int $actionability, int $specificity, int $n
 }
 
 /**
+ * Defaults `$autoApprove` to 90 to mirror production: `ImportanceClassifierSetting`
+ * defaults `auto_approve_threshold` to 90 (see the model and its migration), so a
+ * test that never mentions auto-approval should still run under the value real
+ * traffic runs under. Every pre-existing enforce-mode test in this file drives
+ * `importantJudgement()` (final score 75) over `CLASSIFIABLE_CONTENT` (zero
+ * triggered rules), which is ineligible twice over against 90 — below threshold,
+ * and no positive signal — so defaulting to 90 here does not flip any of them to
+ * `approved`. Pass `autoApprove: null` explicitly for a test that deliberately
+ * exercises auto-approval being switched off.
+ *
  * @param  ImportanceClassifierMode|value-of<ImportanceClassifierMode>  $mode
  */
-function settings(ImportanceClassifierMode|string $mode, int $threshold = 70, ?int $autoApprove = null): void
+function settings(ImportanceClassifierMode|string $mode, int $threshold = 70, ?int $autoApprove = 90): void
 {
     ImportanceClassifierSetting::query()->findOrFail(1)->update([
         'mode' => $mode instanceof ImportanceClassifierMode ? $mode->value : $mode,
@@ -126,22 +136,39 @@ function spyJudge(SemanticImportanceAssessment|Throwable $response): SpyImportan
 }
 
 /**
+ * Spreads a total score across the five criteria without exceeding any
+ * criterion's real maximum (durability 25, the other four 20/20/20/15 — the
+ * same caps `AutoApprovalPolicy`'s docblock sums to 100), by filling each cap
+ * in turn and carrying the remainder forward. `fakeJudge()`'s only contract is
+ * the total; this keeps every individual criterion inside its valid range
+ * instead of persisting an impossible one (e.g. `durability: 88` against a
+ * max of 25).
+ *
+ * @return array{int, int, int, int, int}
+ */
+function distributeSemanticScore(int $total): array
+{
+    $remaining = $total;
+
+    return array_map(function (int $cap) use (&$remaining): int {
+        $value = max(0, min($cap, $remaining));
+        $remaining -= $value;
+
+        return $value;
+    }, [25, 20, 20, 20, 15]);
+}
+
+/**
  * A semantic assessment carrying only the total score that matters to the
  * final-score arithmetic; the individual criterion scores are irrelevant to
- * every test that uses this helper.
+ * every test that uses this helper, but they must still be individually
+ * valid, so this delegates to `judgement()` with a capped split.
  */
 function fakeJudge(int $semanticScore): SpyImportanceJudge
 {
-    return spyJudge(new SemanticImportanceAssessment(
-        durability: $semanticScore,
-        actionability: 0,
-        specificity: 0,
-        nonObviousness: 0,
-        futureValue: 0,
-        semanticScore: $semanticScore,
-        recommendedVerdict: ImportanceVerdict::Important,
-        reasons: [],
-    ));
+    [$durability, $actionability, $specificity, $nonObviousness, $futureValue] = distributeSemanticScore($semanticScore);
+
+    return spyJudge(judgement($durability, $actionability, $specificity, $nonObviousness, $futureValue));
 }
 
 /** A judge that always raises a terminal, technical failure — never a verdict. */
@@ -637,14 +664,18 @@ it('reuses a cached assessment for a repeated candidate', function () {
 
 /**
  * Content whose deterministic rules add +11 (`normative_restriction` + `causal_rationale`)
- * with no penalty at all: it carries a concrete anchor (`orders_table`, snake_case), sits
- * exactly at the `MIN_SUBSTANCE_WORDS` floor, and uses no speculative or transient
- * wording. Verified directly against `DeterministicImportanceRules::evaluate()` — the
- * design doc's original seeder sentence ("...the orders table.") falls just short of
- * eligibility, because two bare words read as `generic_without_context` (-8) under v6;
- * this is the same fact, spelled with a concrete anchor instead.
+ * with no penalty at all: it carries a concrete anchor (`orders_table`, snake_case), and
+ * uses no speculative or transient wording. 16 words — 4 clear of the 12-word
+ * `MIN_SUBSTANCE_WORDS` floor, so deleting one word does not flip `insufficient_substance`
+ * on by accident the way a sentence sitting exactly on the floor would. Verified directly
+ * against `DeterministicImportanceRules::evaluate()`: triggers exactly
+ * `normative_restriction` (+6) and `causal_rationale` (+5), nothing else — the design doc's
+ * original seeder sentence ("...the orders table.") falls just short of eligibility,
+ * because two bare words read as `generic_without_context` (-8) under v6; this is the same
+ * fact, spelled with a concrete anchor instead and padded with a second clause that keeps
+ * the identical rule profile.
  */
-const ELIGIBLE_CONTENT = 'Never run db:seed in production because it truncates the orders_table records permanently.';
+const ELIGIBLE_CONTENT = 'Never run db:seed against the orders_table in production because it permanently truncates every existing invoice record.';
 
 it('auto-approves an eligible entry in enforce mode', function () {
     settings(mode: 'enforce', threshold: 70, autoApprove: 90);
@@ -664,12 +695,46 @@ it('auto-approves an eligible entry in enforce mode', function () {
         ->and($importance['would_reject'])->toBeFalse()
         ->and($importance['verdict'])->toBe('important')
         ->and($importance['final_score'])->toBe(99);
+
+    // "Approved" must be searchable, not just a status label: prove the
+    // observer's transition-to-approved path actually fires the index job,
+    // end to end at the job level, not only by composition with a separate
+    // observer test.
+    Queue::assertPushed(IndexEntryJob::class, 1);
 });
 
 it('leaves an important but ineligible entry to a human in enforce mode', function () {
     settings(mode: 'enforce', threshold: 70, autoApprove: 90);
 
-    // High semantic score, but no positive deterministic signal fires.
+    // CLASSIFIABLE_CONTENT is fluent, penalty-free prose the model can score
+    // however high it likes: verified above (DeterministicImportanceRules)
+    // to trigger zero rules at all, so `hasPositiveSignal` is false and the
+    // policy has nothing else to reject it on. This is the actual injection
+    // scenario `AutoApprovalPolicy` exists to stop — content the regexes are
+    // silent about — as opposed to content that merely trips a penalty.
+    $entry = classifyingEntry(content: CLASSIFIABLE_CONTENT);
+
+    fakeJudge(semanticScore: 100);
+
+    runClassification($entry);
+
+    $entry->refresh();
+
+    expect($entry->metadata['importance']['final_score'])->toBe(100)
+        ->and($entry->metadata['importance']['rules'])->toBe([])
+        ->and($entry->status)->toBe(KnowledgeStatus::Pending->value)
+        ->and($entry->metadata['importance']['auto_approved'])->toBeFalse()
+        ->and($entry->metadata['importance']['would_approve'])->toBeFalse();
+})->note('The injection barrier: a perfect model score with zero deterministic signal cannot approve on its own.');
+
+it('leaves an important entry that only trips a penalty rule to a human in enforce mode', function () {
+    settings(mode: 'enforce', threshold: 70, autoApprove: 90);
+
+    // Ten words of fluent prose: below MIN_SUBSTANCE_WORDS, so this fires the
+    // `insufficient_substance` (-10) penalty. `isEligible()` returns false at
+    // the first negative adjustment, before the positive-signal check is ever
+    // reached — this pins that early-return branch specifically, distinct
+    // from the zero-signal branch pinned above.
     $entry = classifyingEntry(content: 'The embedder model file lives under storage/models and is 420 MB.');
 
     fakeJudge(semanticScore: 100);
@@ -678,10 +743,13 @@ it('leaves an important but ineligible entry to a human in enforce mode', functi
 
     $entry->refresh();
 
-    expect($entry->status)->toBe(KnowledgeStatus::Pending->value)
+    expect($entry->metadata['importance']['rules'])->toBe([
+        ['id' => 'insufficient_substance', 'reason' => 'Too little substance to be useful in a later session.', 'adjustment' => -10],
+    ])
+        ->and($entry->status)->toBe(KnowledgeStatus::Pending->value)
         ->and($entry->metadata['importance']['auto_approved'])->toBeFalse()
         ->and($entry->metadata['importance']['would_approve'])->toBeFalse();
-})->note('The injection barrier: a perfect model score cannot approve on its own.');
+})->note('The penalty branch: a rule-tripping candidate is ineligible before the positive-signal check ever runs.');
 
 it('records would_approve in shadow but never approves', function () {
     settings(mode: 'shadow', threshold: 70, autoApprove: 90);
