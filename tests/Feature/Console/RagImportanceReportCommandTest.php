@@ -28,7 +28,26 @@ function reportEntry(
     int $score,
     string $mode = 'shadow',
     string $projectId = 'report-project',
+    ?bool $wouldApprove = null,
 ): KnowledgeEntry {
+    $importance = [
+        'mode' => $mode,
+        'verdict' => $wouldReject ? 'not_important' : 'important',
+        'would_reject' => $wouldReject,
+        'final_score' => $score,
+        'classified_at' => now()->toIso8601String(),
+    ];
+
+    // `would_approve` is omitted by default, on purpose: this is what a shadow
+    // entry classified before Task 2 shipped the key looks like. Callers that
+    // need the false-auto-approval floor to see this entry (i.e. need it to
+    // count as evidence auto-approval eligibility was actually computed) must
+    // pass `wouldApprove` explicitly — mirroring ClassifyKnowledgeEntryJob,
+    // which writes the key unconditionally once it exists.
+    if ($wouldApprove !== null) {
+        $importance['would_approve'] = $wouldApprove;
+    }
+
     return KnowledgeEntry::create([
         'project_id' => $projectId,
         'title' => 'Entry '.str()->random(8),
@@ -36,13 +55,7 @@ function reportEntry(
         'category' => 'insight',
         'status' => $status,
         'metadata' => [
-            'importance' => [
-                'mode' => $mode,
-                'verdict' => $wouldReject ? 'not_important' : 'important',
-                'would_reject' => $wouldReject,
-                'final_score' => $score,
-                'classified_at' => now()->toIso8601String(),
-            ],
+            'importance' => $importance,
         ],
     ]);
 }
@@ -54,8 +67,14 @@ function reportEntry(
  */
 function readySample(): void
 {
+    // `wouldApprove: false` matters, not just `wouldReject: true`: since Task 2
+    // the classifier writes `would_approve` unconditionally, and it is always
+    // false when `would_reject` is true. Leaving the key off (as bare
+    // `reportEntry` does) would make these entries invisible to the
+    // false-auto-approval floor, which counts only rejections whose
+    // eligibility was actually computed.
     for ($i = 0; $i < 20; $i++) {
-        reportEntry('rejected', wouldReject: true, score: 15);
+        reportEntry('rejected', wouldReject: true, score: 15, wouldApprove: false);
     }
 
     for ($i = 0; $i < 40; $i++) {
@@ -170,7 +189,7 @@ it('honours a custom minimum sample size', function () {
     // auto-approval on a smaller rejected sample — lowering --min-sample cannot
     // buy a way past that floor.
     for ($i = 0; $i < 10; $i++) {
-        reportEntry('rejected', wouldReject: true, score: 15);
+        reportEntry('rejected', wouldReject: true, score: 15, wouldApprove: false);
     }
 
     reportEntry('approved', wouldReject: false, score: 85);
@@ -405,6 +424,36 @@ it('fails readiness when too few entries were human-rejected to validate auto-ap
         ->expectsOutputToContain('NOT READY — 1 of 7 rollout gates fail')
         ->assertExitCode(1);
 })->note('Anti-vacuity: "zero false approvals among zero rejections" proves nothing. The same defect was already found once in the false-reject gate.');
+
+it('fails readiness when human-rejected entries predate would_approve and cannot clear the floor', function () {
+    // The normal upgrade path this feature is built around: an operator ran
+    // shadow for weeks *before* Task 2 shipped `would_approve`, so their
+    // rejected entries carry `would_reject` but the `would_approve` key is
+    // simply absent — not false, absent. `->>` on a missing JSON key yields
+    // SQL NULL, matching neither 'true' nor 'false'.
+    //
+    // A sample that clears every OTHER gate: 45 approved, 25 unreviewed
+    // would-reject entries (to hold the queue-reduction gate above 30% without
+    // adding to the rejected population), and 15 legacy shadow rejections —
+    // comfortably over the OLD `rejected >= 10` floor, but zero of them are
+    // evidence the false-approval risk was ever computed.
+    for ($i = 0; $i < 45; $i++) {
+        reportEntry('approved', wouldReject: false, score: 85);
+    }
+
+    for ($i = 0; $i < 25; $i++) {
+        reportEntry('pending', wouldReject: true, score: 12);
+    }
+
+    for ($i = 0; $i < 15; $i++) {
+        reportEntry('rejected', wouldReject: true, score: 15); // no wouldApprove: legacy shape
+    }
+
+    $this->artisan('rag:importance-report', ['--project' => 'report-project'])
+        ->expectsOutputToContain('Human-rejected entries the classifier would have auto-approved: 0 of 0')
+        ->expectsOutputToContain('NOT READY — 1 of 7 rollout gates fail')
+        ->assertExitCode(1);
+})->note('The vacuous pass the floor exists to prevent, wearing a denominator of 15: `rejected` alone would have cleared the old floor on entries that carry no would_approve evidence at all.');
 
 it('passes the auto-approval gates with a clean rejected sample', function () {
     readySample();

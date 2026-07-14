@@ -151,7 +151,7 @@ class RagImportanceReportCommand extends Command
         ]));
         $this->line(__('importance.report.rejected_would_approve', [
             'count' => $review['rejected_would_approve'],
-            'rejected' => $review['rejected'],
+            'rejected' => $review['rejected_classified_for_approval'],
         ]));
         // A benefit measure, not a gate: the reviews auto-approval would have
         // saved. Approving fewer entries than it could is never unsafe, so nothing
@@ -215,14 +215,21 @@ class RagImportanceReportCommand extends Command
             // for one to have surfaced. Both halves are required: without the
             // floor, a project that has rejected nothing certifies auto-approval
             // on no evidence at all.
+            //
+            // The floor is measured against `rejected_classified_for_approval`,
+            // not the raw `rejected` count: a shadow rejection classified before
+            // `would_approve` existed carries no such key, so it is not evidence
+            // that its false-approval risk was ever evaluated. Counting it here
+            // would let a base full of such legacy rows clear the floor while
+            // contributing nothing the gate actually reasoned about.
             'false_auto_approvals' => [
                 'requirement' => '= '.self::MAX_FALSE_AUTO_APPROVALS
                     .' ('.__('importance.report.min_rejected', ['count' => self::MIN_REJECTED_SAMPLE]).')',
                 'actual' => $autoApprovalEnabled
-                    ? $review['rejected_would_approve'].' / '.$review['rejected']
+                    ? $review['rejected_would_approve'].' / '.$review['rejected_classified_for_approval']
                     : __('importance.report.auto_approval_disabled'),
                 'passes' => ! $autoApprovalEnabled || (
-                    $review['rejected'] >= self::MIN_REJECTED_SAMPLE
+                    $review['rejected_classified_for_approval'] >= self::MIN_REJECTED_SAMPLE
                     && $review['rejected_would_approve'] <= self::MAX_FALSE_AUTO_APPROVALS
                 ),
             ],
@@ -234,7 +241,7 @@ class RagImportanceReportCommand extends Command
                 'requirement' => '= '.self::MAX_MUST_REJECT_ELIGIBLE,
                 'actual' => match (true) {
                     ! $autoApprovalEnabled => __('importance.report.auto_approval_disabled'),
-                    $mustRejectEligible === null => '—',
+                    $mustRejectEligible === null => __('importance.report.corpus_unavailable'),
                     default => (string) $mustRejectEligible['eligible'],
                 },
                 'passes' => ! $autoApprovalEnabled || (

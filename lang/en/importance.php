@@ -94,6 +94,7 @@ return [
         'must_reject' => 'Must-reject corpus eligible for auto-approval: :count of :total',
         'must_reject_unavailable' => 'Must-reject corpus eligible for auto-approval: corpus unavailable at :path',
         'auto_approval_disabled' => 'n/a — auto-approval disabled',
+        'corpus_unavailable' => '—',
         'min_rejected' => 'over :count+ rejections',
         'gate' => 'Gate',
         'requirement' => 'Requirement',

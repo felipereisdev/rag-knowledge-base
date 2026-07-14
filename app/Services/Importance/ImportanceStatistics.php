@@ -167,6 +167,7 @@ final class ImportanceStatistics
      *     rejected: int,
      *     rejected_would_keep: int,
      *     rejected_would_approve: int,
+     *     rejected_classified_for_approval: int,
      * }
      */
     public function shadowReview(string $projectId): array
@@ -211,6 +212,22 @@ final class ImportanceStatistics
             'rejected_would_approve' => $this->shadowClassified($projectId)
                 ->where('status', KnowledgeStatus::Rejected->value)
                 ->where($this->flagIs('would_approve', true))
+                ->count(),
+            // The population the false-auto-approval floor is actually measured
+            // against: rejections whose eligibility was actually computed, i.e.
+            // those carrying a `would_approve` key at all (true OR false).
+            // `would_approve` is written unconditionally by
+            // `ClassifyKnowledgeEntryJob::decide()`, but only since Task 2 — a
+            // shadow rejection classified before that has `would_reject` and no
+            // `would_approve` key whatsoever, and `->>` on a missing key yields
+            // SQL NULL, matching neither `'true'` nor `'false'`. Counting such an
+            // entry in `rejected` (as the floor used to) lets a base full of
+            // legacy shadow rejections clear the anti-vacuity floor while
+            // contributing zero entries whose false-approval risk was ever
+            // evaluated — the exact vacuous pass the floor exists to prevent.
+            'rejected_classified_for_approval' => $this->shadowClassified($projectId)
+                ->where('status', KnowledgeStatus::Rejected->value)
+                ->whereRaw("metadata->'importance'->>'would_approve' IS NOT NULL")
                 ->count(),
         ];
     }
@@ -282,17 +299,23 @@ final class ImportanceStatistics
      * any row whose metadata was hand-edited to a non-boolean, taking `rag_status`
      * down with it.
      *
-     * `$flag` is only ever a literal from this class; nothing external reaches it.
+     * `$flag` is restricted to the three known JSON keys via `match`, so the
+     * `whereRaw` fragment can never carry anything but a literal this class wrote
+     * itself, whatever a future caller passes in.
      *
+     * @param  'auto_approved'|'would_approve'|'would_reject'  $flag
      * @return callable(Builder<KnowledgeEntry>): void
      */
     private function flagIs(string $flag, bool $expected): callable
     {
-        return static function (Builder $query) use ($flag, $expected): void {
-            $query->whereRaw(
-                "metadata->'importance'->>'{$flag}' = ?",
-                [$expected ? 'true' : 'false'],
-            );
+        $column = match ($flag) {
+            'auto_approved' => "metadata->'importance'->>'auto_approved'",
+            'would_approve' => "metadata->'importance'->>'would_approve'",
+            'would_reject' => "metadata->'importance'->>'would_reject'",
+        };
+
+        return static function (Builder $query) use ($column, $expected): void {
+            $query->whereRaw("{$column} = ?", [$expected ? 'true' : 'false']);
         };
     }
 
