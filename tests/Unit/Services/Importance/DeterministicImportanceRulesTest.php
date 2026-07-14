@@ -43,7 +43,7 @@ function triggeredRuleIds(RuleEvaluation $evaluation): array
  */
 function mustKeepFixtures(): array
 {
-    $path = base_path('tests/Fixtures/importance/must-keep.json');
+    $path = resource_path('importance/must-keep.json');
     $corpus = json_decode((string) file_get_contents($path), true, flags: JSON_THROW_ON_ERROR);
 
     return $corpus['fixtures'];
@@ -60,7 +60,7 @@ function mustKeepFixtures(): array
  */
 function vetoProbeKnowledge(): array
 {
-    $path = base_path('tests/Fixtures/importance/must-keep.json');
+    $path = resource_path('importance/must-keep.json');
     $corpus = json_decode((string) file_get_contents($path), true, flags: JSON_THROW_ON_ERROR);
 
     return $corpus['veto_probes']['must_not_be_vetoed'];
@@ -74,7 +74,7 @@ function vetoProbeKnowledge(): array
  */
 function vetoProbeChatter(): array
 {
-    $path = base_path('tests/Fixtures/importance/must-keep.json');
+    $path = resource_path('importance/must-keep.json');
     $corpus = json_decode((string) file_get_contents($path), true, flags: JSON_THROW_ON_ERROR);
 
     return $corpus['veto_probes']['must_be_vetoed'];

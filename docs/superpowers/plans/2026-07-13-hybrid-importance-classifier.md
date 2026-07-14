@@ -531,9 +531,13 @@ git commit -m "feat: add importance classifier operations support"
 
 **Files:**
 
-- Expand: `tests/Fixtures/importance/must-keep.json`
-- Create: `tests/Fixtures/importance/must-reject.json`
-- Create: `tests/Fixtures/importance/borderline.json`
+- Expand: `resources/importance/must-keep.json` (moved out of `tests/Fixtures` during
+  Task 8 review — the production image excludes `tests/` via `.dockerignore`, so a
+  corpus the `rag:importance-report` command reads at runtime has to live under
+  `resources/`, which the image does ship. See `.superpowers/sdd/task-8-report.md`,
+  "Fix round 1".)
+- Create: `resources/importance/must-reject.json`
+- Create: `resources/importance/borderline.json`
 - Create: `tests/Feature/ImportanceClassifierWorkflowTest.php`
 - Modify: relevant search/indexing tests.
 
@@ -564,7 +568,7 @@ Expected: the full lifecycle passes without a real Claude call.
 - [ ] Commit calibration and workflow coverage:
 
 ```bash
-git add tests/Fixtures/importance tests/Feature/ImportanceClassifierWorkflowTest.php tests/Unit/Services/Importance tests/Feature/SearchPageTest.php tests/Unit/Services/Search tests/Unit/Services/Indexing
+git add resources/importance tests/Feature/ImportanceClassifierWorkflowTest.php tests/Unit/Services/Importance tests/Feature/SearchPageTest.php tests/Unit/Services/Search tests/Unit/Services/Indexing
 git commit -m "test: cover importance classifier rollout behavior"
 ```
 

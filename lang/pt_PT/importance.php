@@ -66,6 +66,7 @@ return [
     'report' => [
         'description' => 'Relata a calibração do classificador de importância de um projeto e se o modo enforce é seguro.',
         'project_missing' => "Projeto ':project' não encontrado.",
+        'invalid_min_sample' => "--min-sample ':value' inválido; esperado um número inteiro positivo.",
         'heading' => 'Relatório de calibração de importância — projeto :project (modo :mode, limiar :threshold)',
         'sample' => 'Entradas classificadas e revistas por humanos: :reviewed (mínimo :minimum)',
         'distribution' => 'Distribuição de pontuação da amostra em shadow',

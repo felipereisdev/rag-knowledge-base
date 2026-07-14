@@ -44,5 +44,12 @@ return [
         // which would silently regress if classification shared the default
         // `database` connection's 90s retry_after.
         'queue_connection' => env('RAG_IMPORTANCE_QUEUE_CONNECTION', 'classification'),
+        // The reviewed calibration corpus `rag:importance-report` re-runs through
+        // the deterministic rules for the must-keep gate. Lives under `resources/`
+        // (not `tests/`) because `.dockerignore` excludes `tests/` from the
+        // production image and this command has to run there. Overridable so
+        // tests can point the gate at a fixture without touching the shipped
+        // corpus.
+        'must_keep_corpus_path' => env('RAG_IMPORTANCE_MUST_KEEP_CORPUS_PATH', resource_path('importance/must-keep.json')),
     ],
 ];

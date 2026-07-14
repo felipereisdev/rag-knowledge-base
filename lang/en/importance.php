@@ -66,6 +66,7 @@ return [
     'report' => [
         'description' => 'Report importance-classifier calibration for a project, and whether enforce mode is safe to enable.',
         'project_missing' => "Project ':project' not found.",
+        'invalid_min_sample' => "Invalid --min-sample ':value'; expected a positive integer.",
         'heading' => 'Importance calibration report — project :project (mode :mode, threshold :threshold)',
         'sample' => 'Human-reviewed classified entries: :reviewed (minimum :minimum)',
         'distribution' => 'Score distribution of the shadow sample',

@@ -43,7 +43,7 @@ class RagImportanceReportCommand extends Command
 
     protected $signature = 'rag:importance-report
         {--project= : Project ID (defaults to slugified cwd)}
-        {--min-sample=50 : Minimum number of classified entries a human has since reviewed}';
+        {--min-sample='.self::DEFAULT_MIN_SAMPLE.' : Minimum number of classified entries a human has since reviewed}';
 
     public function __construct()
     {
@@ -65,7 +65,12 @@ class RagImportanceReportCommand extends Command
             return self::FAILURE;
         }
 
-        $minimumSample = max(1, (int) $this->option('min-sample'));
+        $minimumSample = $this->resolveMinimumSample();
+
+        if ($minimumSample === null) {
+            return self::FAILURE;
+        }
+
         $setting = ImportanceClassifierSetting::current();
 
         $review = $statistics->shadowReview($projectId);
@@ -134,7 +139,10 @@ class RagImportanceReportCommand extends Command
             'false_rejects' => [
                 'requirement' => '<= '.$this->percent(self::MAX_APPROVED_WOULD_REJECT_RATE).'%',
                 'actual' => $this->percent($falseRejectRate).'%',
-                'passes' => $falseRejectRate <= self::MAX_APPROVED_WOULD_REJECT_RATE,
+                // Zero approved entries is zero evidence, not a passing rate: a
+                // corpus that is all rejections must never read as a clean 0.0%.
+                'passes' => $review['approved'] > 0
+                    && $falseRejectRate <= self::MAX_APPROVED_WOULD_REJECT_RATE,
             ],
             'reduction' => [
                 'requirement' => '>= '.$this->percent(self::MIN_QUEUE_REDUCTION_RATE).'%',
@@ -265,12 +273,29 @@ class RagImportanceReportCommand extends Command
 
     private function mustKeepCorpusPath(): string
     {
-        return base_path('tests/Fixtures/importance/must-keep.json');
+        return (string) config('rag.importance.must_keep_corpus_path');
     }
 
     private function percent(float $rate): string
     {
         return number_format($rate * 100, 1);
+    }
+
+    /**
+     * Rejects a typo (`--min-sample=0`, `--min-sample=abc`) instead of silently
+     * coercing it to 1, which would quietly weaken the primary sample gate.
+     */
+    private function resolveMinimumSample(): ?int
+    {
+        $raw = (string) $this->option('min-sample');
+
+        if (! ctype_digit($raw) || (int) $raw < 1) {
+            $this->error(__('importance.report.invalid_min_sample', ['value' => $raw]));
+
+            return null;
+        }
+
+        return (int) $raw;
     }
 
     private function resolveProjectId(): string

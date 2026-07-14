@@ -127,6 +127,18 @@ it('honours a custom minimum sample size', function () {
         ->assertExitCode(0);
 });
 
+it('rejects a non-positive --min-sample instead of silently coercing it to 1', function () {
+    $this->artisan('rag:importance-report', ['--project' => 'report-project', '--min-sample' => 0])
+        ->expectsOutputToContain("Invalid --min-sample '0'; expected a positive integer.")
+        ->assertExitCode(1);
+});
+
+it('rejects a non-numeric --min-sample', function () {
+    $this->artisan('rag:importance-report', ['--project' => 'report-project', '--min-sample' => 'abc'])
+        ->expectsOutputToContain("Invalid --min-sample 'abc'; expected a positive integer.")
+        ->assertExitCode(1);
+});
+
 it('fails the false-reject gate when more than 5% of approved entries are marked would_reject', function () {
     readySample();
 
@@ -146,6 +158,21 @@ it('fails the false-reject gate when more than 5% of approved entries are marked
 
     $this->artisan('rag:importance-report', ['--project' => 'report-project'])
         ->expectsOutputToContain('Human-approved entries the classifier would have rejected: 3 of 40 (7.5%)')
+        ->expectsOutputToContain('NOT READY')
+        ->assertExitCode(1);
+});
+
+it('fails the false-reject gate when zero entries are approved, instead of passing on no evidence', function () {
+    // 50 rejected, 0 approved. approved_would_reject / approved would be a
+    // division by zero; the old `approved > 0 ? ... : 0.0` fallback read that
+    // as a clean 0.0% pass with zero evidence, which also pushed the reduction
+    // gate to a vacuous 100%.
+    for ($i = 0; $i < 50; $i++) {
+        reportEntry('rejected', wouldReject: true, score: 15);
+    }
+
+    $this->artisan('rag:importance-report', ['--project' => 'report-project'])
+        ->expectsOutputToContain('Human-approved entries the classifier would have rejected: 0 of 0 (0.0%)')
         ->expectsOutputToContain('NOT READY')
         ->assertExitCode(1);
 });
@@ -182,6 +209,52 @@ it('fails the staleness gate when an entry is stuck in classifying', function ()
 
     $this->artisan('rag:importance-report', ['--project' => 'report-project'])
         ->expectsOutputToContain('Stale classifying entries: 1')
+        ->expectsOutputToContain('NOT READY')
+        ->assertExitCode(1);
+});
+
+it('fails the must-keep gate when the current rules hard-veto a corpus fixture', function () {
+    readySample();
+
+    // Empty content is a hard veto in DeterministicImportanceRules — a single
+    // fixture like this is exactly what the gate exists to catch: reviewed
+    // knowledge the current rules would now destroy.
+    $corpus = tempnam(sys_get_temp_dir(), 'must_keep_').'.json';
+    file_put_contents($corpus, json_encode([
+        'fixtures' => [
+            [
+                'id' => 'veto-regression',
+                'candidate' => [
+                    'title' => 'Anything',
+                    'content' => '',
+                    'category' => 'insight',
+                    'source' => 'condense',
+                ],
+            ],
+        ],
+    ]));
+    config(['rag.importance.must_keep_corpus_path' => $corpus]);
+
+    $this->artisan('rag:importance-report', ['--project' => 'report-project'])
+        ->expectsOutputToContain('Must-keep corpus false rejects: 1 of 1')
+        ->expectsOutputToContain('NOT READY')
+        ->assertExitCode(1);
+
+    unlink($corpus);
+});
+
+it('fails the must-keep gate — never READY — when the corpus is missing', function () {
+    readySample();
+
+    // This is the branch that fires in production when the command runs
+    // through its documented `docker compose exec app ...` invocation before
+    // the corpus is shipped at a path the image actually contains: an
+    // unreadable corpus must never read as a pass.
+    $missing = sys_get_temp_dir().'/rag-missing-must-keep-'.bin2hex(random_bytes(4)).'.json';
+    config(['rag.importance.must_keep_corpus_path' => $missing]);
+
+    $this->artisan('rag:importance-report', ['--project' => 'report-project'])
+        ->expectsOutputToContain("Must-keep corpus false rejects: corpus unavailable at {$missing}")
         ->expectsOutputToContain('NOT READY')
         ->assertExitCode(1);
 });
