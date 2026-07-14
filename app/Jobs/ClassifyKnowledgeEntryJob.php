@@ -254,14 +254,22 @@ class ClassifyKnowledgeEntryJob implements ShouldQueue
      * is always `pending`. Eligibility itself is `AutoApprovalPolicy`'s call, not
      * this method's — it never re-derives that decision.
      *
-     * The dial the eligibility decision was made against (`auto_approve_threshold`)
-     * is recorded alongside the decision. It is not a duplicate of the setting: the
-     * setting is what the dial is NOW, and the snapshot is what it was WHEN this
-     * entry was judged. Without it, `would_approve: false` is unreadable — it may
-     * mean "evaluated at 90 and refused" or "auto-approval was off, so nothing was
-     * evaluated at all" — and the readiness report cannot tell a shadow rejection
-     * that is evidence about the dial in force from one that is evidence about
-     * nothing. See ImportanceStatistics::shadowReview().
+     * Both halves of the decision's INPUT are persisted — `final_score` and the
+     * triggered `rules` — and that is what makes the decision reproducible: the
+     * readiness report re-runs `AutoApprovalPolicy` over exactly those two fields,
+     * at whatever dial is configured when it runs, rather than trusting the
+     * `would_approve` stamp below. See ImportanceStatistics::falseAutoApprovals().
+     * `would_approve` itself is kept because it is what the classifier ACTUALLY
+     * concluded at the time (in `enforce` it is why the entry was approved), and
+     * because `rag_status` reports it in aggregate.
+     *
+     * `auto_approve_threshold` is a pure AUDIT record and is kept as one: it is the
+     * dial this entry was judged against, and no gate reads it any more. It is not a
+     * duplicate of the setting — the setting is what the dial is NOW, and an
+     * administrator may move it at any time, so for an `auto_approved: true` entry
+     * this snapshot is the only surviving record of the dial that let it into the
+     * base with nobody reading it. Removing it would leave "why was this entry never
+     * reviewed?" unanswerable after the next dial change.
      */
     private function decide(
         KnowledgeEntry $entry,

@@ -748,12 +748,17 @@ it('leaves an important entry that only trips a penalty rule to a human in enfor
 
     $entry->refresh();
 
-    // `toEqualCanonicalizing`, not `toBe`: `toBe` is assertSame, which compares the
+    // `toEqual` (assertEquals, `==`), not `toBe` (assertSame): `toBe` compares the
     // KEY ORDER of the stored rule too. The rules are constructed as id/adjustment/
     // reason and come back as id/reason/adjustment because Postgres `jsonb`
     // normalizes object keys by (length, bytes) — so a `toBe` here silently pins a
-    // storage detail of the database rather than the rule the job recorded.
-    expect($entry->metadata['importance']['rules'])->toEqualCanonicalizing([
+    // storage detail of the database rather than the rule the job recorded. `==`
+    // ignores key order for associative arrays while still comparing the keys
+    // themselves; `toEqualCanonicalizing` would NOT — it sorts each array, which
+    // reindexes an associative one and throws its keys away, leaving only a multiset
+    // of values, so `['id' => -10, 'adjustment' => 'insufficient_substance', ...]`
+    // would have passed it.
+    expect($entry->metadata['importance']['rules'])->toEqual([
         ['id' => 'insufficient_substance', 'adjustment' => -10, 'reason' => 'Too little substance to be useful in a later session.'],
     ])
         ->and($entry->status)->toBe(KnowledgeStatus::Pending->value)

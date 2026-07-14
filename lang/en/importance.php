@@ -86,7 +86,7 @@ return [
         'reduction' => 'Projected queue reduction: :rate% (:rejected of :classified)',
         'approved_would_reject' => 'Human-approved entries the classifier would have rejected: :count of :approved (:rate%)',
         'rejected_would_keep' => 'Human-rejected entries the classifier would have kept: :count of :rejected',
-        'rejected_would_approve' => 'Human-rejected entries the classifier would have auto-approved: :count of :classified rejections classified for auto-approval at the current threshold',
+        'rejected_would_approve' => 'Human-rejected entries the classifier would have auto-approved: :count of :classified rejections re-evaluated at the auto-approve threshold now in force',
         'review_reduction' => 'Projected review reduction: :count of :total human-approved entries needed no review',
         'stale' => 'Stale classifying entries: :count (older than :minutes min)',
         'must_keep' => 'Must-keep corpus false rejects: :count of :total',

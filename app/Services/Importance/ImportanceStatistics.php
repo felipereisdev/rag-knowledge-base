@@ -4,9 +4,9 @@ namespace App\Services\Importance;
 
 use App\Enums\ImportanceAssessmentStatus;
 use App\Enums\ImportanceClassifierMode;
+use App\Enums\ImportanceVerdict;
 use App\Enums\KnowledgeStatus;
 use App\Models\ImportanceAssessment;
-use App\Models\ImportanceClassifierSetting;
 use App\Models\KnowledgeEntry;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\DB;
@@ -20,8 +20,12 @@ use Illuminate\Support\Facades\Schema;
  * Two disciplines hold everywhere in this class:
  *
  *  - **Aggregate in SQL.** `rag_status` calls this on every invocation; nothing
- *    here may load an entry's `content` or an assessment's `normalized_candidate`
- *    into PHP just to count it.
+ *    it consumes may load an entry's `content` or an assessment's
+ *    `normalized_candidate` into PHP just to count it. The single exception is
+ *    {@see self::falseAutoApprovals()}, which recomputes a predicate per row and
+ *    is therefore REPORT-ONLY: `rag:importance-report` is run by hand, and
+ *    `rag_status` must never call it. It still reads only `id` and `metadata` —
+ *    never an entry body.
  *  - **Shadow means shadow.** `metadata.importance.would_reject` is written in
  *    *every* mode (it mirrors "the computed verdict was not_important"), so an
  *    `enforce` rejection carries it too. Every shadow figure below therefore also
@@ -31,6 +35,8 @@ use Illuminate\Support\Facades\Schema;
  */
 final class ImportanceStatistics
 {
+    public function __construct(private readonly AutoApprovalPolicy $autoApproval) {}
+
     /**
      * Entries the classifier still owns, and those it has owned for too long —
      * a stale entry means the worker died, is not running, or never drained the
@@ -167,14 +173,11 @@ final class ImportanceStatistics
      *     approved_would_approve: int,
      *     rejected: int,
      *     rejected_would_keep: int,
-     *     rejected_would_approve: int,
-     *     rejected_classified_for_approval: int,
      * }
      */
     public function shadowReview(string $projectId): array
     {
         $reviewedStatuses = [KnowledgeStatus::Approved->value, KnowledgeStatus::Rejected->value];
-        $autoApproveThreshold = ImportanceClassifierSetting::current()->auto_approve_threshold;
 
         return [
             'classified' => $this->shadowClassified($projectId)->count(),
@@ -206,59 +209,80 @@ final class ImportanceStatistics
                 ->where('status', KnowledgeStatus::Rejected->value)
                 ->where($this->wouldReject(false))
                 ->count(),
-            // A human threw it away, and the classifier would have APPROVED it,
-            // unread, into the base an agent later trusts. This is the false
-            // auto-approval count, and the gate built on it tolerates none:
-            // rejecting wrongly costs one click, approving wrongly poisons the
-            // knowledge base silently.
-            //
-            // Deliberately NOT narrowed to the current dial, unlike the floor
-            // population below. An entry stamped `would_approve: true` under ANY
-            // dial is a recorded intent to publish something a human threw away,
-            // and the only errors that asymmetry can produce are FAILures of a gate
-            // that would otherwise pass — the safe direction. Narrowing it could
-            // hide one.
-            'rejected_would_approve' => $this->shadowClassified($projectId)
-                ->where('status', KnowledgeStatus::Rejected->value)
-                ->where($this->flagIs('would_approve', true))
-                ->count(),
-            // The population the false-auto-approval floor is actually measured
-            // against: rejections whose eligibility was computed AT THE DIAL NOW
-            // IN FORCE. Two things must hold, and neither is redundant.
-            //
-            //  - The entry carries a `would_approve` key at all (true OR false).
-            //    It is written unconditionally by `ClassifyKnowledgeEntryJob::decide()`,
-            //    but only since Task 2 — a shadow rejection classified before that
-            //    has `would_reject` and no `would_approve` key whatsoever, and `->>`
-            //    on a missing key yields SQL NULL, matching neither `'true'` nor
-            //    `'false'`.
-            //  - The entry recorded the SAME `auto_approve_threshold` the
-            //    administrator has configured today. `would_approve` is computed
-            //    against whatever the dial was at classify time, so a `false` stamped
-            //    while auto-approval was OFF (`null`), or under a different number,
-            //    says nothing whatsoever about the dial being certified. This is the
-            //    cautious operator's most natural sequence — calibrate for weeks with
-            //    auto-approval disabled, then set the dial and read the report — and
-            //    without this filter every one of those rejections counts as clean
-            //    evidence for a threshold not one of them was ever evaluated against.
-            //
-            // Counting either kind lets a base clear the anti-vacuity floor while
-            // contributing zero entries whose false-approval risk was ever evaluated
-            // at the dial in force — the exact vacuous pass the floor exists to
-            // prevent. When auto-approval is off there is no dial to be evidence
-            // about, so the population is empty by definition; gate 6 is skipped in
-            // that case anyway.
-            //
-            // Compared as text, never cast: the same discipline as `flagIs()` —
-            // hand-edited metadata must not be able to take `rag_status` down.
-            'rejected_classified_for_approval' => $autoApproveThreshold === null
-                ? 0
-                : $this->shadowClassified($projectId)
-                    ->where('status', KnowledgeStatus::Rejected->value)
-                    ->whereRaw("metadata->'importance'->>'would_approve' IS NOT NULL")
-                    ->whereRaw("metadata->'importance'->>'auto_approve_threshold' = ?", [(string) $autoApproveThreshold])
-                    ->count(),
         ];
+    }
+
+    /**
+     * Gate 6, both of its figures, computed from the DATA rather than from a
+     * stamp: for every shadow-classified entry a human threw away, the real
+     * {@see AutoApprovalPolicy} is re-run over that entry's stored `final_score`
+     * and `rules`, at the `auto_approve_threshold` CURRENTLY configured.
+     *
+     * It therefore answers the only question the gate is about — *"at the dial I
+     * am about to enforce, how many entries a human rejected would this classifier
+     * have approved with nobody reading them?"* — and answers it from evidence.
+     *
+     *  - `computable` (the anti-vacuity floor's population): rejections that carry
+     *    both a `final_score` and a `rules` array, i.e. the ones whose eligibility
+     *    CAN be decided. An entry classified before this feature has no `rules`
+     *    key, so nothing can be said about it and it is excluded — it must not be
+     *    able to satisfy the floor.
+     *  - `false_approvals`: of those, the ones the policy says would be eligible
+     *    right now.
+     *
+     * Reading `metadata.importance.would_approve` instead — the stamp
+     * `ClassifyKnowledgeEntryJob::decide()` wrote at classify time — was the old
+     * design, and it was wrong twice over. It threw away every rejection recorded
+     * at another dial, including rejections whose stored score and rules are direct
+     * evidence of a false approval at the dial being certified; and, because
+     * eligibility is monotone decreasing in the dial, a `true` stamped at a LOWER
+     * dial counted forever against a HIGHER one, which no amount of fresh clean
+     * evidence could ever clear (rejected entries are terminal and never
+     * re-classified). Recomputing has neither problem: it uses every row it can
+     * read, it is recomputed on every run, it is correct across a dial moved in
+     * either direction, and the two figures count the same population — so the
+     * report can never print a self-contradictory "1 of 0".
+     *
+     * The policy is REUSED, never reimplemented: a copy of the predicate here would
+     * only prove that the gate agrees with itself, and would keep agreeing with
+     * itself while `AutoApprovalPolicy` had a bug. The verdict test that
+     * `decide()` applies on top of the policy (`verdict === important`) is
+     * deliberately NOT applied: it depends on the REJECT threshold, a different
+     * dial from the one being certified, and omitting it can only ever make this
+     * gate fail where it might have passed — the safe direction.
+     *
+     * REPORT-ONLY, and the one method in this class that is not a SQL aggregate:
+     * it reads `id` and `metadata` per rejected row (never an entry body).
+     * `rag:importance-report` is run by hand; `rag_status` runs on every MCP call
+     * and must not call this.
+     *
+     * @return array{computable: int, false_approvals: int}
+     */
+    public function falseAutoApprovals(string $projectId, ?int $autoApproveThreshold): array
+    {
+        $computable = 0;
+        $falseApprovals = 0;
+
+        $rejections = $this->shadowClassified($projectId)
+            ->where('status', KnowledgeStatus::Rejected->value)
+            ->select(['id', 'metadata'])
+            ->lazy();
+
+        foreach ($rejections as $rejection) {
+            $result = $this->storedResult($rejection);
+
+            if ($result === null) {
+                continue;
+            }
+
+            $computable++;
+
+            if ($this->autoApproval->isEligible($result, $autoApproveThreshold)) {
+                $falseApprovals++;
+            }
+        }
+
+        return ['computable' => $computable, 'false_approvals' => $falseApprovals];
     }
 
     /**
@@ -307,6 +331,69 @@ final class ImportanceStatistics
             ->where('project_id', $projectId)
             ->whereRaw("metadata->'importance'->>'mode' = ?", [ImportanceClassifierMode::Shadow->value])
             ->whereRaw("metadata->'importance'->>'verdict' IS NOT NULL");
+    }
+
+    /**
+     * The classification result as it was persisted on the entry, rebuilt so the
+     * real policy can be re-run over it. `metadata.importance` already stores
+     * everything {@see AutoApprovalPolicy::isEligible()} reads — the `final_score`
+     * and the triggered `rules` with their adjustments — so nothing has to be
+     * re-derived from the entry's content, and no model is ever called.
+     *
+     * Returns null when eligibility cannot be decided from what is stored: an
+     * entry classified before this feature carries no `rules` key at all, a failed
+     * classification carries no `final_score`, and hand-edited metadata may carry
+     * neither in a readable shape. "Not computable" is the truthful answer for
+     * those, and it keeps them out of the floor's population — they are not
+     * evidence about the dial, and must not be able to satisfy the anti-vacuity
+     * floor. Nothing here may throw: a malformed row must not take the report down.
+     */
+    private function storedResult(KnowledgeEntry $entry): ?ImportanceClassificationResult
+    {
+        $importance = $entry->metadata['importance'] ?? null;
+
+        if (! is_array($importance)) {
+            return null;
+        }
+
+        $finalScore = $importance['final_score'] ?? null;
+        $storedRules = $importance['rules'] ?? null;
+
+        if (! is_int($finalScore) || ! is_array($storedRules)) {
+            return null;
+        }
+
+        /** @var list<array{id: string, adjustment: int, reason: string}> $rules */
+        $rules = [];
+
+        foreach ($storedRules as $rule) {
+            if (! is_array($rule) || ! is_int($rule['adjustment'] ?? null)) {
+                // A rule whose adjustment cannot be read cannot be weighed, so the
+                // entry's eligibility cannot be decided at all.
+                return null;
+            }
+
+            $rules[] = [
+                'id' => (string) ($rule['id'] ?? ''),
+                'adjustment' => $rule['adjustment'],
+                'reason' => (string) ($rule['reason'] ?? ''),
+            ];
+        }
+
+        $semanticScore = $importance['semantic_score'] ?? null;
+        $verdict = $importance['verdict'] ?? null;
+
+        return new ImportanceClassificationResult(
+            semanticScore: is_int($semanticScore) ? $semanticScore : null,
+            finalScore: $finalScore,
+            verdict: is_string($verdict) ? ImportanceVerdict::tryFrom($verdict) : null,
+            reasons: [],
+            triggeredRules: $rules,
+            cacheHit: false,
+            model: (string) ($importance['model'] ?? ''),
+            promptVersion: (string) ($importance['prompt_version'] ?? ''),
+            rulesVersion: (string) ($importance['rules_version'] ?? ''),
+        );
     }
 
     /**

@@ -113,6 +113,13 @@ class RagImportanceReportCommand extends Command
         $autoApprovalEnabled = $setting->auto_approve_threshold !== null;
 
         $review = $statistics->shadowReview($projectId);
+        // Gate 6's two figures, recomputed from the stored `final_score` and
+        // `rules` of every human-rejected shadow entry, at the dial in force —
+        // never read off the `would_approve` stamp the classifier wrote against
+        // whatever the dial happened to be that day. See
+        // ImportanceStatistics::falseAutoApprovals(). Per-row, and affordable
+        // precisely because this command is run by hand; `rag_status` never calls it.
+        $falseApprovals = $statistics->falseAutoApprovals($projectId, $setting->auto_approve_threshold);
         $classifying = $statistics->classifying($projectId);
         $mustKeep = $this->mustKeepFalseRejects($rules, $normalizer);
         $mustRejectEligible = $this->mustRejectEligible($rules, $normalizer);
@@ -159,13 +166,13 @@ class RagImportanceReportCommand extends Command
         ]));
         // Its own wording, not the `rejected_would_keep` line's: the two sit next to
         // each other but count different populations. This one's denominator is only
-        // the rejections whose auto-approval eligibility was actually computed
-        // against the dial in force, so an operator who reads "15 of 15" above and
-        // "0 of 0" here is told why the population shrank instead of being left to
-        // guess.
+        // the rejections whose auto-approval eligibility can be RECOMPUTED — the ones
+        // that stored both a `final_score` and their `rules` — so an operator who
+        // reads "15 of 15" above and "0 of 0" here is told why the population shrank
+        // instead of being left to guess.
         $this->line(__('importance.report.rejected_would_approve', [
-            'count' => $review['rejected_would_approve'],
-            'classified' => $review['rejected_classified_for_approval'],
+            'count' => $falseApprovals['false_approvals'],
+            'classified' => $falseApprovals['computable'],
         ]));
         // A benefit measure, not a gate: the reviews auto-approval would have
         // saved. Approving fewer entries than it could is never unsafe, so nothing
@@ -232,26 +239,25 @@ class RagImportanceReportCommand extends Command
             // floor, a project that has rejected nothing certifies auto-approval
             // on no evidence at all.
             //
-            // The floor is measured against `rejected_classified_for_approval`,
-            // not the raw `rejected` count: a shadow rejection classified before
-            // `would_approve` existed carries no such key, and one classified
-            // under a different `auto_approve_threshold` (or while auto-approval
-            // was off entirely) was evaluated against a dial that is not the one
-            // being certified. Neither is evidence that THIS dial's false-approval
-            // risk was ever computed. Counting them would let a base full of such
-            // rows clear the floor while contributing nothing the gate actually
-            // reasoned about — which is why the gate FAILS after the dial moves,
-            // until fresh shadow evidence exists at the value now in force. That
-            // is the truthful answer, not an inconvenience.
+            // Both figures are RECOMPUTED by re-running `AutoApprovalPolicy` over
+            // each rejection's stored `final_score` and `rules` at the dial in
+            // force, so they answer "at the dial I am about to enforce, how many
+            // entries a human rejected would this classifier have approved unread?"
+            // from the data — not from the `would_approve` stamp, which recorded an
+            // answer to that question about whatever the dial was on the day the
+            // entry was classified. The floor's population is therefore every
+            // rejection whose eligibility CAN be decided; an entry that predates the
+            // feature stores no `rules` and says nothing about anything, so it
+            // cannot satisfy the floor. See ImportanceStatistics::falseAutoApprovals().
             'false_auto_approvals' => [
                 'requirement' => '= '.self::MAX_FALSE_AUTO_APPROVALS
                     .' ('.__('importance.report.min_rejected', ['count' => self::MIN_REJECTED_SAMPLE]).')',
                 'actual' => $autoApprovalEnabled
-                    ? $review['rejected_would_approve'].' / '.$review['rejected_classified_for_approval']
+                    ? $falseApprovals['false_approvals'].' / '.$falseApprovals['computable']
                     : __('importance.report.auto_approval_disabled'),
                 'passes' => ! $autoApprovalEnabled || (
-                    $review['rejected_classified_for_approval'] >= self::MIN_REJECTED_SAMPLE
-                    && $review['rejected_would_approve'] <= self::MAX_FALSE_AUTO_APPROVALS
+                    $falseApprovals['computable'] >= self::MIN_REJECTED_SAMPLE
+                    && $falseApprovals['false_approvals'] <= self::MAX_FALSE_AUTO_APPROVALS
                 ),
             ],
             // Gate 7. The model-independent half of the injection defence: no

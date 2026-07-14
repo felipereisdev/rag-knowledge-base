@@ -20,13 +20,46 @@ beforeEach(function () {
 });
 
 /**
+ * A rule set with a positive signal and no penalty: `AutoApprovalPolicy` approves
+ * it at any dial the score clears. Both entries are copied verbatim from
+ * DeterministicImportanceRules (`explicit_decision`, +6) — the gate re-runs the
+ * real policy over these stored rules, so their `adjustment` signs are the whole
+ * point.
+ *
+ * @return list<array{id: string, adjustment: int, reason: string}>
+ */
+function cleanRules(): array
+{
+    return [['id' => 'explicit_decision', 'adjustment' => 6, 'reason' => 'States an explicit decision.']];
+}
+
+/**
+ * A rule set carrying a penalty (`insufficient_substance`, -10). The policy
+ * refuses it at every dial, whatever the score.
+ *
+ * @return list<array{id: string, adjustment: int, reason: string}>
+ */
+function penalizedRules(): array
+{
+    return [['id' => 'insufficient_substance', 'adjustment' => -10, 'reason' => 'Too little substance to be useful in a later session.']];
+}
+
+/**
  * One entry as the classifier job would have left it.
  *
- * `$autoApproveThreshold` is the dial the eligibility decision was recorded
- * against, exactly as `ClassifyKnowledgeEntryJob::decide()` snapshots it. It
- * defaults to 90 — the production default of `ImportanceClassifierSetting` — and
- * `null` models an entry classified while auto-approval was switched OFF, which
- * carries the key with a null value rather than no key at all.
+ * `$rules` is what gate 6 actually reasons about: together with `final_score` it
+ * is the whole input of `AutoApprovalPolicy::isEligible()`, and the report re-runs
+ * the policy over it at the dial in force. It is omitted by default, on purpose —
+ * that is exactly what an entry classified before this feature looks like, and such
+ * an entry's eligibility cannot be computed at all, so it must not be able to
+ * satisfy the anti-vacuity floor.
+ *
+ * `$wouldApprove` / `$autoApproveThreshold` are the stamps `ClassifyKnowledgeEntryJob::decide()`
+ * wrote at classify time. No gate reads them any more; they are still written here
+ * because the job writes them, and because `rag_status` and the review-reduction
+ * line still report `would_approve` in aggregate.
+ *
+ * @param  list<array{id: string, adjustment: int, reason: string}>|null  $rules
  */
 function reportEntry(
     string $status,
@@ -36,6 +69,7 @@ function reportEntry(
     string $projectId = 'report-project',
     ?bool $wouldApprove = null,
     ?int $autoApproveThreshold = 90,
+    ?array $rules = null,
 ): KnowledgeEntry {
     $importance = [
         'mode' => $mode,
@@ -45,12 +79,10 @@ function reportEntry(
         'classified_at' => now()->toIso8601String(),
     ];
 
-    // `would_approve` is omitted by default, on purpose: this is what a shadow
-    // entry classified before Task 2 shipped the key looks like. Callers that
-    // need the false-auto-approval floor to see this entry (i.e. need it to
-    // count as evidence auto-approval eligibility was actually computed) must
-    // pass `wouldApprove` explicitly — mirroring ClassifyKnowledgeEntryJob,
-    // which writes both keys, together and unconditionally, once they exist.
+    if ($rules !== null) {
+        $importance['rules'] = $rules;
+    }
+
     if ($wouldApprove !== null) {
         $importance['would_approve'] = $wouldApprove;
         $importance['auto_approve_threshold'] = $autoApproveThreshold;
@@ -75,14 +107,12 @@ function reportEntry(
  */
 function readySample(): void
 {
-    // `wouldApprove: false` matters, not just `wouldReject: true`: since Task 2
-    // the classifier writes `would_approve` unconditionally, and it is always
-    // false when `would_reject` is true. Leaving the key off (as bare
-    // `reportEntry` does) would make these entries invisible to the
-    // false-auto-approval floor, which counts only rejections whose
-    // eligibility was actually computed.
+    // The rules matter, not just `wouldReject: true`: gate 6 recomputes each
+    // rejection's eligibility from its stored `final_score` and `rules`, so a
+    // rejection with no stored rules is not computable and cannot count toward
+    // the floor. A score of 15 under a penalty is refused at every dial.
     for ($i = 0; $i < 20; $i++) {
-        reportEntry('rejected', wouldReject: true, score: 15, wouldApprove: false);
+        reportEntry('rejected', wouldReject: true, score: 15, wouldApprove: false, rules: penalizedRules());
     }
 
     for ($i = 0; $i < 40; $i++) {
@@ -96,14 +126,24 @@ function readySample(): void
  *
  * `mode => shadow` and a non-null `verdict` are both deliberate:
  * ImportanceStatistics::shadowClassified() filters on exactly those two things,
- * so an entry missing either is invisible to the gate and the test would pass
- * in a vacuum. `auto_approve_threshold` is the third: the floor counts only the
- * rejections whose eligibility was computed against the dial CURRENTLY in force,
- * so an entry recorded at another dial is evidence about that other dial, not
- * this one.
+ * so an entry missing either is invisible to the gate and the test would pass in
+ * a vacuum.
+ *
+ * `$wouldApprove` selects the STORED DATA the gate recomputes over: by default a
+ * score of 95 with clean rules (eligible at a dial of 90) or a score of 15 under a
+ * penalty (eligible at no dial at all). `$score` and `$rules` override that data
+ * independently of the stamp, which is how a test can model the entry the old
+ * stamp-reading gate got wrong — data that says one thing, stamp that says another.
+ *
+ * @param  list<array{id: string, adjustment: int, reason: string}>|null  $rules
  */
-function rejectedShadowEntries(int $count, bool $wouldApprove, ?int $autoApproveThreshold = 90): void
-{
+function rejectedShadowEntries(
+    int $count,
+    bool $wouldApprove,
+    ?int $autoApproveThreshold = 90,
+    ?int $score = null,
+    ?array $rules = null,
+): void {
     for ($i = 0; $i < $count; $i++) {
         KnowledgeEntry::create([
             'project_id' => 'report-project',
@@ -119,7 +159,8 @@ function rejectedShadowEntries(int $count, bool $wouldApprove, ?int $autoApprove
                     'would_approve' => $wouldApprove,
                     'auto_approve_threshold' => $autoApproveThreshold,
                     'auto_approved' => false,
-                    'final_score' => $wouldApprove ? 95 : 15,
+                    'final_score' => $score ?? ($wouldApprove ? 95 : 15),
+                    'rules' => $rules ?? ($wouldApprove ? cleanRules() : penalizedRules()),
                     'classified_at' => now()->toIso8601String(),
                 ],
             ],
@@ -219,7 +260,7 @@ it('honours a custom minimum sample size', function () {
     // auto-approval on a smaller rejected sample — lowering --min-sample cannot
     // buy a way past that floor.
     for ($i = 0; $i < 10; $i++) {
-        reportEntry('rejected', wouldReject: true, score: 15, wouldApprove: false);
+        reportEntry('rejected', wouldReject: true, score: 15, wouldApprove: false, rules: penalizedRules());
     }
 
     reportEntry('approved', wouldReject: false, score: 85);
@@ -447,84 +488,102 @@ it('fails readiness when too few entries were human-rejected to validate auto-ap
         ->assertExitCode(1);
 })->note('Anti-vacuity: "zero false approvals among zero rejections" proves nothing. The same defect was already found once in the false-reject gate.');
 
-it('fails readiness when human-rejected entries predate would_approve and cannot clear the floor', function () {
-    // The normal upgrade path this feature is built around: an operator ran
-    // shadow for weeks *before* Task 2 shipped `would_approve`, so their
-    // rejected entries carry `would_reject` but the `would_approve` key is
-    // simply absent — not false, absent. `->>` on a missing JSON key yields
-    // SQL NULL, matching neither 'true' nor 'false'.
+it('fails readiness when human-rejected entries predate the feature and cannot clear the floor', function () {
+    // The normal upgrade path this feature is built around: an operator ran shadow
+    // for weeks *before* the classifier persisted its `rules`, so their rejected
+    // entries carry a verdict and nothing gate 6 can reason with. Eligibility cannot
+    // be recomputed for them at any dial — not "false", unknowable — so they are not
+    // evidence, and the floor must not accept them.
     //
-    // A sample that clears every OTHER gate, plus 15 legacy shadow rejections —
-    // comfortably over the OLD `rejected >= 10` floor, but zero of them are
-    // evidence the false-approval risk was ever computed.
+    // A sample that clears every OTHER gate, plus 15 such legacy shadow rejections:
+    // comfortably over the `rejected >= 10` floor if the raw rejection count were
+    // used, and worth exactly nothing.
     readySampleWithoutRejections();
 
     for ($i = 0; $i < 15; $i++) {
-        reportEntry('rejected', wouldReject: true, score: 15); // no wouldApprove: legacy shape
+        reportEntry('rejected', wouldReject: true, score: 15); // no rules key: legacy shape
     }
 
     $this->artisan('rag:importance-report', ['--project' => 'report-project'])
         ->expectsOutputToContain('Human-rejected entries the classifier would have auto-approved: 0 of 0')
         ->expectsOutputToContain('NOT READY — 1 of 7 rollout gates fail')
         ->assertExitCode(1);
-})->note('The vacuous pass the floor exists to prevent, wearing a denominator of 15: `rejected` alone would have cleared the old floor on entries that carry no would_approve evidence at all.');
+})->note('The vacuous pass the floor exists to prevent, wearing a denominator of 15: entries whose eligibility can never be computed are not a clean record, they are no record.');
 
-it('fails readiness when the rejected sample was classified while auto-approval was disabled', function () {
-    // The cautious operator's most natural sequence, and the vacuous pass it used
-    // to buy:
+it('recomputes eligibility over rejections recorded while auto-approval was off, and finds the false approvals in them', function () {
+    // The failure the `would_approve` stamp made invisible, and the reason gate 6
+    // recomputes:
     //
-    //   1. set `auto_approve_threshold = null` — "let's not auto-approve while we
-    //      calibrate" — and run shadow for weeks;
-    //   2. `isEligible()` returns false for a null dial, so EVERY shadow entry is
-    //      stamped `would_approve: false` — and the key is present, so every one of
-    //      them used to count toward the floor;
-    //   3. set the dial to 90 and re-run the report. Gate 6 activates, reads a
-    //      spotless "0 of 15", and certifies auto-approval — against a base in which
-    //      not one entry ever had its eligibility evaluated at 90.
+    //   1. the operator calibrates for weeks at `auto_approve_threshold = null`.
+    //      `isEligible()` refuses a null dial, so every one of those 100 rejections
+    //      is stamped `would_approve: false` — truthfully, about a dial of `null`;
+    //   2. THREE of them stored a `final_score` of 95 with clean rules. At a dial of
+    //      90 each is a false auto-approval, sitting in the database, computable;
+    //   3. the operator sets the dial to 90 and gathers 10 fresh clean rejections.
     //
-    // The dial each entry was judged against is recorded now, so those 15 are
-    // evidence about `null` and about nothing else. The floor is not met, and gate 6
-    // says so.
+    // The stamp-reading gate dropped all 100 (their recorded dial was `null`, not
+    // 90), read a spotless "0 of 10", met the floor and certified the classifier.
+    // Recomputing at the dial in force reads all 110 and finds the 3.
     readySampleWithoutRejections();
 
-    rejectedShadowEntries(count: 15, wouldApprove: false, autoApproveThreshold: null);
+    rejectedShadowEntries(count: 97, wouldApprove: false, autoApproveThreshold: null);
+    rejectedShadowEntries(
+        count: 3,
+        wouldApprove: false,          // stamped false: the dial was null when it was judged
+        autoApproveThreshold: null,
+        score: 95,                    // …but the DATA is eligible at 90
+        rules: cleanRules(),
+    );
+    rejectedShadowEntries(count: 10, wouldApprove: false, autoApproveThreshold: 90);
 
     ImportanceClassifierSetting::query()->findOrFail(1)->update(['auto_approve_threshold' => 90]);
 
     $this->artisan('rag:importance-report', ['--project' => 'report-project'])
         ->expectsOutputToContain('auto-approve 90')
-        ->expectsOutputToContain('Human-rejected entries the classifier would have auto-approved: 0 of 0')
+        ->expectsOutputToContain('Human-rejected entries the classifier would have auto-approved: 3 of 110')
         ->expectsOutputToContain('NOT READY — 1 of 7 rollout gates fail')
         ->assertExitCode(1);
-})->note('Shadow evidence gathered with auto-approval OFF certifies nothing about a dial that was never applied to it.');
+})->note('Contrary evidence a human already produced must not be thrown away because of the dial it happened to be stamped with.');
 
-it('fails readiness when the rejected sample was classified at a different auto-approve threshold', function () {
-    // The same hole, opened by the other natural operator act: reading the score
-    // distribution and moving the dial. Fifteen clean rejections were evaluated at
-    // 95; the operator now proposes 90. Every one of those entries was refused by a
-    // stricter dial than the one being certified, so none of them says what a 90
-    // would have done with it — and the gate refuses to pretend otherwise until
-    // fresh shadow evidence exists at 90.
+it('does not let a would_approve stamped at a lower dial block a higher one forever', function () {
+    // The brick. `isEligible()` is monotone decreasing in the dial, so an entry
+    // stamped `would_approve: true` at 60 with a score of 65 is NOT eligible at 90.
+    // The stamp-reading gate counted it anyway (it counted a `true` recorded at ANY
+    // dial), and rejected entries are terminal — never re-classified — so no amount
+    // of fresh clean evidence could ever bring gate 6 back to a pass, and the
+    // operator's only remedy was to hand-edit metadata.
+    //
+    // Recomputing asks the policy instead of the stamp: at 90, a 65 is refused, so
+    // this entry is not a false approval and does not block. It is still COUNTED —
+    // its eligibility is computable — so it is part of the floor's population.
     readySampleWithoutRejections();
 
-    rejectedShadowEntries(count: 15, wouldApprove: false, autoApproveThreshold: 95);
+    rejectedShadowEntries(count: 10, wouldApprove: false, autoApproveThreshold: 90);
+    rejectedShadowEntries(
+        count: 1,
+        wouldApprove: true,           // stamped true, truthfully, at a dial of 60
+        autoApproveThreshold: 60,
+        score: 65,
+        rules: cleanRules(),
+    );
 
     ImportanceClassifierSetting::query()->findOrFail(1)->update(['auto_approve_threshold' => 90]);
 
     $this->artisan('rag:importance-report', ['--project' => 'report-project'])
-        ->expectsOutputToContain('Human-rejected entries the classifier would have auto-approved: 0 of 0')
-        ->expectsOutputToContain('NOT READY — 1 of 7 rollout gates fail')
-        ->assertExitCode(1);
-})->note('Moving the dial invalidates the evidence gathered at the old one. That is the truthful answer, not an inconvenience.');
+        ->expectsOutputToContain('Human-rejected entries the classifier would have auto-approved: 0 of 11')
+        ->expectsOutputToContain('READY')
+        ->assertExitCode(0);
+})->note('A gate no fresh evidence can ever clear is not a gate, it is a brick.');
 
-it('counts the rejected sample recorded at the dial actually in force', function () {
-    // The control for the two tests above: the same 15 rejections, recorded at the
-    // dial the operator is certifying. NOW they are evidence, the floor is met, and
-    // the gate passes — so the two NOT READYs above are the filter doing its work,
-    // not the sample being too small or some other gate failing.
+it('counts rejections recorded at any dial, because their eligibility is recomputed at the one in force', function () {
+    // The control for both tests above: 15 rejections recorded while auto-approval
+    // was OFF, whose stored score and rules are refused at 90. They are evidence
+    // about the dial in force — the recomputation says so — the floor is met on
+    // them, and the gate passes. The dial they happened to be stamped with never
+    // enters into it.
     readySampleWithoutRejections();
 
-    rejectedShadowEntries(count: 15, wouldApprove: false, autoApproveThreshold: 90);
+    rejectedShadowEntries(count: 15, wouldApprove: false, autoApproveThreshold: null);
 
     ImportanceClassifierSetting::query()->findOrFail(1)->update(['auto_approve_threshold' => 90]);
 
@@ -534,10 +593,10 @@ it('counts the rejected sample recorded at the dial actually in force', function
         ->assertExitCode(0);
 });
 
-it('fails readiness on a false auto-approval recorded at the dial in force', function () {
-    // And the other half of the control: with the population correct, one entry a
-    // human threw away that the classifier would have approved at THIS dial still
-    // fails the gate. The narrowed floor cannot hide a real false auto-approval.
+it('fails readiness on a false auto-approval the stored data proves at the dial in force', function () {
+    // With the population correct, one entry a human threw away whose stored score
+    // and rules the policy approves at THIS dial still fails the gate. The
+    // recomputation cannot hide a real false auto-approval.
     readySampleWithoutRejections();
 
     rejectedShadowEntries(count: 14, wouldApprove: false, autoApproveThreshold: 90);
@@ -550,6 +609,37 @@ it('fails readiness on a false auto-approval recorded at the dial in force', fun
         ->expectsOutputToContain('NOT READY — 1 of 7 rollout gates fail')
         ->assertExitCode(1);
 });
+
+it('fails readiness when the whole rejected sample would be auto-approved at the dial in force', function () {
+    // The other direction of a dial move, and the one an operator makes after
+    // reading the score distribution: LOWERING it. Twelve rejections were judged at
+    // 95 and stamped `would_approve: false` — truthfully, at 95, because they score
+    // 92. The operator now proposes 90, and at 90 every one of those 12 is a false
+    // auto-approval: clean rules, score over the dial, thrown away by a human.
+    //
+    // Nothing about them changed except the dial, and the stamp cannot see that. The
+    // recomputation reads their stored score and rules against the dial in force and
+    // finds all twelve — where the stamp-reading gate saw a population of zero, and
+    // would have certified the classifier the moment ten fresh clean rejections
+    // arrived at 90, with these twelve still sitting in the base.
+    readySampleWithoutRejections();
+
+    rejectedShadowEntries(
+        count: 12,
+        wouldApprove: false,          // stamped at 95: 92 < 95, so not eligible THEN
+        autoApproveThreshold: 95,
+        score: 92,                    // …but 92 >= 90, with clean rules: eligible NOW
+        rules: cleanRules(),
+    );
+
+    ImportanceClassifierSetting::query()->findOrFail(1)->update(['auto_approve_threshold' => 90]);
+
+    $this->artisan('rag:importance-report', ['--project' => 'report-project'])
+        ->expectsOutputToContain('Human-rejected entries the classifier would have auto-approved: 12 of 12')
+        ->expectsOutputToContain('False auto-approvals')
+        ->expectsOutputToContain('NOT READY — 1 of 7 rollout gates fail')
+        ->assertExitCode(1);
+})->note('Lowering the dial can only create false approvals, never remove them: the gate must recompute, not remember.');
 
 it('prints the auto-approve dial the two approve-path gates depend on', function () {
     // The report is the document an operator reads to decide whether to enforce.

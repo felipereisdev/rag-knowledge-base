@@ -302,19 +302,27 @@ final class HybridImportanceClassifier
      * rules version is part of the cache identity, so they cannot disagree with
      * the stored ones) — which is what keeps a hard veto binding even here.
      *
-     * The FRESH evaluation's rules are what the result carries, not the stored
-     * ones. The two halves of a result must come from one source: the verdict is
-     * already derived from `$evaluation->vetoed`, and `AutoApprovalPolicy` reads
-     * `triggeredRules` to decide whether an entry may be published to search with
-     * nobody reading it. They agree by construction as long as `VERSION` is bumped
-     * on every behavioural rule change — but that discipline is documented, not
-     * enforceable, and the failure it permits is the precise one this feature must
-     * never produce: a developer who widens a PENALTY without bumping `VERSION`
-     * leaves cached assessments whose stored `rules` carry no penalty, and every
-     * entry hitting that cache would be auto-approved while the current rules would
-     * have disqualified it. Re-evaluating is equivalent when the discipline holds
-     * (same normalized candidate, same `candidate_hash`) and strictly safer when it
-     * does not.
+     * The FRESH evaluation's rules are what the result carries, not the stored ones,
+     * and this result is therefore deliberately MIXED: `finalScore` and `reasons`
+     * come from the cached row, while `triggeredRules` (and the veto that re-derives
+     * the verdict) come from the rules as they are TODAY. That mixture is not an
+     * oversight, and it is the safe one.
+     *
+     * The two can only disagree when a behavioural rule change shipped without a
+     * `VERSION` bump — the versions are part of the cache identity, so when the
+     * discipline holds, re-evaluating the same normalized candidate reproduces the
+     * stored rules exactly and "mixed" is indistinguishable from "fresh". When the
+     * discipline is broken, the mixture is what saves the feature: `AutoApprovalPolicy`
+     * reads `triggeredRules` to decide whether an entry may be published to search
+     * with nobody reading it, so a developer who widens a PENALTY without bumping
+     * `VERSION` would otherwise leave cached assessments whose stored `rules` carry
+     * no penalty, and every entry hitting that cache would be auto-approved while the
+     * current rules disqualify it. Reading the rules fresh closes that: over every
+     * combination of an un-bumped rule change (a widened or narrowed penalty, a
+     * widened or narrowed positive signal), the decision this mixed result produces
+     * is equal to, or more conservative than, the one a full fresh classification
+     * would have produced — a stale `finalScore` cannot approve anything the current
+     * rules refuse, because the current rules are the ones being read.
      *
      * The stored row is deliberately NOT re-stamped with the re-derived verdict.
      * An assessment is shared by every entry with the same cache identity, and

@@ -86,7 +86,7 @@ return [
         'reduction' => 'Redução projetada da fila: :rate% (:rejected de :classified)',
         'approved_would_reject' => 'Entradas aprovadas por humanos que o classificador rejeitaria: :count de :approved (:rate%)',
         'rejected_would_keep' => 'Entradas rejeitadas por humanos que o classificador manteria: :count de :rejected',
-        'rejected_would_approve' => 'Entradas rejeitadas por humanos que o classificador aprovaria automaticamente: :count de :classified rejeições classificadas para aprovação automática no limiar atual',
+        'rejected_would_approve' => 'Entradas rejeitadas por humanos que o classificador aprovaria automaticamente: :count de :classified rejeições reavaliadas no limiar de aprovação automática atualmente em vigor',
         'review_reduction' => 'Redução projetada da revisão: :count de :total entradas aprovadas por humanos não precisariam de revisão',
         'stale' => 'Entradas paradas em classificação: :count (há mais de :minutes min)',
         'must_keep' => 'Falsas rejeições no corpus obrigatório: :count de :total',

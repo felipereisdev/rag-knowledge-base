@@ -71,9 +71,12 @@ it('refuses a high score carrying any penalty, even alongside a positive signal'
 it('refuses a vetoed evaluation', function () {
     $policy = new AutoApprovalPolicy;
 
-    // The score is deliberately ABOVE the threshold, and the verdict deliberately
-    // `important`, so the two earlier branches of `isEligible()` both wave this
-    // result through and the veto rule is the only thing left that can refuse it.
+    // The score is deliberately ABOVE the threshold, so the null-dial and
+    // score-comparison branches of `isEligible()` both wave this result through and
+    // the veto rule is the only thing left in the loop that can refuse it. (The
+    // `important` verdict is set for realism only: `isEligible()` never reads the
+    // verdict — that gate lives in `ClassifyKnowledgeEntryJob::decide()`, which
+    // requires BOTH an `important` verdict and eligibility.)
     // A vetoed evaluation really scores 0, which is why the previous version of
     // this test (finalScore: 0) never reached the loop at all: it was refused by
     // the threshold comparison and asserted nothing whatsoever about the veto.
