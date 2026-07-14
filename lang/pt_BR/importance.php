@@ -17,6 +17,16 @@ return [
         'prompt_version_help' => 'Definida na configuração, não aqui.',
         'rules_version' => 'Versão das regras',
         'rules_version_help' => 'Definida na configuração, não aqui.',
+        'auto_approve_threshold' => 'Limite de aprovação automática',
+        'auto_approved' => 'Aprovado automaticamente',
+    ],
+    'help' => [
+        'auto_approve_threshold' => 'Entradas com pontuação igual ou superior a este valor, com um sinal de regra positivo e sem penalidade, são aprovadas sem revisão humana quando o modo é Aplicar. Deixe vazio para desativar a aprovação automática mantendo a rejeição.',
+    ],
+    'filters' => [
+        'auto_approved' => 'Aprovado automaticamente',
+        'auto_approved_yes' => 'Aprovado pelo classificador',
+        'auto_approved_no' => 'Revisado por um humano',
     ],
     'modes' => [
         'off' => 'Desligado',

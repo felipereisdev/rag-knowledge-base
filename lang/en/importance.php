@@ -17,6 +17,16 @@ return [
         'prompt_version_help' => 'Set in configuration, not here.',
         'rules_version' => 'Rules version',
         'rules_version_help' => 'Set in configuration, not here.',
+        'auto_approve_threshold' => 'Auto-approve threshold',
+        'auto_approved' => 'Auto-approved',
+    ],
+    'help' => [
+        'auto_approve_threshold' => 'Entries scoring at least this, carrying a positive rule signal and no penalty, are approved without human review when the mode is Enforce. Leave empty to disable auto-approval while keeping rejection.',
+    ],
+    'filters' => [
+        'auto_approved' => 'Auto-approved',
+        'auto_approved_yes' => 'Approved by the classifier',
+        'auto_approved_no' => 'Reviewed by a human',
     ],
     'modes' => [
         'off' => 'Off',

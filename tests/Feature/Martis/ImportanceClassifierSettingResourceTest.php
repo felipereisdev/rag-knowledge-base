@@ -45,8 +45,8 @@ describe('ImportanceClassifierSettingResource', function () {
             ->and($resource->authorizedToUpdate($request))->toBeTrue();
     });
 
-    it('exposes only mode and threshold as editable fields', function () {
-        expect(array_keys(settingFields(FieldContext::UPDATE)))->toBe(['mode', 'threshold']);
+    it('exposes only mode, threshold and auto_approve_threshold as editable fields', function () {
+        expect(array_keys(settingFields(FieldContext::UPDATE)))->toBe(['mode', 'threshold', 'auto_approve_threshold']);
     });
 
     it('shows the code-owned model and versions read-only, resolved from config and the class constants', function () {
@@ -151,5 +151,58 @@ describe('ImportanceClassifierSettingResource', function () {
         $this->deleteJson('/martis/api/resources/importance-classifier-settings/1')->assertForbidden();
 
         expect(ImportanceClassifierSetting::query()->count())->toBe(1);
+    });
+
+    it('accepts an auto-approve threshold at or above the importance threshold', function () {
+        $response = $this->putJson('/martis/api/resources/importance-classifier-settings/1', [
+            'mode' => 'shadow',
+            'threshold' => 70,
+            'auto_approve_threshold' => 90,
+        ]);
+
+        $response->assertSuccessful();
+
+        expect(ImportanceClassifierSetting::current()->auto_approve_threshold)->toBe(90);
+    });
+
+    it('refuses an auto-approve threshold below the importance threshold', function () {
+        $response = $this->putJson('/martis/api/resources/importance-classifier-settings/1', [
+            'mode' => 'shadow',
+            'threshold' => 70,
+            'auto_approve_threshold' => 60,
+        ]);
+
+        // Martis renders validation failures as a list of {field, message, code}
+        // objects rather than Laravel's default field-keyed map, so
+        // assertJsonFragment (used elsewhere in this suite for the same shape)
+        // is the correct assertion here — assertJsonValidationErrors expects the
+        // standard shape and would never match.
+        $response->assertStatus(422)->assertJsonFragment([
+            'field' => 'auto_approve_threshold',
+            'code' => 'invalid',
+        ]);
+    })->note('Approving below the importance threshold is incoherent.');
+
+    it('accepts a null auto-approve threshold to disable auto-approval', function () {
+        $response = $this->putJson('/martis/api/resources/importance-classifier-settings/1', [
+            'mode' => 'enforce',
+            'threshold' => 70,
+            'auto_approve_threshold' => null,
+        ]);
+
+        $response->assertSuccessful();
+
+        expect(ImportanceClassifierSetting::current()->auto_approve_threshold)->toBeNull();
+    });
+
+    it('refuses an auto-approve threshold outside 0..100', function () {
+        $this->putJson('/martis/api/resources/importance-classifier-settings/1', [
+            'mode' => 'shadow',
+            'threshold' => 70,
+            'auto_approve_threshold' => 101,
+        ])->assertStatus(422)->assertJsonFragment([
+            'field' => 'auto_approve_threshold',
+            'code' => 'invalid',
+        ]);
     });
 });

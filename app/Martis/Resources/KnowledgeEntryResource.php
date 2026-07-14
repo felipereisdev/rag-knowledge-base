@@ -9,6 +9,7 @@ use App\Enums\KnowledgeSource;
 use App\Enums\KnowledgeStatus;
 use App\Martis\Actions\ApproveEntries;
 use App\Martis\Actions\RejectEntries;
+use App\Martis\Filters\AutoApprovedFilter;
 use App\Martis\Filters\CategoryFilter;
 use App\Martis\Filters\ProjectFilter;
 use App\Martis\Filters\StatusFilter;
@@ -22,6 +23,7 @@ use Martis\Contracts\OverrideContract;
 use Martis\DrawerOverride;
 use Martis\Fields\BelongsTo;
 use Martis\Fields\BelongsToMany;
+use Martis\Fields\Boolean;
 use Martis\Fields\DateTime;
 use Martis\Fields\Field;
 use Martis\Fields\Id;
@@ -186,6 +188,7 @@ class KnowledgeEntryResource extends Resource
                 ->placeholder(__('rag.filters.select')),
             CategoryFilter::make(__('rag.filters.category')),
             StatusFilter::make(__('rag.filters.status')),
+            AutoApprovedFilter::make(__('importance.filters.auto_approved')),
             DateRangeFilter::make(__('rag.filters.created_between'))
                 ->column('created_at'),
         ];
@@ -467,6 +470,20 @@ class KnowledgeEntryResource extends Resource
 
                     return $verdict === null ? null : __('importance.verdicts.'.$verdict->value);
                 })
+                ->span(4),
+
+            // Reads the ENTRY's own metadata only — no assessment fallback. The
+            // assessment row is shared across every entry with the same cache
+            // identity, so its notion of "approved" (if it had one) would
+            // belong to whichever entry first computed it, not to this one.
+            // `self::importance($entry)` is exactly the raw `metadata.importance`
+            // map, never touching `$entry->importanceAssessment`, which is what
+            // makes this safe. This is the whole point of the audit tab: the
+            // one place a human can see what auto-approval let through
+            // unreviewed.
+            Boolean::make('importance_auto_approved', __('importance.fields.auto_approved'))
+                ->onlyOnDetail()
+                ->resolveUsing(static fn (mixed $value, KnowledgeEntry $entry): bool => (bool) (self::importance($entry)['auto_approved'] ?? false))
                 ->span(4),
 
             Text::make('importance_mode', __('importance.audit.mode'))

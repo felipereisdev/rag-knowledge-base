@@ -77,6 +77,16 @@ class ImportanceClassifierSettingResource extends Resource
                 ->rules(['required', 'integer', 'between:0,100'])
                 ->help(__('importance.fields.threshold_help')),
 
+            // Nullable: `null` disables auto-approval while rejection (in
+            // `enforce`) keeps working — the escape hatch described on the
+            // migration. `gte:threshold` refuses a value that would approve
+            // something below the importance threshold, which is incoherent;
+            // the drawer resubmits every scalar field on save, so `threshold`
+            // is always present in the payload for `gte:` to compare against.
+            Number::make('auto_approve_threshold', __('importance.fields.auto_approve_threshold'))
+                ->rules(['nullable', 'integer', 'min:0', 'max:100', 'gte:threshold'])
+                ->help(__('importance.help.auto_approve_threshold')),
+
             // Code-owned. `exceptOnForms()` keeps them out of every form context,
             // so the update endpoint neither validates nor fills them — there is
             // no editable copy of a config value to drift out of sync.

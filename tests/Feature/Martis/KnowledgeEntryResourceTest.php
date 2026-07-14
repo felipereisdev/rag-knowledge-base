@@ -285,6 +285,7 @@ describe('KnowledgeEntryResource', function () {
             ->toBe([
                 'importance_score',
                 'importance_verdict',
+                'importance_auto_approved',
                 'importance_mode',
                 'importance_reasons',
                 'importance_rules',
@@ -604,5 +605,44 @@ describe('KnowledgeEntryResource', function () {
 
             expect($entry->refresh()->status)->toBe($to->value);
         }
+    });
+
+    it('shows on detail whether an entry was auto-approved', function () {
+        $entry = KnowledgeEntry::factory()->create([
+            'status' => KnowledgeStatus::Approved->value,
+            'metadata' => ['importance' => [
+                'final_score' => 95,
+                'verdict' => 'important',
+                'mode' => 'enforce',
+                'auto_approved' => true,
+                'would_approve' => true,
+            ]],
+        ]);
+
+        $response = $this->getJson("/martis/api/resources/knowledge-entries/{$entry->id}");
+
+        $response->assertSuccessful();
+
+        expect(json_encode($response->json()))->toContain('auto_approved');
+    })->note('Silent action needs a surface where it can be inspected.');
+
+    it('filters knowledge entries down to the auto-approved ones', function () {
+        $auto = KnowledgeEntry::factory()->create([
+            'status' => KnowledgeStatus::Approved->value,
+            'metadata' => ['importance' => ['auto_approved' => true]],
+        ]);
+
+        $human = KnowledgeEntry::factory()->create([
+            'status' => KnowledgeStatus::Approved->value,
+            'metadata' => ['importance' => ['auto_approved' => false]],
+        ]);
+
+        $filters = urlencode(json_encode(['auto-approved' => '1']));
+
+        $response = $this->getJson("/martis/api/resources/knowledge-entries?filters={$filters}");
+
+        $ids = collect($response->json('data'))->pluck('id')->all();
+
+        expect($ids)->toContain($auto->id)->not->toContain($human->id);
     });
 });
