@@ -302,6 +302,16 @@ final class HybridImportanceClassifier
      * The rules are re-evaluated on every call (they are pure and cheap, and the
      * rules version is part of the cache identity, so they cannot disagree with
      * the stored ones) — which is what keeps a hard veto binding even here.
+     *
+     * The stored row is deliberately NOT re-stamped with the re-derived verdict.
+     * An assessment is shared by every entry with the same cache identity, and
+     * the threshold is not part of that identity, so re-stamping would rewrite
+     * the audit record of entries decided earlier under a different threshold —
+     * an entry rejected at 70 would end up pointing at a row reading `important`
+     * because an unrelated later capture was decided at 60. `assessment.verdict`
+     * therefore records the verdict as of the FIRST computation; the verdict that
+     * actually applied to an entry lives in that entry's `metadata.importance`,
+     * which is written per entry and never rewritten.
      */
     private function cachedResult(
         ImportanceAssessment $assessment,
@@ -310,10 +320,6 @@ final class HybridImportanceClassifier
     ): ImportanceClassificationResult {
         $finalScore = (int) $assessment->final_score;
         $verdict = $this->verdict($finalScore, $threshold, $evaluation->vetoed);
-
-        if ($assessment->verdict !== $verdict) {
-            $assessment->update(['verdict' => $verdict]);
-        }
 
         return new ImportanceClassificationResult(
             semanticScore: $assessment->semantic_score,

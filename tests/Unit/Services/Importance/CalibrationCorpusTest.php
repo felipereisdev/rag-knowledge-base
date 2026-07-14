@@ -241,10 +241,25 @@ it('rejects the must-reject noise the rules deliberately let through, on its sco
     // semantic score is the whole of what rejects them. If one of them starts
     // being vetoed, a precision regression has been introduced and real knowledge
     // is being destroyed somewhere out of sight.
+    $rules = new DeterministicImportanceRules;
+
     foreach (calibrationFixtures('must-reject') as $fixture) {
         if ($fixture['expected']['disposition'] !== 'score') {
             continue;
         }
+
+        // No veto AT ALL, not merely no `agent_operation_only`. These fixtures are
+        // rejected on their score, and `reject-chatter-with-parenthetical` scores 0
+        // once clamped — so a veto by ANY other rule would produce the very same
+        // final score and verdict and slip through unnoticed. The blanket assertion
+        // is what makes the escape observable.
+        $evaluation = $rules->evaluate(calibrationNormalized($fixture['candidate']));
+
+        expect($evaluation->vetoed)->toBeFalse(
+            "Must-reject fixture [{$fixture['id']}] is a documented ESCAPE and must reach the judge, but it was hard-vetoed by: ".
+            implode(', ', calibrationRuleIds($evaluation->triggeredRules)).
+            '. A veto here means the grammar was widened and the false-veto class of rounds 1-4 is back.',
+        );
 
         $judged = false;
 
@@ -255,7 +270,7 @@ it('rejects the must-reject noise the rules deliberately let through, on its sco
             $result = calibrationClassifier($judge)->classify('calibration', calibrationCandidate($fixture['candidate']));
 
             expect(in_array('agent_operation_only', calibrationRuleIds($result->triggeredRules), true))->toBeFalse(
-                "Must-reject fixture [{$fixture['id']}] is a documented ESCAPE and must reach the judge. A veto here means the grammar was widened and the false-veto class of rounds 1-4 is back.",
+                "Must-reject fixture [{$fixture['id']}] triggered [agent_operation_only], the rule it is on record as escaping.",
             )
                 // The first threshold pays for the judgement; every later one is
                 // the same candidate under the same cache identity and must reuse
@@ -302,10 +317,16 @@ it('decides every borderline candidate exactly as reviewed, at each threshold', 
             $judge = new CorpusFixedJudge($fixture['expected']['semantic_score']);
             $result = calibrationClassifier($judge)->classify('calibration', calibrationCandidate($fixture['candidate']));
 
-            expect($result->semanticScore)->toBe($fixture['expected']['semantic_score'])
-                ->and($result->finalScore)->toBe($fixture['expected']['final_score'],
-                    "Borderline fixture [{$fixture['id']}] no longer scores what the reviewer recorded: the rule adjustments moved under it.",
-                )
+            // The semantic score is NOT asserted against the fixture here: the judge
+            // was constructed with that very number, so on the first pass it would
+            // only assert that the fake returned what the fake was handed. What is
+            // worth pinning is what the classifier did WITH it — the deterministic
+            // adjustment, the clamp, and the threshold comparison below — and that
+            // the cached pass re-derives the same final score from the stored row
+            // without a judge call.
+            expect($result->finalScore)->toBe($fixture['expected']['final_score'],
+                "Borderline fixture [{$fixture['id']}] no longer scores what the reviewer recorded: the rule adjustments moved under it.",
+            )
                 ->and($result->verdict->value)->toBe($expectedVerdict,
                     "Borderline fixture [{$fixture['id']}] came out {$result->verdict->value} at threshold {$threshold}, not {$expectedVerdict}.",
                 )

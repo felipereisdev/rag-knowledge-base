@@ -11,6 +11,18 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * One cached importance judgement, keyed by the cache identity
  * (project + candidate hash + model + prompt version + rules version).
  *
+ * Every field here is threshold-independent EXCEPT `verdict`. The threshold is
+ * an administrator dial and is deliberately not part of the cache identity, so
+ * one row is shared by every entry that captured the same candidate — under
+ * whatever threshold was in force at the time. `verdict` therefore records the
+ * verdict **as of the first computation** of this row and is never re-stamped:
+ * rewriting it on a later cache hit would retroactively rewrite the audit
+ * record of the entries already decided from it.
+ *
+ * The authoritative, per-entry verdict is `knowledge_entries.metadata.importance.verdict`
+ * (written by `ClassifyKnowledgeEntryJob`, never rewritten). Read that — never
+ * this column — when you need to know what actually happened to an entry.
+ *
  * @property int $id
  * @property string $project_id
  * @property string $candidate_hash
@@ -26,7 +38,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * @property int|null $future_value_score
  * @property int|null $semantic_score
  * @property int|null $final_score
- * @property ImportanceVerdict|null $verdict
+ * @property ImportanceVerdict|null $verdict the verdict at first computation, NOT the verdict that applied to any given entry
  * @property list<array{criterion:string, explanation:string}> $reasons
  * @property list<array{id:string, adjustment:int, reason:string}> $rules
  * @property int|null $duration_ms

@@ -476,10 +476,20 @@ describe('workflow 8: lowering the threshold re-decides without re-judging', fun
             ->and($accepted->metadata['importance']['would_reject'])->toBeFalse()
             ->and($accepted->status)->toBe(KnowledgeStatus::Pending->value);
 
-        // The stored assessment is re-stamped with the current verdict, so the
-        // audit record and the entry never disagree about what was decided.
+        // The entry decided under the OLD threshold is untouched by the new one.
+        // Both entries share the single assessment row, so re-stamping its verdict
+        // on the cache hit would rewrite the audit record of a live rejection: the
+        // rejected entry would point at a row reading `important`. The row records
+        // the verdict at its FIRST computation and nothing rewrites it; the verdict
+        // that actually applied to each entry is the one in its own metadata.
+        $rejected->refresh();
+
+        expect($rejected->status)->toBe(KnowledgeStatus::Rejected->value)
+            ->and($rejected->metadata['importance']['verdict'])->toBe('not_important')
+            ->and($rejected->importance_assessment_id)->toBe($accepted->importance_assessment_id);
+
         $assessment = ImportanceAssessment::query()->sole();
-        expect($assessment->verdict)->toBe(ImportanceVerdict::Important)
+        expect($assessment->verdict)->toBe(ImportanceVerdict::NotImportant)
             ->and($assessment->semantic_score)->toBe(55)
             ->and($assessment->final_score)->toBe(66);
     });

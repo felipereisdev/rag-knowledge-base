@@ -12,6 +12,7 @@ use App\Martis\Actions\RejectEntries;
 use App\Martis\Filters\CategoryFilter;
 use App\Martis\Filters\ProjectFilter;
 use App\Martis\Filters\StatusFilter;
+use App\Models\ImportanceAssessment;
 use App\Models\KnowledgeEntry;
 use BackedEnum;
 use Illuminate\Http\Request;
@@ -414,10 +415,20 @@ class KnowledgeEntryResource extends Resource
             // Both go through tryFrom: metadata written by an older prompt or rule
             // set may carry a value this build no longer knows, and an audit panel
             // must degrade to blank rather than 500 the whole detail page.
+            //
+            // The verdict alone is read from the entry's metadata WITHOUT the
+            // assessment fallback. An assessment row is shared by every entry with
+            // the same cache identity, and the threshold is not part of that
+            // identity, so its `verdict` is only the verdict at that row's first
+            // computation — showing it here would attribute another entry's
+            // decision to this one. No verdict in the metadata means this entry was
+            // never decided (it failed open, or predates the classifier), and blank
+            // is the honest answer.
             Text::make('importance_verdict', __('importance.audit.verdict'))
                 ->onlyOnDetail()
                 ->resolveUsing(static function (mixed $value, KnowledgeEntry $entry): ?string {
-                    $verdict = ImportanceVerdict::tryFrom((string) self::importanceString($entry, 'verdict'));
+                    $stored = self::importance($entry)['verdict'] ?? null;
+                    $verdict = is_string($stored) ? ImportanceVerdict::tryFrom($stored) : null;
 
                     return $verdict === null ? null : __('importance.verdicts.'.$verdict->value);
                 })
@@ -514,6 +525,10 @@ class KnowledgeEntryResource extends Resource
      * classification error (a fail-open records the model and the versions it
      * failed under there, and links no assessment), then the linked assessment
      * row.
+     *
+     * Only for the threshold-independent values. `verdict` must NOT be read
+     * through here: the assessment row is shared across entries and its verdict
+     * is only the one at first computation (see {@see ImportanceAssessment}).
      */
     private static function importanceValue(KnowledgeEntry $entry, string $key): mixed
     {

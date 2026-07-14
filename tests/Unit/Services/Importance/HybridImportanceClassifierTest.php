@@ -234,7 +234,13 @@ it('recalculates the verdict from the cached assessment when only the threshold 
         ->and($relaxed->finalScore)->toBe(60)
         ->and($relaxed->verdict)->toBe(ImportanceVerdict::Important)
         ->and(ImportanceAssessment::query()->count())->toBe(1)
-        ->and(ImportanceAssessment::query()->sole()->verdict)->toBe(ImportanceVerdict::Important);
+        // The CALLER gets the re-derived verdict; the stored row keeps the one it
+        // was first computed with. The row is shared by every entry with this cache
+        // identity, and the threshold is not part of that identity, so re-stamping
+        // it would rewrite the audit record of entries already decided under the
+        // old threshold. The verdict that applied to an entry lives in that entry's
+        // `metadata.importance`, not here.
+        ->and(ImportanceAssessment::query()->sole()->verdict)->toBe(ImportanceVerdict::NotImportant);
 });
 
 it('misses the cache when the candidate changes', function () {
