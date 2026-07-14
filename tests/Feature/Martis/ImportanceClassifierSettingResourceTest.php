@@ -173,14 +173,19 @@ describe('ImportanceClassifierSettingResource', function () {
         ]);
 
         // Martis renders validation failures as a list of {field, message, code}
-        // objects rather than Laravel's default field-keyed map, so
-        // assertJsonFragment (used elsewhere in this suite for the same shape)
-        // is the correct assertion here — assertJsonValidationErrors expects the
-        // standard shape and would never match.
-        $response->assertStatus(422)->assertJsonFragment([
-            'field' => 'auto_approve_threshold',
-            'code' => 'invalid',
-        ]);
+        // objects rather than Laravel's default field-keyed map. `code` is
+        // derived by substring-scanning the English validation message
+        // (see JsonErrorResponse::inferCode()), so it is not asserted here —
+        // if Laravel's wording for `gte` ever picks up "minimum"/"maximum"
+        // the inferred code would flip and this assertion would break for a
+        // reason unrelated to what the test actually checks. Asserting on
+        // the flattened list of `field`s (rather than assertJsonFragment,
+        // which matches key/value pairs independently of which error object
+        // they came from) ties the assertion to the one thing that matters:
+        // the `auto_approve_threshold` field itself failed.
+        $response->assertStatus(422);
+        expect(collect($response->json('errors'))->pluck('field')->all())
+            ->toContain('auto_approve_threshold');
     })->note('Approving below the importance threshold is incoherent.');
 
     it('accepts a null auto-approve threshold to disable auto-approval', function () {
@@ -196,13 +201,16 @@ describe('ImportanceClassifierSettingResource', function () {
     });
 
     it('refuses an auto-approve threshold outside 0..100', function () {
-        $this->putJson('/martis/api/resources/importance-classifier-settings/1', [
+        $response = $this->putJson('/martis/api/resources/importance-classifier-settings/1', [
             'mode' => 'shadow',
             'threshold' => 70,
             'auto_approve_threshold' => 101,
-        ])->assertStatus(422)->assertJsonFragment([
-            'field' => 'auto_approve_threshold',
-            'code' => 'invalid',
         ]);
+
+        // See the note above: `code` is a heuristic derived from message
+        // wording and is not what this test cares about.
+        $response->assertStatus(422);
+        expect(collect($response->json('errors'))->pluck('field')->all())
+            ->toContain('auto_approve_threshold');
     });
 });

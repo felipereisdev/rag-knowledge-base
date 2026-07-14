@@ -2,7 +2,6 @@
 
 namespace App\Martis\Filters;
 
-use App\Jobs\ClassifyKnowledgeEntryJob;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
@@ -46,7 +45,7 @@ class AutoApprovedFilter extends SelectFilter
      * Apply the filter to the given query.
      *
      * `metadata.importance.auto_approved` is only ever written by
-     * {@see ClassifyKnowledgeEntryJob::decide()}; an entry never
+     * `ClassifyKnowledgeEntryJob::decide()`; an entry never
      * classified (or classified before this key existed) has no such key, and
      * `coalesce(..., false)` treats that the same as "reviewed by a human".
      *

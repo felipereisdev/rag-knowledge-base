@@ -608,7 +608,7 @@ describe('KnowledgeEntryResource', function () {
     });
 
     it('shows on detail whether an entry was auto-approved', function () {
-        $entry = KnowledgeEntry::factory()->create([
+        $auto = KnowledgeEntry::factory()->create([
             'status' => KnowledgeStatus::Approved->value,
             'metadata' => ['importance' => [
                 'final_score' => 95,
@@ -619,12 +619,81 @@ describe('KnowledgeEntryResource', function () {
             ]],
         ]);
 
-        $response = $this->getJson("/martis/api/resources/knowledge-entries/{$entry->id}");
+        $human = KnowledgeEntry::factory()->create([
+            'status' => KnowledgeStatus::Approved->value,
+            'metadata' => ['importance' => [
+                'final_score' => 95,
+                'verdict' => 'important',
+                'mode' => 'enforce',
+                'auto_approved' => false,
+            ]],
+        ]);
 
-        $response->assertSuccessful();
+        $this->getJson("/martis/api/resources/knowledge-entries/{$auto->id}")
+            ->assertSuccessful()
+            ->assertJsonPath('data.importance_auto_approved', true);
 
-        expect(json_encode($response->json()))->toContain('auto_approved');
+        $this->getJson("/martis/api/resources/knowledge-entries/{$human->id}")
+            ->assertSuccessful()
+            ->assertJsonPath('data.importance_auto_approved', false);
     })->note('Silent action needs a surface where it can be inspected.');
+
+    it('resolves auto_approved from each entry\'s own metadata, not the assessment row they share', function () {
+        Project::firstOrCreate(['id' => 'r1'], ['name' => 'R1', 'root_path' => '/p']);
+
+        $assessment = ImportanceAssessment::create([
+            'project_id' => 'r1',
+            'candidate_hash' => str_repeat('c', 64),
+            'normalized_candidate' => ['title' => 'shared candidate'],
+            'model' => 'claude-haiku-4-5-20251001',
+            'prompt_version' => 'p1',
+            'rules_version' => 'r1',
+            'status' => ImportanceAssessmentStatus::Succeeded->value,
+            'semantic_score' => 60,
+            'final_score' => 82,
+            'verdict' => ImportanceVerdict::Important->value,
+            'reasons' => [],
+            'rules' => [],
+            'duration_ms' => 1234,
+        ]);
+
+        $autoApproved = KnowledgeEntry::factory()->create([
+            'project_id' => 'r1',
+            'status' => KnowledgeStatus::Approved->value,
+            'metadata' => ['importance' => [
+                'final_score' => 82,
+                'verdict' => 'important',
+                'mode' => 'enforce',
+                'auto_approved' => true,
+            ]],
+        ]);
+        $autoApproved->importance_assessment_id = $assessment->id;
+        $autoApproved->save();
+
+        $humanApproved = KnowledgeEntry::factory()->create([
+            'project_id' => 'r1',
+            'status' => KnowledgeStatus::Approved->value,
+            'metadata' => ['importance' => [
+                'final_score' => 82,
+                'verdict' => 'important',
+                'mode' => 'enforce',
+                'auto_approved' => false,
+            ]],
+        ]);
+        $humanApproved->importance_assessment_id = $assessment->id;
+        $humanApproved->save();
+
+        expect($autoApproved->refresh()->importance_assessment_id)
+            ->toBe($humanApproved->refresh()->importance_assessment_id);
+
+        $this->getJson("/martis/api/resources/knowledge-entries/{$autoApproved->id}")
+            ->assertSuccessful()
+            ->assertJsonPath('data.importance_auto_approved', true);
+
+        $this->getJson("/martis/api/resources/knowledge-entries/{$humanApproved->id}")
+            ->assertSuccessful()
+            ->assertJsonPath('data.importance_auto_approved', false);
+    })->note('The assessment row is a cache shared by cache identity across entries; a fallback to it would attribute one entry\'s decision to another.');
 
     it('filters knowledge entries down to the auto-approved ones', function () {
         $auto = KnowledgeEntry::factory()->create([
