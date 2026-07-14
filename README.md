@@ -290,13 +290,46 @@ It has three modes, set in **Martis → Importance Classifier**
 | Mode | Behaviour |
 |---|---|
 | `off` | Capture everything; never judge. Entries go straight to **pending**. |
-| `shadow` | Judge every entry and record the verdict, but **never reject**. Entries still go to **pending**. This is the default. |
-| `enforce` | Judge, and reject entries scored below the threshold. |
+| `shadow` | Judge every entry and record the verdict, but **never reject and never approve**. Entries still go to **pending**. This is the default. |
+| `enforce` | Judge; reject entries scored below the threshold, and auto-approve the ones that clear the auto-approve threshold *and* carry a clean deterministic signal. |
 
 **Fail open.** A technical failure (no `claude` on the worker host, a timeout, an
 unparseable answer) never rejects an entry: it is released to **pending** with a
 `classification_error` in its metadata. Only a computed `not_important` verdict under
-`enforce` rejects anything.
+`enforce` rejects anything. A failure never auto-approves an entry either — there is no
+score to approve on.
+
+### High-confidence auto-approval
+
+`enforce` has a fourth transition: **classifying → approved**, with no human in the loop.
+It fires only when both halves of `AutoApprovalPolicy` hold:
+
+1. `final_score >= auto_approve_threshold`, and
+2. at least one deterministic rule scored the candidate **up**, and **no rule scored it
+   down** — no penalty, no veto.
+
+The second half is not redundant. An approved entry is retrievable by search, so it is
+served to agents as trusted project knowledge that **nobody read**. Candidate text is
+untrusted, and the semantic score comes from the very model a prompt injection targets —
+so a high score alone can never be enough. The deterministic rules are regex, not
+inference: they are the one part of the decision a sentence cannot argue its way past.
+
+**`auto_approve_threshold`** is set in **Martis → Importance Classifier**, defaults to
+`90`, and must be **≥ the rejection threshold** (a value below it would approve entries
+the classifier is simultaneously rejecting). Leaving it **empty disables auto-approval
+entirely** while rejection keeps working — that is the way to back out of auto-approval
+alone, without giving up the rest of the classifier.
+
+**`shadow` never approves.** It computes eligibility and records it as
+`metadata.importance.would_approve`, exactly as it records `would_reject`, and then does
+nothing about either. Only `enforce` acts, and it sets
+`metadata.importance.auto_approved` on the entries it approved by itself.
+
+**Auto-approval is reversible.** Rejecting an auto-approved entry from the
+knowledge-entries panel purges it from the index immediately — the chunks and embeddings
+are deleted and search stops returning it. The **content survives**: the row, the text
+and the assessment that approved it are all intact, so you can read what the classifier
+thought and put the entry back.
 
 ### 1. Setup: the worker runs on a trusted host, not in Docker
 
@@ -378,7 +411,7 @@ php artisan rag:importance-report --project=my-project
 
 The report prints the score distribution of the shadow sample, the projected queue
 reduction, the entries the classifier and the human disagreed about, and an explicit
-readiness verdict. Readiness holds **only when all five rollout gates hold**:
+readiness verdict. Readiness holds **only when all seven rollout gates hold**:
 
 | Gate | Requirement |
 |---|---|
@@ -387,29 +420,64 @@ readiness verdict. Readiness holds **only when all five rollout gates hold**:
 | False rejects | ≤ 5% of human-**approved** entries marked `would_reject` |
 | Queue reduction | ≥ 30% of classified entries would not have reached the review queue |
 | Stale classifications | 0 entries stranded in `classifying` |
+| **False auto-approvals** | 0 human-**rejected** entries marked `would_approve`, over **≥ 10 rejected entries that were classified with auto-approval in force** |
+| **Must-reject corpus** | 0 fixtures of the reviewed must-reject corpus that satisfy the **deterministic half** of eligibility |
 
-The command exits `0` when every gate passes and `1` otherwise, so it can gate a script.
-**It never changes the mode** — enabling `enforce` is a deliberate human act.
+The last two gates exist because `enforce` now turns on rejection *and* auto-approval
+together. They are the two questions rejection alone never had to answer:
+
+- **False auto-approvals** asks the humans. Of everything a human threw away, how much
+  would the classifier have published on its own? Zero, or you are not ready. The **floor
+  of ten rejected entries** is half the gate, not a formality: a project that has rejected
+  nothing scores a clean `0 / 0` and would otherwise certify auto-approval **on no
+  evidence at all**. Ten rejections is the smallest sample in which a false approval had a
+  fair chance to show itself. (Rejections recorded before auto-approval existed carry no
+  `would_approve` and are not counted — they were never evaluated for this risk.)
+- **Must-reject corpus** asks nothing of the model, deliberately. It re-runs the reviewed
+  noise fixtures through the deterministic rules alone: not one of them may show a
+  positive signal with no penalty. This is the half of the injection defence that a
+  captured model cannot influence.
+
+Both gates are skipped when `auto_approve_threshold` is empty — there is nothing to
+certify. The command exits `0` when every gate passes and `1` otherwise, so it can gate a
+script. **It never changes the mode** — enabling `enforce` is a deliberate human act.
 
 ### 4. Enable `enforce` (by hand)
 
-When the report says READY: open **Martis → Importance Classifier**, set **Mode** to
-`enforce`, and save. Adjust **Threshold** there too — the score distribution in the
-report tells you whether the threshold sits in a valley or cuts through a cluster.
-From then on, entries scored below the threshold are rejected instead of queued; every
-rejection keeps its full audit trail (score, verdict, reasons, triggered rules, model,
-prompt and rules version) on the entry.
+The order matters, because `enforce` switches on both behaviours at once:
+
+1. **Validate rejection in `shadow`.** Leave it there until the sample is real: entries
+   scored, verdicts recorded, humans still reviewing everything.
+2. **Confirm all seven gates.** `rag:importance-report` must say READY — including the
+   two auto-approval gates, which need at least ten human-rejected entries before they
+   can be validated at all.
+3. **Switch to `enforce`.** Open **Martis → Importance Classifier**, set **Mode** to
+   `enforce`, and save. Adjust **Threshold** and **Auto-approve threshold** there too —
+   the score distribution in the report tells you whether either sits in a valley or cuts
+   through a cluster. This turns on rejection AND auto-approval together, which is safe
+   only because READY now covers both.
+4. **Review what was auto-approved.** Filter the knowledge-entries panel by
+   **Auto-approved** and spot-check what the classifier let into search without you. This
+   is the only surface on which those entries are ever seen by a human.
+
+Every decision keeps its full audit trail (score, verdict, reasons, triggered rules,
+model, prompt and rules version) on the entry, whichever way it went.
 
 ### 5. Rollback
 
-Rolling back is a mode change, not a deployment:
+Rolling back is a settings change, not a deployment:
 
-- **`enforce` → `shadow`**: stop rejecting immediately; keep collecting verdicts.
+- **auto-approval only**: clear **Auto-approve threshold** in Martis. Nothing is approved
+  without a human any more; rejection keeps working exactly as it did.
+- **`enforce` → `shadow`**: stop rejecting *and* stop approving immediately; keep
+  collecting both verdicts.
 - **`shadow` → `off`**: stop judging altogether. Entries already in `classifying` are
   released to **pending** without a verdict by the worker, so keep the worker running
   briefly after switching to `off` to drain them.
 
 Entries already rejected stay rejected — reinstate them from the knowledge-entries panel.
+Entries already auto-approved stay approved and searchable; reject them from the same
+panel to purge them from the index (the content is kept).
 
 ---
 

@@ -3,6 +3,7 @@
 use App\Enums\ImportanceVerdict;
 use App\Models\ImportanceClassifierSetting;
 use App\Models\Project;
+use App\Services\Importance\AutoApprovalPolicy;
 use App\Services\Importance\DeterministicImportanceRules;
 use App\Services\Importance\HybridImportanceClassifier;
 use App\Services\Importance\ImportanceCandidate;
@@ -102,6 +103,34 @@ function calibrationNormalized(array $candidate): NormalizedImportanceCandidate
 function calibrationRuleIds(array $triggeredRules): array
 {
     return array_map(static fn (array $rule): string => $rule['id'], $triggeredRules);
+}
+
+/**
+ * The deterministic half of auto-approval eligibility, decided by the real
+ * `AutoApprovalPolicy` over a real classification result — never by a predicate
+ * this test reimplements, which would only ever assert that the copy agrees
+ * with itself.
+ *
+ * Two dials are turned to their most dangerous settings so that what is left is
+ * exactly the deterministic half:
+ *
+ *  - the judge returns 100, the top of the scale. This models the candidate that
+ *    has WON over the model — the prompt injection that talked the judge into a
+ *    perfect score, which is the case the deterministic barrier exists for;
+ *  - the auto-approve threshold is 0, the most permissive value an administrator
+ *    could ever set, so the score comparison inside the policy is always
+ *    satisfied and cannot mask a deterministic failure.
+ *
+ * What survives both is only this: at least one rule scored the candidate UP,
+ * and no rule scored it down. That is the regex barrier, and it is the one part
+ * of eligibility a model cannot be argued into moving.
+ */
+function calibrationDeterministicallyEligible(array $candidate): bool
+{
+    $result = calibrationClassifier(new CorpusFixedJudge(100))
+        ->classify('calibration', calibrationCandidate($candidate));
+
+    return (new AutoApprovalPolicy)->isEligible($result, autoApproveThreshold: 0);
 }
 
 /**
@@ -422,6 +451,52 @@ it('hashes past formatting but not past meaning', function () {
         'An edited candidate kept its cache identity, so it would reuse the assessment of the text it no longer is.',
     );
 });
+
+it('never lets an unequivocal must-reject fixture reach auto-approval eligibility', function () {
+    // The model-independent injection guard, and the reason it is here rather
+    // than in a job test: an auto-approved entry is retrievable by search, so it
+    // is served to agents as trusted project knowledge with NO human ever reading
+    // it. The semantic score is produced by the very model an injection targets,
+    // so it is not evidence. The deterministic rules are.
+    //
+    // Every fixture below is reviewed noise. Each is run through the real
+    // classifier with the judge captured (a perfect 100) and the administrator's
+    // dial at its most permissive (auto-approve threshold 0). Not one of them may
+    // still come out eligible.
+    calibrationThreshold(70);
+
+    $eligible = [];
+
+    foreach (calibrationFixtures('must-reject') as $fixture) {
+        if (calibrationDeterministicallyEligible($fixture['candidate'])) {
+            $eligible[] = $fixture['id'];
+        }
+    }
+
+    expect($eligible)->toBe([],
+        'These reviewed noise fixtures satisfy the deterministic half of auto-approval eligibility, so a model that scored them highly would write them straight into search with no human in the loop: '.implode(', ', $eligible),
+    );
+})->note('Baseline when written: 0 of 22 eligible. A regression here means noise could be silently approved.');
+
+it('keeps real knowledge reachable by auto-approval', function () {
+    // The other side of the same coin. A barrier nothing can pass is not a
+    // barrier, it is a wall: if the deterministic half stopped recognising real
+    // knowledge, auto-approval would simply never fire and the whole feature
+    // would be dead weight nobody noticed had died.
+    calibrationThreshold(70);
+
+    $eligible = 0;
+
+    foreach (calibrationFixtures('must-keep') as $fixture) {
+        if (calibrationDeterministicallyEligible($fixture['candidate'])) {
+            $eligible++;
+        }
+    }
+
+    expect($eligible)->toBeGreaterThanOrEqual(20,
+        "Only {$eligible} of the reviewed must-keep fixtures still satisfy the deterministic half of auto-approval eligibility. Auto-approval has stopped recognising real knowledge.",
+    );
+})->note('Baseline when written: 27 of 28. If this collapses, auto-approval never fires and the feature is dead weight.');
 
 it('keeps the calibration corpus synthetic', function () {
     // The corpus ships inside the production image. A real credential, hostname
