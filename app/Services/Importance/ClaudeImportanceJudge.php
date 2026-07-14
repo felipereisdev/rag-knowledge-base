@@ -78,7 +78,9 @@ final class ClaudeImportanceJudge implements SemanticImportanceJudge
             throw ImportanceClassificationException::processFailed($result->exitCode() ?? -1);
         }
 
-        return $this->parser->parse($this->extractResponseText($result->output()));
+        return $this->parser->parse(
+            $this->unwrapCodeFence($this->extractResponseText($result->output()))
+        );
     }
 
     /**
@@ -118,5 +120,63 @@ final class ClaudeImportanceJudge implements SemanticImportanceJudge
         }
 
         return $rawOutput;
+    }
+
+    /**
+     * Strips a markdown code fence that wraps the whole response text.
+     *
+     * The real CLI returns the contract object fenced (```json ... ```) even
+     * though the system prompt forbids fences, and it does so consistently.
+     * That fence is a TRANSPORT artifact of the CLI's free-text channel, not a
+     * payload defect: the bytes inside are the contract, exactly. Removing an
+     * unambiguous wrapper here — in the transport layer — keeps
+     * `ImportanceResponseParser` strict, which is the point: the parser
+     * validates the payload CONTRACT (exact keys, exact types, exact ranges)
+     * and must never repair a malformed payload.
+     *
+     * Deliberately narrow. The fence is only removed when the trimmed text is
+     * ENTIRELY one fenced block: an opening fence with an optional language tag
+     * on its own line, and a closing fence at the very end. Everything else is
+     * returned untouched, so the parser still rejects it:
+     *  - prose before or after the fence -> not entirely a fenced block, passed
+     *    through, fails as `invalid_json` (the model added content we must not
+     *    silently discard);
+     *  - more than one fenced block -> ambiguous which one is the answer, passed
+     *    through, fails as `invalid_json`;
+     *  - an unterminated fence -> the response was truncated, passed through,
+     *    fails as `invalid_json`;
+     *  - non-JSON (or non-contract JSON) inside the fence -> unwrapped, then
+     *    fails as `invalid_json` / `invalid_schema` in the parser, as it should.
+     *
+     * No other repair is attempted here, ever.
+     */
+    private function unwrapCodeFence(string $text): string
+    {
+        $trimmed = trim($text);
+
+        if (preg_match('/\A```[A-Za-z0-9_+-]*[^\S\r\n]*\R(.*)\R[^\S\r\n]*```\z/s', $trimmed, $matches) !== 1) {
+            return $text;
+        }
+
+        $inner = $matches[1];
+
+        // A fence DELIMITER only ever opens at the start of a line, so that is
+        // the only thing that means "there is more than one block in here" —
+        // and multiple blocks are ambiguous, so we refuse to guess.
+        //
+        // Backticks that merely appear INSIDE the payload are not delimiters
+        // and must not trip this: the model happily quotes "```json" inside a
+        // reason explanation when the candidate it is judging talks about code
+        // fences (which is exactly what the candidates for THIS fix do). A JSON
+        // string cannot contain a raw newline, so such backticks are always
+        // mid-line, never at a line start. Rejecting on a bare str_contains
+        // would fail those payloads as `invalid_json` for no reason.
+        foreach (preg_split('/\R/', $inner) ?: [] as $line) {
+            if (str_starts_with(ltrim($line), '```')) {
+                return $text;
+            }
+        }
+
+        return $inner;
     }
 }
