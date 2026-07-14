@@ -16,6 +16,13 @@ return [
         'approved' => 'Aprovado',
         'rejected' => 'Rejeitado',
     ],
+    'sources' => [
+        'condense' => 'Captura de sessão',
+        'mcp' => 'MCP',
+        'cli' => 'CLI',
+        'import' => 'Importação',
+        'manual' => 'Manual',
+    ],
     'languages' => [
         'en' => 'Inglês',
         'pt' => 'Português',
@@ -46,7 +53,7 @@ return [
         'metadata' => 'Metadados',
         'created_at' => 'Criado em',
         'language' => 'Idioma',
-        'source_help' => 'manual, mcp, importação ou cli.',
+        'source_help' => 'De onde veio a entrada. As entradas criadas aqui são manuais.',
         'language_help' => 'Afeta a lematização da pesquisa de texto integral.',
     ],
     'filters' => [
@@ -55,6 +62,16 @@ return [
         'status' => 'Estado',
         'created_between' => 'Criado entre',
         'select' => 'Selecionar...',
+    ],
+    'actions' => [
+        'approve' => [
+            'name' => 'Aprovar',
+            'success' => '{0} Nenhuma entrada aprovada.|{1} Uma entrada aprovada.|[2,*] :count entradas aprovadas.',
+        ],
+        'reject' => [
+            'name' => 'Rejeitar',
+            'success' => '{0} Nenhuma entrada rejeitada.|{1} Uma entrada rejeitada.|[2,*] :count entradas rejeitadas.',
+        ],
     ],
     'dashboard' => [
         'main' => 'Principal',

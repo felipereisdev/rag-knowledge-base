@@ -53,9 +53,14 @@ it('keeps sibling H2 sections under their parent H1', function () {
     try {
         $entryIds = $this->importer->import($this->project->id, $path, 'documentation', ['docs']);
 
-        $titles = KnowledgeEntry::whereIn('id', $entryIds)->pluck('title')->all();
+        // Ordered by the ids the importer returned, not by whatever physical
+        // order Postgres hands back for an unordered SELECT — that order depends
+        // on heap free-space reuse from earlier tests in the run, which makes the
+        // assertion flip as soon as an unrelated test writes knowledge entries.
+        $titles = KnowledgeEntry::whereIn('id', $entryIds)->pluck('title', 'id');
+        $ordered = array_map(static fn (int $id): string => $titles[$id], $entryIds);
 
-        expect($titles)->toBe(['Parent', 'Parent / First', 'Parent / Second']);
+        expect($ordered)->toBe(['Parent', 'Parent / First', 'Parent / Second']);
     } finally {
         @unlink($path);
     }

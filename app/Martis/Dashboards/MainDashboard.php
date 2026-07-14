@@ -49,12 +49,27 @@ class MainDashboard extends Dashboard
                 }
             },
 
+            // The human queue. `classifying` entries are deliberately NOT counted
+            // here: nobody can act on them yet, so folding them into the approval
+            // queue would inflate a number an administrator is meant to work down.
             new class(__('rag.dashboard.pending_approvals'), 'pending-approvals') extends ValueMetric
             {
                 public function calculate(Request $request): ValueResult
                 {
                     return new ValueResult(
                         KnowledgeEntry::where('status', KnowledgeStatus::Pending->value)->count()
+                    );
+                }
+            },
+
+            // The classifier's own backlog: entries in flight. A number that stops
+            // falling is how a stalled classification queue becomes visible.
+            new class(__('importance.dashboard.classifying'), 'classifying-count') extends ValueMetric
+            {
+                public function calculate(Request $request): ValueResult
+                {
+                    return new ValueResult(
+                        KnowledgeEntry::where('status', KnowledgeStatus::Classifying->value)->count()
                     );
                 }
             },

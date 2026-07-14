@@ -16,6 +16,13 @@ return [
         'approved' => 'Approved',
         'rejected' => 'Rejected',
     ],
+    'sources' => [
+        'condense' => 'Session capture',
+        'mcp' => 'MCP',
+        'cli' => 'CLI',
+        'import' => 'Import',
+        'manual' => 'Manual',
+    ],
     'languages' => [
         'en' => 'English',
         'pt' => 'Portuguese',
@@ -46,7 +53,7 @@ return [
         'metadata' => 'Metadata',
         'created_at' => 'Created At',
         'language' => 'Language',
-        'source_help' => 'manual, mcp, import, or cli.',
+        'source_help' => 'Where the entry came from. Entries created here are manual.',
         'language_help' => 'Affects FTS stemming.',
     ],
     'filters' => [
@@ -55,6 +62,16 @@ return [
         'status' => 'Status',
         'created_between' => 'Created Between',
         'select' => 'Select...',
+    ],
+    'actions' => [
+        'approve' => [
+            'name' => 'Approve',
+            'success' => '{0} No entries approved.|{1} One entry approved.|[2,*] :count entries approved.',
+        ],
+        'reject' => [
+            'name' => 'Reject',
+            'success' => '{0} No entries rejected.|{1} One entry rejected.|[2,*] :count entries rejected.',
+        ],
     ],
     'dashboard' => [
         'main' => 'Main',
