@@ -44,12 +44,23 @@ class AppServiceProvider extends ServiceProvider
             timeoutSeconds: (int) config('rag.importance.timeout'),
         ));
 
+        // The rules/prompt versions are read from the class constants HERE, not
+        // from `config('rag.importance.*')`. They are load-bearing: they form
+        // part of the assessment cache identity and are stamped onto the audit
+        // record. `php artisan config:cache` snapshots config values at build
+        // time, and the `bootstrap/cache` volume can outlive the image (see
+        // docker/entrypoint-app.sh), so a cached `config.php` would keep
+        // reporting the OLD version while the NEW rule/prompt code runs —
+        // reusing stale assessments and mislabelling fresh ones. Constants are
+        // read from the code that is actually executing, so a version bump
+        // always invalidates the cache it is supposed to invalidate. The config
+        // keys still exist, but only for DISPLAY (rag_status, Martis).
         $this->app->bind(HybridImportanceClassifier::class, fn ($app) => new HybridImportanceClassifier(
             $app->make(ImportanceCandidateNormalizer::class),
-            new DeterministicImportanceRules((string) config('rag.importance.rules_version')),
+            new DeterministicImportanceRules(DeterministicImportanceRules::VERSION),
             $app->make(SemanticImportanceJudge::class),
             model: (string) config('rag.importance.model'),
-            promptVersion: (string) config('rag.importance.prompt_version'),
+            promptVersion: ImportancePrompt::VERSION,
             staleAfterMinutes: (int) config('rag.importance.stale_after_minutes'),
         ));
 

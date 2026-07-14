@@ -1,5 +1,6 @@
 <?php
 
+use App\Jobs\IndexEntryJob;
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
@@ -92,9 +93,26 @@ return new class extends Migration
         // classification never completed is unjudged, not unwanted. Demote it
         // to `pending` so it lands back in the normal human review queue with
         // its content intact. Never delete it.
+        //
+        // A `classifying` entry has NO chunks (KnowledgeEntryObserver keeps it
+        // out of the index until it is released), and this raw update bypasses
+        // that observer, so the demotion has to schedule the first indexing
+        // pass itself. Without it the entry would sit in `pending` unindexed
+        // forever: approving it later does not rescue it either, because the
+        // observer's recovery path only fires for a `rejected`/`classifying`
+        // predecessor -- so a human approving it would publish an entry that is
+        // permanently unsearchable.
+        $stranded = DB::table('knowledge_entries')
+            ->where('status', 'classifying')
+            ->pluck('id');
+
         DB::table('knowledge_entries')
             ->where('status', 'classifying')
             ->update(['status' => 'pending']);
+
+        foreach ($stranded as $id) {
+            IndexEntryJob::dispatch((int) $id);
+        }
 
         Schema::table('knowledge_entries', function (Blueprint $table) {
             $table->dropForeign('knowledge_entries_importance_assessment_id_foreign');

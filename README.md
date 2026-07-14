@@ -335,6 +335,14 @@ up as **stale** in `rag_status` and in the calibration report. If you must stop
 classifying for a while, set the mode to `off` (see rollback below) rather than leaving
 entries stranded.
 
+That backstop only holds while the job still exists. A job whose own recovery also threw
+lands in `failed_jobs` instead, and nothing else will ever move that entry out of
+**classifying** — the admin surface deliberately refuses every other way out. Recover it
+with `php artisan queue:retry` (all, or the specific id): `handle()` is fully idempotent,
+so a re-run re-classifies the entry from scratch and drives it to `pending`, `approved`,
+or `rejected`. Check `failed_jobs` whenever `rag_status` reports stale entries that never
+drain.
+
 ### 2. Roll out in shadow
 
 Start in `shadow` and leave it there until the numbers justify enforcing. Every entry is
@@ -346,7 +354,7 @@ project's health:
 
 ```
   Importance classifier: mode shadow, threshold 70
-    Model: claude-haiku-4-5-20251001 | Prompt: v2 | Rules: v6
+    Model: claude-haiku-4-5-20251001 | Prompt: v1 | Rules: v6
     Classifying: 3; stale over 15 min: 0
     Assessments: 128 succeeded, 2 failed
     Shadow verdicts: 84 would keep, 44 would reject
@@ -466,6 +474,8 @@ The embedding identity variables are interpolated from the host environment or `
 | `RAG_IMPORTANCE_TIMEOUT` | `90` | Claude process timeout (s). The job's `$timeout` (+30s) and the `classification` connection's `retry_after` (+60s) are derived from it — see [the importance classifier](#the-importance-classifier) |
 | `RAG_IMPORTANCE_STALE_AFTER_MINUTES` | `15` | After this long in `classifying`, an entry is reported stale |
 | `RAG_IMPORTANCE_QUEUE` / `RAG_IMPORTANCE_QUEUE_CONNECTION` | `classification` | Queue name and dedicated connection the classification worker drains |
+| `RAG_IMPORTANCE_MAX_REASON_COUNT` | `5` | Max reasons accepted from the judge's response (extra ones are a contract violation) |
+| `RAG_IMPORTANCE_MAX_REASON_LENGTH` | `280` | Max characters per reason |
 | `MARTIS_AUTH_MIDDLEWARE` | (empty) | Auth middleware for admin routes (empty = no auth — **localhost only**) |
 
 > **Security.** By default the server has no authentication — it is intended for **localhost** use. If you expose it on a network, set `MARTIS_AUTH_MIDDLEWARE` and put the MCP endpoint behind a reverse proxy with auth.

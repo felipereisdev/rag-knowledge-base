@@ -31,6 +31,12 @@ return [
     'importance' => [
         'model' => env('RAG_IMPORTANCE_MODEL', 'claude-haiku-4-5-20251001'),
         'timeout' => (int) env('RAG_IMPORTANCE_TIMEOUT', ClassifyKnowledgeEntryJob::DEFAULT_MODEL_TIMEOUT_SECONDS),
+        // DISPLAY ONLY (rag_status, the Martis setting screen). These two are
+        // deliberately NOT load-bearing: `config:cache` snapshots them, and the
+        // `bootstrap/cache` volume can outlive the image, so a cached value can
+        // lag the code. Everything that stamps or keys on a version (the cache
+        // identity in HybridImportanceClassifier, the audit record in
+        // ClassifyKnowledgeEntryJob) reads the class constant directly instead.
         'prompt_version' => ImportancePrompt::VERSION,
         'rules_version' => DeterministicImportanceRules::VERSION,
         'max_reason_count' => (int) env('RAG_IMPORTANCE_MAX_REASON_COUNT', 5),

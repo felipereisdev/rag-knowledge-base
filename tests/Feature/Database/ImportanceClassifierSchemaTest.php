@@ -2,6 +2,7 @@
 
 use App\Enums\ImportanceAssessmentStatus;
 use App\Enums\ImportanceVerdict;
+use App\Jobs\IndexEntryJob;
 use App\Models\ImportanceAssessment;
 use App\Models\KnowledgeEntry;
 use App\Models\Project;
@@ -98,6 +99,8 @@ it('persists assessment cache identity and accepts a classifying entry state', f
 });
 
 it('rolls the classifier back and forward again without stranding in-flight entries', function () {
+    Queue::fake();
+
     $migration = require database_path('migrations/2026_07_13_000003_add_importance_classifier.php');
 
     $statusConstraint = function (): string {
@@ -142,6 +145,18 @@ it('rolls the classifier back and forward again without stranding in-flight entr
     expect($rolledBack)->not->toBeNull()
         ->and($rolledBack->status)->toBe('pending')
         ->and($rolledBack->content)->toBe('Hard-won knowledge that must survive a rollback.');
+
+    // ...and searchable. A `classifying` entry has no chunks, and the raw
+    // demotion above bypasses KnowledgeEntryObserver, so the rollback has to
+    // schedule the first indexing pass itself. Without this the entry would sit
+    // in `pending` with no chunks forever -- and a human approving it later
+    // would not rescue it either (the observer's recovery path only fires for a
+    // `rejected`/`classifying` predecessor), publishing an entry that is
+    // permanently unsearchable.
+    Queue::assertPushed(
+        IndexEntryJob::class,
+        fn (IndexEntryJob $job) => $job->entryId === (int) $entryId,
+    );
 
     // --- UP again ---------------------------------------------------------
     $migration->up();

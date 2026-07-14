@@ -259,7 +259,6 @@ final class HybridImportanceClassifier
             model: $assessment->model,
             promptVersion: $assessment->prompt_version,
             rulesVersion: $evaluation->rulesVersion,
-            recommendedVerdict: $semantic?->recommendedVerdict,
         );
     }
 
@@ -360,9 +359,7 @@ final class HybridImportanceClassifier
 
     private function threshold(): int
     {
-        $setting = ImportanceClassifierSetting::query()->find(1) ?? new ImportanceClassifierSetting;
-
-        return (int) $setting->threshold;
+        return (int) ImportanceClassifierSetting::current()->threshold;
     }
 
     /**

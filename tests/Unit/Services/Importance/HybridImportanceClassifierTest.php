@@ -11,6 +11,7 @@ use App\Services\Importance\ImportanceAssessmentInProgressException;
 use App\Services\Importance\ImportanceCandidate;
 use App\Services\Importance\ImportanceCandidateNormalizer;
 use App\Services\Importance\ImportanceClassificationException;
+use App\Services\Importance\ImportancePrompt;
 use App\Services\Importance\NormalizedImportanceCandidate;
 use App\Services\Importance\SemanticImportanceAssessment;
 use App\Services\Importance\SemanticImportanceJudge;
@@ -173,15 +174,18 @@ it('is important exactly when the final score reaches the threshold', function (
         ->and($belowThreshold->verdict)->toBe(ImportanceVerdict::NotImportant);
 });
 
-it('records the verdict Claude recommends but never lets it override the computed one', function () {
+it('never lets the verdict Claude recommends override the computed one', function () {
     setImportanceThreshold(70);
 
+    // Claude says "important"; the score says otherwise, and the score wins.
+    // The recommendation is not even carried on the result, so no caller can
+    // pick it up by accident.
     $optimistic = importanceClassifier(new RecordingJudge(semanticAssessment(recommended: ImportanceVerdict::Important)))
         ->classify('classifier', neutralCandidate('Optimistic'));
 
-    expect($optimistic->recommendedVerdict)->toBe(ImportanceVerdict::Important)
-        ->and($optimistic->finalScore)->toBe(60)
-        ->and($optimistic->verdict)->toBe(ImportanceVerdict::NotImportant);
+    expect($optimistic->finalScore)->toBe(60)
+        ->and($optimistic->verdict)->toBe(ImportanceVerdict::NotImportant)
+        ->and(property_exists($optimistic, 'recommendedVerdict'))->toBeFalse();
 
     $pessimistic = importanceClassifier(new RecordingJudge(semanticAssessment(
         durability: 25,
@@ -192,9 +196,13 @@ it('records the verdict Claude recommends but never lets it override the compute
         recommended: ImportanceVerdict::NotImportant,
     )))->classify('classifier', neutralCandidate('Pessimistic'));
 
-    expect($pessimistic->recommendedVerdict)->toBe(ImportanceVerdict::NotImportant)
-        ->and($pessimistic->finalScore)->toBe(100)
+    expect($pessimistic->finalScore)->toBe(100)
         ->and($pessimistic->verdict)->toBe(ImportanceVerdict::Important);
+
+    // Nor is it persisted on the audit record.
+    expect(ImportanceAssessment::query()->get()->every(
+        fn (ImportanceAssessment $assessment) => ! array_key_exists('recommended_verdict', $assessment->getAttributes()),
+    ))->toBeTrue();
 });
 
 it('reuses a succeeded assessment instead of consulting the judge again', function () {
@@ -561,6 +569,39 @@ it('resolves from the container with the configured model and prompt version', f
 
     expect($result->model)->toBe((string) config('rag.importance.model'))
         ->and($result->promptVersion)->toBe((string) config('rag.importance.prompt_version'));
+});
+
+it('keys the cache identity on the class constants, not on a config value that may be stale', function () {
+    // `php artisan config:cache` snapshots config/rag.php, and the
+    // bootstrap/cache volume can outlive the image it was built from — so the
+    // snapshot can lag the code by a whole version bump. If the versions were
+    // read through config, the app would run the NEW rules while stamping the
+    // OLD version: it would reuse assessments computed under different rules
+    // and mislabel fresh ones, i.e. the bump would invalidate nothing and the
+    // audit record would stop being attributable. Simulate exactly that.
+    config([
+        'rag.importance.prompt_version' => 'stale-cached-prompt-version',
+        'rag.importance.rules_version' => 'stale-cached-rules-version',
+    ]);
+
+    // Veto path: no judge process, no network, deterministic.
+    $result = app(HybridImportanceClassifier::class)->classify('classifier', new ImportanceCandidate(
+        title: 'Empty note',
+        content: '',
+        category: 'insight',
+        source: 'condense',
+    ));
+
+    expect($result->promptVersion)->toBe(ImportancePrompt::VERSION)
+        ->and($result->rulesVersion)->toBe(DeterministicImportanceRules::VERSION)
+        ->and($result->promptVersion)->not->toBe('stale-cached-prompt-version')
+        ->and($result->rulesVersion)->not->toBe('stale-cached-rules-version');
+
+    // And the row the cache identity is actually keyed on carries them too.
+    $assessment = ImportanceAssessment::query()->sole();
+
+    expect($assessment->prompt_version)->toBe(ImportancePrompt::VERSION)
+        ->and($assessment->rules_version)->toBe(DeterministicImportanceRules::VERSION);
 });
 
 /**

@@ -87,9 +87,14 @@ it('invokes claude with the required safety flags, configured model, system prom
         expect($modelIndex)->not->toBeFalse();
         expect($command[$modelIndex + 1])->toBe('claude-haiku-4-5-20251001');
 
-        $promptIndex = array_search('--append-system-prompt', $command, true);
+        // The judge persona OWNS the system slot: `--system-prompt`, never
+        // `--append-system-prompt` (which would leave Claude Code's default
+        // agentic prompt in charge and only bolt the strict contract on the
+        // end of it, loosening the output contract).
+        $promptIndex = array_search('--system-prompt', $command, true);
         expect($promptIndex)->not->toBeFalse();
         expect($command[$promptIndex + 1])->toBe((new ImportancePrompt)->systemPrompt());
+        expect($command)->not->toContain('--append-system-prompt');
 
         // Bounded timeout, exact configured value, never "forever".
         expect($process->timeout)->toBe(90);
@@ -159,4 +164,63 @@ it('bubbles a strict parser failure as a typed exception when claude returns mal
 
     expect(fn () => importanceJudge()->assess(importanceJudgeCandidate()))
         ->toThrow(ImportanceClassificationException::class);
+});
+
+it('files an envelope that reports its own error as a process failure, not a response-contract one', function (array $envelope) {
+    // The CLI exits 0 and still says the turn failed; `result` then holds an
+    // English error string, not the contract. Reporting that as `invalid_json`
+    // or `invalid_schema` would blame the prompt for a broken process and skew
+    // the very signal rag_status and the calibration report are read for.
+    Process::fake(['*' => Process::result(output: json_encode($envelope))])->preventStrayProcesses();
+
+    try {
+        importanceJudge()->assess(importanceJudgeCandidate());
+        expect(false)->toBeTrue('Expected an exception to be thrown.');
+    } catch (ImportanceClassificationException $exception) {
+        expect($exception->errorCode)->toBe('process_error')
+            ->and($exception->getMessage())->not->toContain('Credit balance')
+            ->and($exception->getMessage())->not->toContain('rm -rf');
+    }
+})->with([
+    'is_error with an error subtype' => [[
+        'type' => 'result',
+        'subtype' => 'error_during_execution',
+        'is_error' => true,
+        'result' => 'API Error: Credit balance is too low',
+    ]],
+    'is_error alone' => [[
+        'type' => 'result',
+        'is_error' => true,
+        'result' => 'API Error: Credit balance is too low',
+    ]],
+    'a non-success subtype alone' => [[
+        'type' => 'result',
+        'subtype' => 'error_max_turns',
+        'result' => 'Reached maximum turns',
+    ]],
+    'an error envelope whose subtype is not a safe token' => [[
+        'type' => 'result',
+        'subtype' => 'rm -rf / && echo pwned',
+        'is_error' => true,
+        'result' => 'API Error: Credit balance is too low',
+    ]],
+]);
+
+it('still accepts the success envelope it is contracted for', function () {
+    Process::fake(['*' => Process::result(output: json_encode([
+        'type' => 'result',
+        'subtype' => 'success',
+        'is_error' => false,
+        'result' => json_encode([
+            'durability' => 20,
+            'actionability' => 15,
+            'specificity' => 18,
+            'non_obviousness' => 12,
+            'future_value' => 10,
+            'recommended_verdict' => 'important',
+            'reasons' => [['criterion' => 'durability', 'explanation' => 'Durable architectural rule.']],
+        ]),
+    ]))])->preventStrayProcesses();
+
+    expect(importanceJudge()->assess(importanceJudgeCandidate())->semanticScore)->toBe(75);
 });

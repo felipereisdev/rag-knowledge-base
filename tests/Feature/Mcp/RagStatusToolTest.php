@@ -6,6 +6,8 @@ use App\Models\ImportanceAssessment;
 use App\Models\ImportanceClassifierSetting;
 use App\Models\KnowledgeEntry;
 use App\Models\Project;
+use App\Services\Importance\DeterministicImportanceRules;
+use App\Services\Importance\ImportancePrompt;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Testing\Fluent\AssertableJson;
 use Laravel\Ai\Embeddings;
@@ -270,4 +272,16 @@ it('counts assessments and classification jobs of other projects and queues apar
     $response->assertOk();
     $response->assertSee('Assessments: 0 succeeded, 0 failed');
     $response->assertSee('Classification queue (global): 0 pending, 0 failed');
+});
+
+it('keeps the README sample of this block in step with the versions actually shipped', function () {
+    // The README prints a sample `rag_status` block with the prompt/rules
+    // versions baked in. It drifted once already (it advertised a prompt
+    // version that never shipped), and an operator reading it has no way to
+    // tell. Pin it to the constants that are the single source of truth.
+    $readme = file_get_contents(base_path('README.md'));
+
+    expect($readme)->toContain(
+        'Prompt: '.ImportancePrompt::VERSION.' | Rules: '.DeterministicImportanceRules::VERSION,
+    );
 });

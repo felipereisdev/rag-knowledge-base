@@ -10,11 +10,13 @@ use App\Models\ImportanceAssessment;
 use App\Models\ImportanceClassifierSetting;
 use App\Models\KnowledgeEntry;
 use App\Models\Relation;
+use App\Services\Importance\DeterministicImportanceRules;
 use App\Services\Importance\HybridImportanceClassifier;
 use App\Services\Importance\ImportanceAssessmentInProgressException;
 use App\Services\Importance\ImportanceCandidate;
 use App\Services\Importance\ImportanceCandidateNormalizer;
 use App\Services\Importance\ImportanceClassificationResult;
+use App\Services\Importance\ImportancePrompt;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -309,8 +311,12 @@ class ClassifyKnowledgeEntryJob implements ShouldQueue
                 'code' => $code,
                 'message' => $message,
                 'model' => $result->model ?? (string) config('rag.importance.model'),
-                'prompt_version' => $result->promptVersion ?? (string) config('rag.importance.prompt_version'),
-                'rules_version' => $result->rulesVersion ?? (string) config('rag.importance.rules_version'),
+                // The class constants, never `config('rag.importance.*_version')`:
+                // this is an audit record, and a `config:cache` snapshot taken
+                // before a version bump would attribute the failure to the wrong
+                // rules/prompt. See AppServiceProvider::register().
+                'prompt_version' => $result->promptVersion ?? ImportancePrompt::VERSION,
+                'rules_version' => $result->rulesVersion ?? DeterministicImportanceRules::VERSION,
             ],
         ], assessmentId: null);
 

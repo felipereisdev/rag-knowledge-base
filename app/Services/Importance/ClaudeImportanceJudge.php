@@ -20,10 +20,11 @@ use Throwable;
  *    dir, never the project root), so it has no project access and cannot
  *    auto-load this repo's CLAUDE.md or other project context;
  *  - the timeout is bounded and configured, never "forever";
- *  - every failure mode (non-zero exit, timeout, unexpected exception,
- *    invalid response) maps to `ImportanceClassificationException` with a
- *    sanitized message — raw stderr and raw candidate/response text are
- *    never embedded in the exception or logged.
+ *  - every failure mode (non-zero exit, timeout, unexpected exception, an
+ *    envelope that reports its own error, invalid response) maps to
+ *    `ImportanceClassificationException` with a sanitized message — raw stderr
+ *    and raw candidate/response text are never embedded in the exception or
+ *    logged.
  */
 final class ClaudeImportanceJudge implements SemanticImportanceJudge
 {
@@ -48,7 +49,14 @@ final class ClaudeImportanceJudge implements SemanticImportanceJudge
             '-p',
             '--model',
             $this->model,
-            '--append-system-prompt',
+            // `--system-prompt`, not `--append-system-prompt`: the judge persona
+            // must OWN the system slot. Appending would leave Claude Code's
+            // default agentic system prompt in place and merely bolt the strict
+            // five-criterion contract onto the end of it, which loosens the
+            // output contract (more prose, more `invalid_json`) for no benefit —
+            // this session has no tools and no project access to need the
+            // agentic preamble for.
+            '--system-prompt',
             $this->prompt->systemPrompt(),
         ];
 
@@ -75,17 +83,37 @@ final class ClaudeImportanceJudge implements SemanticImportanceJudge
 
     /**
      * `claude --output-format json` wraps the model's reply in an envelope
-     * (type/subtype/result/cost/...); the strict five-criterion contract
-     * this judge expects lives in the `result` string field. Falling back
-     * to the raw output when the envelope is absent lets the (equally
+     * (type/subtype/is_error/result/cost/...); the strict five-criterion
+     * contract this judge expects lives in the `result` string field. Falling
+     * back to the raw output when the envelope is absent lets the (equally
      * strict) parser reject it with a clear invalid-JSON/invalid-schema
      * error rather than this method guessing or repairing anything.
+     *
+     * The envelope's own failure signal is honoured first. The CLI can exit 0
+     * and still report the turn failed (`is_error: true`, `subtype` other than
+     * `success` — e.g. an API error or a max-turns abort), in which case
+     * `result` holds an English error string, not the contract. Handing that to
+     * the parser would fail open all the same, but it would file a PROCESS
+     * failure under a RESPONSE-CONTRACT error code (`invalid_json` /
+     * `invalid_schema`) and so corrupt the very signal `rag_status` and the
+     * calibration report use to tell "Claude is broken" from "the prompt needs
+     * work".
      */
     private function extractResponseText(string $rawOutput): string
     {
         $envelope = json_decode($rawOutput, true);
 
-        if (is_array($envelope) && is_string($envelope['result'] ?? null)) {
+        if (! is_array($envelope)) {
+            return $rawOutput;
+        }
+
+        $subtype = is_string($envelope['subtype'] ?? null) ? $envelope['subtype'] : null;
+
+        if (! empty($envelope['is_error']) || ($subtype !== null && $subtype !== 'success')) {
+            throw ImportanceClassificationException::processErrored($subtype);
+        }
+
+        if (is_string($envelope['result'] ?? null)) {
             return $envelope['result'];
         }
 

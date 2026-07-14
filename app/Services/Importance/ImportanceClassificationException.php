@@ -77,4 +77,28 @@ final class ImportanceClassificationException extends RuntimeException
             $previous,
         );
     }
+
+    /**
+     * The CLI exited 0 but its own JSON envelope reports the turn failed
+     * (`is_error: true`, or a `subtype` other than `success`). That is a
+     * PROCESS failure, not a response-contract one: the `result` field then
+     * carries an English error string rather than the five-criterion contract,
+     * and letting the parser choke on it would file the failure under
+     * `invalid_json`/`invalid_schema` and skew the operational signal.
+     *
+     * `$subtype` comes from the CLI, not from the candidate, but it is still
+     * whitelisted to a conservative shape before it reaches a message that gets
+     * persisted and logged.
+     */
+    public static function processErrored(?string $subtype = null): self
+    {
+        $safe = $subtype !== null && preg_match('/^[A-Za-z0-9_.-]{1,64}$/', $subtype) === 1
+            ? $subtype
+            : 'unknown';
+
+        return new self(
+            'process_error',
+            "Claude importance process reported an error ({$safe}).",
+        );
+    }
 }

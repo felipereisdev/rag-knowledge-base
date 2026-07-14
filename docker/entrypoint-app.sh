@@ -13,7 +13,12 @@ fi
 # app-dev image), so a cached manifest may reference packages this --no-dev
 # image doesn't have (e.g. laravel/pail) — which crashes every artisan command
 # and loops the container. Regenerating from the current image is always safe.
-rm -f bootstrap/cache/packages.php bootstrap/cache/services.php
+#
+# config.php goes with them: a config snapshot from a previous image would pin
+# values (e.g. the importance prompt/rules versions surfaced to operators) to
+# whatever the OLD code said, while the new code runs. Config is rebuilt from
+# .env + the environment on every boot, so dropping it is always safe too.
+rm -f bootstrap/cache/packages.php bootstrap/cache/services.php bootstrap/cache/config.php
 
 # Generate APP_KEY on first boot if missing (plug-and-play: no manual setup needed)
 if [ -z "$APP_KEY" ] && ! grep -q "^APP_KEY=base64:" .env 2>/dev/null; then
