@@ -10,6 +10,7 @@ use App\Models\ImportanceAssessment;
 use App\Models\ImportanceClassifierSetting;
 use App\Models\KnowledgeEntry;
 use App\Models\Relation;
+use App\Services\Importance\AutoApprovalPolicy;
 use App\Services\Importance\DeterministicImportanceRules;
 use App\Services\Importance\HybridImportanceClassifier;
 use App\Services\Importance\ImportanceAssessmentInProgressException;
@@ -129,8 +130,11 @@ class ClassifyKnowledgeEntryJob implements ShouldQueue
         return [30, 60];
     }
 
-    public function handle(HybridImportanceClassifier $classifier, ImportanceCandidateNormalizer $normalizer): void
-    {
+    public function handle(
+        HybridImportanceClassifier $classifier,
+        ImportanceCandidateNormalizer $normalizer,
+        AutoApprovalPolicy $autoApproval,
+    ): void {
         $entry = KnowledgeEntry::query()->find($this->entryId);
 
         if ($entry === null) {
@@ -192,7 +196,7 @@ class ClassifyKnowledgeEntryJob implements ShouldQueue
             return;
         }
 
-        $this->decide($entry, $mode, $result, $normalizer->normalize($candidate)->hash());
+        $this->decide($entry, $mode, $result, $normalizer->normalize($candidate)->hash(), $autoApproval);
     }
 
     /**
@@ -242,21 +246,37 @@ class ClassifyKnowledgeEntryJob implements ShouldQueue
     }
 
     /**
-     * Apply the computed verdict. This is the only path that may reject, and only
-     * because the classifier said the entry is not important — never because
-     * something broke.
+     * Apply the computed verdict. This is the only path that may reject or
+     * approve, and the status is chosen exactly once, here: `enforce` acts on a
+     * `not_important` verdict by rejecting, and on an `important` AND *eligible*
+     * verdict by approving — no human involved either way. `shadow` computes and
+     * records both (`would_reject`, `would_approve`) but never acts: its status
+     * is always `pending`. Eligibility itself is `AutoApprovalPolicy`'s call, not
+     * this method's — it never re-derives that decision.
      */
     private function decide(
         KnowledgeEntry $entry,
         ImportanceClassifierMode $mode,
         ImportanceClassificationResult $result,
         string $candidateHash,
+        AutoApprovalPolicy $autoApproval,
     ): void {
-        $wouldReject = $result->verdict === ImportanceVerdict::NotImportant;
+        $setting = ImportanceClassifierSetting::current();
 
-        $status = $wouldReject && $mode === ImportanceClassifierMode::Enforce
-            ? KnowledgeStatus::Rejected
-            : KnowledgeStatus::Pending;
+        $wouldReject = $result->verdict === ImportanceVerdict::NotImportant;
+        $wouldApprove = ! $wouldReject
+            && $result->verdict === ImportanceVerdict::Important
+            && $autoApproval->isEligible($result, $setting->auto_approve_threshold);
+
+        $enforcing = $mode === ImportanceClassifierMode::Enforce;
+
+        $status = match (true) {
+            $wouldReject && $enforcing => KnowledgeStatus::Rejected,
+            $wouldApprove && $enforcing => KnowledgeStatus::Approved,
+            default => KnowledgeStatus::Pending,
+        };
+
+        $autoApproved = $status === KnowledgeStatus::Approved;
 
         $assessmentId = $this->assessmentId($entry, $result, $candidateHash);
 
@@ -266,6 +286,8 @@ class ClassifyKnowledgeEntryJob implements ShouldQueue
             'verdict' => $result->verdict?->value,
             'mode' => $mode->value,
             'would_reject' => $wouldReject,
+            'would_approve' => $wouldApprove,
+            'auto_approved' => $autoApproved,
             'reasons' => $result->reasons,
             'rules' => $result->triggeredRules,
             'model' => $result->model,
@@ -282,6 +304,8 @@ class ClassifyKnowledgeEntryJob implements ShouldQueue
             'mode' => $mode->value,
             'verdict' => $result->verdict?->value,
             'final_score' => $result->finalScore,
+            'would_approve' => $wouldApprove,
+            'auto_approved' => $autoApproved,
             'cache_hit' => $result->cacheHit,
             'assessment_id' => $assessmentId,
             'status' => $applied ? $status->value : $entry->fresh()?->status,

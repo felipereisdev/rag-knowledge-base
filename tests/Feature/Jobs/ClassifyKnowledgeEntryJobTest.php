@@ -65,12 +65,12 @@ const CLASSIFIABLE_CONTENT = 'The InvoiceNumberAllocator hands out one number pe
 /**
  * @param  array<string, mixed>  $metadata
  */
-function classifyingEntry(array $metadata = [], string $status = 'classifying'): KnowledgeEntry
+function classifyingEntry(array $metadata = [], string $status = 'classifying', ?string $content = null): KnowledgeEntry
 {
     return KnowledgeEntry::create([
         'project_id' => 'p1',
         'title' => 'Invoice numbering',
-        'content' => CLASSIFIABLE_CONTENT,
+        'content' => $content ?? CLASSIFIABLE_CONTENT,
         'category' => 'insight',
         'source' => 'condense',
         'status' => $status,
@@ -104,11 +104,15 @@ function judgement(int $durability, int $actionability, int $specificity, int $n
     );
 }
 
-function classifierMode(ImportanceClassifierMode $mode, int $threshold = 70): void
+/**
+ * @param  ImportanceClassifierMode|value-of<ImportanceClassifierMode>  $mode
+ */
+function settings(ImportanceClassifierMode|string $mode, int $threshold = 70, ?int $autoApprove = null): void
 {
     ImportanceClassifierSetting::query()->findOrFail(1)->update([
-        'mode' => $mode->value,
+        'mode' => $mode instanceof ImportanceClassifierMode ? $mode->value : $mode,
         'threshold' => $threshold,
+        'auto_approve_threshold' => $autoApprove,
     ]);
 }
 
@@ -121,6 +125,37 @@ function spyJudge(SemanticImportanceAssessment|Throwable $response): SpyImportan
     return $judge;
 }
 
+/**
+ * A semantic assessment carrying only the total score that matters to the
+ * final-score arithmetic; the individual criterion scores are irrelevant to
+ * every test that uses this helper.
+ */
+function fakeJudge(int $semanticScore): SpyImportanceJudge
+{
+    return spyJudge(new SemanticImportanceAssessment(
+        durability: $semanticScore,
+        actionability: 0,
+        specificity: 0,
+        nonObviousness: 0,
+        futureValue: 0,
+        semanticScore: $semanticScore,
+        recommendedVerdict: ImportanceVerdict::Important,
+        reasons: [],
+    ));
+}
+
+/** A judge that always raises a terminal, technical failure — never a verdict. */
+function failingJudge(): SpyImportanceJudge
+{
+    return spyJudge(ImportanceClassificationException::timedOut());
+}
+
+/**
+ * Note: this is deliberately NOT named `runClassificationJob()` — that name is
+ * already a global function in `tests/Feature/ImportanceClassifierWorkflowTest.php`
+ * (Pest test-file helpers share one global namespace across the whole run), and
+ * redeclaring it would be a fatal error the moment the full suite runs both files.
+ */
 function runClassification(KnowledgeEntry $entry): void
 {
     app()->call([new ClassifyKnowledgeEntryJob((int) $entry->id), 'handle']);
@@ -155,7 +190,7 @@ it('sizes the classification queue connection so retry_after strictly exceeds th
 });
 
 it('keeps a shadow-mode important entry pending with its verdict snapshot', function () {
-    classifierMode(ImportanceClassifierMode::Shadow);
+    settings(ImportanceClassifierMode::Shadow);
     $judge = spyJudge(importantJudgement());
     $entry = classifyingEntry();
 
@@ -186,7 +221,7 @@ it('keeps a shadow-mode important entry pending with its verdict snapshot', func
 });
 
 it('keeps a shadow-mode unimportant entry pending but marks it as one it would reject', function () {
-    classifierMode(ImportanceClassifierMode::Shadow);
+    settings(ImportanceClassifierMode::Shadow);
     spyJudge(unimportantJudgement());
     $entry = classifyingEntry();
 
@@ -204,7 +239,7 @@ it('keeps a shadow-mode unimportant entry pending but marks it as one it would r
 });
 
 it('keeps an enforce-mode important entry pending', function () {
-    classifierMode(ImportanceClassifierMode::Enforce);
+    settings(ImportanceClassifierMode::Enforce);
     spyJudge(importantJudgement());
     $entry = classifyingEntry();
 
@@ -226,7 +261,7 @@ it('keeps an enforce-mode important entry pending', function () {
 });
 
 it('rejects an enforce-mode unimportant entry', function () {
-    classifierMode(ImportanceClassifierMode::Enforce);
+    settings(ImportanceClassifierMode::Enforce);
     spyJudge(unimportantJudgement());
     $entry = classifyingEntry();
 
@@ -249,7 +284,7 @@ it('rejects an enforce-mode unimportant entry', function () {
 });
 
 it('releases an entry to pending without an assessment when the mode was switched off mid-flight', function () {
-    classifierMode(ImportanceClassifierMode::Off);
+    settings(ImportanceClassifierMode::Off);
     $judge = spyJudge(importantJudgement());
     $entry = classifyingEntry();
 
@@ -269,7 +304,7 @@ it('releases an entry to pending without an assessment when the mode was switche
 });
 
 it('writes the verdict snapshot without touching unrelated metadata keys', function () {
-    classifierMode(ImportanceClassifierMode::Shadow);
+    settings(ImportanceClassifierMode::Shadow);
     spyJudge(importantJudgement());
     $entry = classifyingEntry(['source_path' => '/sessions/42.jsonl', 'condense_run_id' => 7]);
 
@@ -283,7 +318,7 @@ it('writes the verdict snapshot without touching unrelated metadata keys', funct
 });
 
 it('does nothing to an entry that has already left classifying', function (string $status) {
-    classifierMode(ImportanceClassifierMode::Enforce);
+    settings(ImportanceClassifierMode::Enforce);
     $judge = spyJudge(unimportantJudgement());
     $entry = classifyingEntry(['reviewer' => 'human'], status: $status);
 
@@ -303,7 +338,7 @@ it('does nothing to an entry that has already left classifying', function (strin
 ]);
 
 it('does not clobber a human decision taken while the classification was in flight', function () {
-    classifierMode(ImportanceClassifierMode::Enforce);
+    settings(ImportanceClassifierMode::Enforce);
     $entry = classifyingEntry();
 
     // The reviewer approves the entry while the judge is still deliberating: the
@@ -338,7 +373,7 @@ it('does not clobber a human decision taken while the classification was in flig
 });
 
 it('is harmless when the job is delivered twice', function () {
-    classifierMode(ImportanceClassifierMode::Shadow);
+    settings(ImportanceClassifierMode::Shadow);
     $judge = spyJudge(importantJudgement());
     $entry = classifyingEntry();
 
@@ -356,7 +391,7 @@ it('is harmless when the job is delivered twice', function () {
 });
 
 it('retries a transient contention failure instead of failing the entry open', function () {
-    classifierMode(ImportanceClassifierMode::Shadow);
+    settings(ImportanceClassifierMode::Shadow);
     $judge = spyJudge(importantJudgement());
     $entry = classifyingEntry();
 
@@ -377,7 +412,7 @@ it('retries a transient contention failure instead of failing the entry open', f
 
 it('fails open to pending with a sanitized error on every terminal technical failure', function (Throwable $failure, string $code, string $message) {
     // Enforce mode: even here, a technical failure must never reject.
-    classifierMode(ImportanceClassifierMode::Enforce);
+    settings(ImportanceClassifierMode::Enforce);
     spyJudge($failure);
     $entry = classifyingEntry(['source_path' => '/sessions/42.jsonl']);
 
@@ -444,7 +479,7 @@ it('stamps the failOpen audit record with the class constants, not a config valu
         'rag.importance.rules_version' => 'stale-cached-v0',
     ]);
 
-    classifierMode(ImportanceClassifierMode::Enforce);
+    settings(ImportanceClassifierMode::Enforce);
     spyJudge(ImportanceClassificationException::timedOut());
     $entry = classifyingEntry();
 
@@ -460,7 +495,7 @@ it('stamps the failOpen audit record with the class constants, not a config valu
 });
 
 it('never logs the raw failure text of an unexpected exception', function () {
-    classifierMode(ImportanceClassifierMode::Shadow);
+    settings(ImportanceClassifierMode::Shadow);
     spyJudge(new RuntimeException('raw stderr: speculative reasoning about '.CLASSIFIABLE_CONTENT));
     $entry = classifyingEntry();
 
@@ -481,7 +516,7 @@ it('never logs the raw failure text of an unexpected exception', function () {
 });
 
 it('records the failed assessment so the failure is auditable', function () {
-    classifierMode(ImportanceClassifierMode::Enforce);
+    settings(ImportanceClassifierMode::Enforce);
     spyJudge(ImportanceClassificationException::timedOut());
     $entry = classifyingEntry();
 
@@ -496,7 +531,7 @@ it('records the failed assessment so the failure is auditable', function () {
 });
 
 it('fails the entry open from its terminal failure handler', function () {
-    classifierMode(ImportanceClassifierMode::Enforce);
+    settings(ImportanceClassifierMode::Enforce);
     $entry = classifyingEntry(['source_path' => '/sessions/42.jsonl']);
 
     (new ClassifyKnowledgeEntryJob((int) $entry->id))->failed(new RuntimeException('raw stderr: leaking'));
@@ -513,7 +548,7 @@ it('fails the entry open from its terminal failure handler', function () {
 });
 
 it('records exhausted contention retries as a transient failure when it fails the entry open', function () {
-    classifierMode(ImportanceClassifierMode::Shadow);
+    settings(ImportanceClassifierMode::Shadow);
     $entry = classifyingEntry();
 
     (new ClassifyKnowledgeEntryJob((int) $entry->id))
@@ -527,7 +562,7 @@ it('records exhausted contention retries as a transient failure when it fails th
 });
 
 it('is idempotent in its terminal failure handler', function () {
-    classifierMode(ImportanceClassifierMode::Shadow);
+    settings(ImportanceClassifierMode::Shadow);
     spyJudge(importantJudgement());
     $entry = classifyingEntry();
 
@@ -553,7 +588,7 @@ it('is idempotent in its terminal failure handler', function () {
 });
 
 it('does not propagate when its own recovery write fails', function () {
-    classifierMode(ImportanceClassifierMode::Enforce);
+    settings(ImportanceClassifierMode::Enforce);
     $entry = classifyingEntry();
 
     // Laravel never retries `failed()`; if the DB write it performs throws,
@@ -573,7 +608,7 @@ it('does not propagate when its own recovery write fails', function () {
 });
 
 it('does nothing when the entry no longer exists', function () {
-    classifierMode(ImportanceClassifierMode::Shadow);
+    settings(ImportanceClassifierMode::Shadow);
     $judge = spyJudge(importantJudgement());
 
     app()->call([new ClassifyKnowledgeEntryJob(999_999), 'handle']);
@@ -584,7 +619,7 @@ it('does nothing when the entry no longer exists', function () {
 });
 
 it('reuses a cached assessment for a repeated candidate', function () {
-    classifierMode(ImportanceClassifierMode::Shadow);
+    settings(ImportanceClassifierMode::Shadow);
     $judge = spyJudge(importantJudgement());
 
     $first = classifyingEntry();
@@ -599,6 +634,113 @@ it('reuses a cached assessment for a repeated candidate', function () {
         ->and($second->importance_assessment_id)->toBe($first->refresh()->importance_assessment_id)
         ->and($second->status)->toBe(KnowledgeStatus::Pending->value);
 });
+
+/**
+ * Content whose deterministic rules add +11 (`normative_restriction` + `causal_rationale`)
+ * with no penalty at all: it carries a concrete anchor (`orders_table`, snake_case), sits
+ * exactly at the `MIN_SUBSTANCE_WORDS` floor, and uses no speculative or transient
+ * wording. Verified directly against `DeterministicImportanceRules::evaluate()` — the
+ * design doc's original seeder sentence ("...the orders table.") falls just short of
+ * eligibility, because two bare words read as `generic_without_context` (-8) under v6;
+ * this is the same fact, spelled with a concrete anchor instead.
+ */
+const ELIGIBLE_CONTENT = 'Never run db:seed in production because it truncates the orders_table records permanently.';
+
+it('auto-approves an eligible entry in enforce mode', function () {
+    settings(mode: 'enforce', threshold: 70, autoApprove: 90);
+
+    $entry = classifyingEntry(content: ELIGIBLE_CONTENT);
+
+    fakeJudge(semanticScore: 88); // + normative_restriction(6) + causal_rationale(5) = 99
+
+    runClassification($entry);
+
+    $entry->refresh();
+    $importance = $entry->metadata['importance'];
+
+    expect($entry->status)->toBe(KnowledgeStatus::Approved->value)
+        ->and($importance['auto_approved'])->toBeTrue()
+        ->and($importance['would_approve'])->toBeTrue()
+        ->and($importance['would_reject'])->toBeFalse()
+        ->and($importance['verdict'])->toBe('important')
+        ->and($importance['final_score'])->toBe(99);
+});
+
+it('leaves an important but ineligible entry to a human in enforce mode', function () {
+    settings(mode: 'enforce', threshold: 70, autoApprove: 90);
+
+    // High semantic score, but no positive deterministic signal fires.
+    $entry = classifyingEntry(content: 'The embedder model file lives under storage/models and is 420 MB.');
+
+    fakeJudge(semanticScore: 100);
+
+    runClassification($entry);
+
+    $entry->refresh();
+
+    expect($entry->status)->toBe(KnowledgeStatus::Pending->value)
+        ->and($entry->metadata['importance']['auto_approved'])->toBeFalse()
+        ->and($entry->metadata['importance']['would_approve'])->toBeFalse();
+})->note('The injection barrier: a perfect model score cannot approve on its own.');
+
+it('records would_approve in shadow but never approves', function () {
+    settings(mode: 'shadow', threshold: 70, autoApprove: 90);
+
+    $entry = classifyingEntry(content: ELIGIBLE_CONTENT);
+
+    fakeJudge(semanticScore: 88);
+
+    runClassification($entry);
+
+    $entry->refresh();
+
+    expect($entry->status)->toBe(KnowledgeStatus::Pending->value)
+        ->and($entry->metadata['importance']['would_approve'])->toBeTrue()
+        ->and($entry->metadata['importance']['auto_approved'])->toBeFalse();
+})->note('Shadow measures. It never acts.');
+
+it('never auto-approves when the threshold is null', function () {
+    settings(mode: 'enforce', threshold: 70, autoApprove: null);
+
+    $entry = classifyingEntry(content: ELIGIBLE_CONTENT);
+
+    fakeJudge(semanticScore: 88);
+
+    runClassification($entry);
+
+    $entry->refresh();
+
+    expect($entry->status)->toBe(KnowledgeStatus::Pending->value)
+        ->and($entry->metadata['importance']['would_approve'])->toBeFalse();
+});
+
+it('still rejects a not-important entry in enforce mode', function () {
+    settings(mode: 'enforce', threshold: 70, autoApprove: 90);
+
+    $entry = classifyingEntry(content: 'Maybe we should look into this at some point.');
+
+    fakeJudge(semanticScore: 10);
+
+    runClassification($entry);
+
+    expect($entry->fresh()->status)->toBe(KnowledgeStatus::Rejected->value);
+})->note('The reject path is unchanged.');
+
+it('never auto-approves on a technical failure', function () {
+    settings(mode: 'enforce', threshold: 70, autoApprove: 90);
+
+    $entry = classifyingEntry(content: ELIGIBLE_CONTENT);
+
+    failingJudge(); // throws a terminal ImportanceClassificationException
+
+    runClassification($entry);
+
+    $entry->refresh();
+
+    expect($entry->status)->toBe(KnowledgeStatus::Pending->value)
+        ->and($entry->metadata['importance'])->not->toHaveKey('auto_approved')
+        ->and($entry->metadata['importance']['classification_error']['code'])->not->toBeNull();
+})->note('Fail-open still governs: a failure approves nothing and rejects nothing.');
 
 /**
  * Stand in for another worker that is mid-classification on the same cache

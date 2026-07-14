@@ -256,6 +256,21 @@ it('deletes chunks when an entry is rejected', function () {
     expect(DB::table('chunk_embeddings')->where('entry_id', $entry->id)->exists())->toBeFalse();
 });
 
+it('indexes an entry that goes straight from classifying to approved', function () {
+    Queue::fake();
+
+    $entry = KnowledgeEntry::create([
+        'project_id' => 'p1', 'title' => 't', 'content' => 'c',
+        'category' => 'insight', 'source' => 'condense', 'status' => KnowledgeStatus::Classifying->value,
+    ]);
+
+    Queue::assertNothingPushed();
+
+    $entry->update(['status' => KnowledgeStatus::Approved->value]);
+
+    Queue::assertPushed(IndexEntryJob::class, 1);
+})->note('Auto-approved entries must become searchable with no extra wiring.');
+
 it('deletes stale chunks when an already rejected entry is updated', function () {
     Queue::fake();
 
