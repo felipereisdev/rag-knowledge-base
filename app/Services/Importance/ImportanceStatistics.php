@@ -149,9 +149,12 @@ final class ImportanceStatistics
     /**
      * How many shadow-classified entries the classifier would have approved with
      * nobody reading them. In `shadow` nothing is approved, so this is the size of
-     * the risk `enforce` would take on — read it beside `shadowReview()`'s
-     * `rejected_would_approve`, which is the part of that risk already known to be
-     * wrong.
+     * the risk `enforce` would take on.
+     *
+     * This reads the `would_approve` stamp, so it reports what the classifier
+     * thought at the dial in force when it ran — fine for a status headline. Read
+     * it beside `falseAutoApprovals()`, which recomputes eligibility at the dial
+     * configured NOW and is the figure the readiness gate is allowed to trust.
      */
     public function shadowWouldApproveCount(string $projectId): int
     {

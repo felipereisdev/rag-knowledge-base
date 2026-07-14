@@ -119,7 +119,11 @@ class RagImportanceReportCommand extends Command
         // whatever the dial happened to be that day. See
         // ImportanceStatistics::falseAutoApprovals(). Per-row, and affordable
         // precisely because this command is run by hand; `rag_status` never calls it.
-        $falseApprovals = $statistics->falseAutoApprovals($projectId, $setting->auto_approve_threshold);
+        // Skipped entirely when the dial is off: gates 6 and 7 do not run, and the
+        // per-row pass would be work nothing gates on.
+        $falseApprovals = $autoApprovalEnabled
+            ? $statistics->falseAutoApprovals($projectId, $setting->auto_approve_threshold)
+            : ['computable' => 0, 'false_approvals' => 0];
         $classifying = $statistics->classifying($projectId);
         $mustKeep = $this->mustKeepFalseRejects($rules, $normalizer);
         $mustRejectEligible = $this->mustRejectEligible($rules, $normalizer);
