@@ -131,4 +131,9 @@ return [
         'thresholds_failed' => 'Evaluation thresholds failed.',
         'thresholds_passed' => 'Evaluation thresholds passed.',
     ],
+    'menu' => [
+        'knowledge' => 'Knowledge',
+        'projects' => 'Projects',
+        'settings' => 'Settings',
+    ],
 ];

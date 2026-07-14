@@ -131,4 +131,9 @@ return [
         'thresholds_failed' => 'Os limiares de avaliação falharam.',
         'thresholds_passed' => 'Os limiares de avaliação foram atingidos.',
     ],
+    'menu' => [
+        'knowledge' => 'Conhecimento',
+        'projects' => 'Projetos',
+        'settings' => 'Definições',
+    ],
 ];

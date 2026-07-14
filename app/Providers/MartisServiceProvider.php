@@ -3,7 +3,9 @@
 namespace App\Providers;
 
 use App\Martis\Dashboards\MainDashboard;
+use App\Martis\Resources\CondenseSettingResource;
 use App\Martis\Resources\EntityResource;
+use App\Martis\Resources\ImportanceClassifierSettingResource;
 use App\Martis\Resources\KnowledgeEntryResource;
 use App\Martis\Resources\ProjectResource;
 use App\Martis\Resources\RelationResource;
@@ -67,16 +69,24 @@ class MartisServiceProvider extends ServiceProvider
     {
         Martis::mainMenu(function ($request, $menu) {
             return $menu->sections([
-                MenuSection::make('Knowledge', [
+                MenuSection::make(__('rag.menu.knowledge'), [
                     MenuItem::resource(KnowledgeEntryResource::class),
                     MenuItem::resource(TagResource::class),
                     MenuItem::resource(EntityResource::class),
                     MenuItem::resource(RelationResource::class),
                 ])->icon('book'),
 
-                MenuSection::make('Projects', [
+                MenuSection::make(__('rag.menu.projects'), [
                     MenuItem::resource(ProjectResource::class),
                 ])->icon('folder'),
+
+                // `sections()` REPLACES the menu, so a resource absent from this
+                // list is unreachable in the UI even though its routes work.
+                // Every settings resource must be listed here.
+                MenuSection::make(__('rag.menu.settings'), [
+                    MenuItem::resource(ImportanceClassifierSettingResource::class),
+                    MenuItem::resource(CondenseSettingResource::class),
+                ])->icon('gear'),
             ]);
         });
     }
