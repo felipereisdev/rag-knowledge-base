@@ -56,6 +56,12 @@ return [
         'source_help' => 'Where the entry came from. Entries created here are manual.',
         'language_help' => 'Affects FTS stemming.',
     ],
+    'detail' => [
+        'content' => 'Content',
+        'context' => 'Context',
+        'relationships' => 'Relationships',
+        'metadata' => 'Metadata',
+    ],
     'filters' => [
         'project' => 'Project',
         'category' => 'Category',

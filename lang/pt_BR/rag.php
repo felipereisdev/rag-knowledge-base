@@ -56,6 +56,12 @@ return [
         'source_help' => 'De onde veio a entrada. As entradas criadas aqui são manuais.',
         'language_help' => 'Afeta a derivação de palavras na busca de texto completo.',
     ],
+    'detail' => [
+        'content' => 'Conteúdo',
+        'context' => 'Contexto',
+        'relationships' => 'Relacionamentos',
+        'metadata' => 'Metadados',
+    ],
     'filters' => [
         'project' => 'Projeto',
         'category' => 'Categoria',

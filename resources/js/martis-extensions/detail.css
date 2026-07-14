@@ -2,7 +2,18 @@
  * SectionDisplay and relationship panels both render the field label. Keep the
  * panel heading (icon + title + count) and hide only the outer definition-term
  * label when a relationship is wrapped in a Section for full-width display.
+ *
+ * Two renderers can wrap a relation field, and they emit different markup:
+ *  - SectionRenderer (SectionDisplay): <dl class="martis-section-grid martis-form-grid grid">
+ *      > <div> > <dt class="martis-detail-label"> + <dd> (no nested <dl>).
+ *  - TabsRenderer (TabsDisplay): <div class="martis-form-grid grid grid-cols-12">
+ *      > <div class="col-span-12"> > <dl> > <dt class="martis-detail-label"> + <dd>
+ *      (field row has its own inner <dl>).
+ * Both rules are kept even though no `Section::make(...)` currently ships under
+ * app/ — Section is still a supported Martis layout primitive, so a future
+ * resource could reintroduce that shape.
  */
-.martis-section-grid > div:has(> dd .martis-relation-toolbar) > .martis-detail-label {
+.martis-section-grid > div:has(> dd .martis-relation-toolbar) > .martis-detail-label,
+.martis-form-grid > div > dl:has(> dd .martis-relation-toolbar) > .martis-detail-label {
   display: none;
 }

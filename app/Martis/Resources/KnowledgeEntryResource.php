@@ -33,7 +33,8 @@ use Martis\Fields\Text;
 use Martis\Fields\Textarea;
 use Martis\Filters\DateRangeFilter;
 use Martis\Filters\Filter;
-use Martis\Layout\Section;
+use Martis\Layout\Tab;
+use Martis\Layout\TabGroup;
 use Martis\Resource;
 
 class KnowledgeEntryResource extends Resource
@@ -56,6 +57,15 @@ class KnowledgeEntryResource extends Resource
     public static function model(): string
     {
         return KnowledgeEntry::class;
+    }
+
+    /**
+     * Show the knowledge title in the detail header and in relationship pickers,
+     * instead of the default "Knowledge Entry #id" label.
+     */
+    public static function titleAttribute(): string
+    {
+        return 'title';
     }
 
     /**
@@ -362,30 +372,55 @@ class KnowledgeEntryResource extends Resource
     }
 
     /**
-     * Keep scalar fields in the default drawer layout. Wrap the relationship
-     * panels in a headerless section so they render at full width instead of
-     * passing through the drawer's scalar label/value grid, and append the
-     * read-only importance audit.
+     * Detail drawer: five native Martis tabs instead of one long scalar list.
+     * The dominant workflow is consulting approved knowledge, so the first tab is
+     * the reading surface (status + rendered Markdown) and everything else —
+     * context, relationships, the read-only importance audit, metadata — waits
+     * behind its own tab.
+     *
+     * The audit sits *before* the raw metadata tab on purpose: it is the readable
+     * rendering of `metadata.importance`, and keeping Metadata last preserves it
+     * as the far bound of the flattened field list (see the detail-payload test).
+     *
+     * Scalar field instances are reused from fields() so validation, options and
+     * labels stay in one place. `title` is deliberately absent: titleAttribute()
+     * already renders it as the drawer header.
      */
     public function fieldsForDetail(Request $request): array
     {
-        $detailFields = [];
-        $relationshipFields = [];
+        $fields = [];
 
         foreach ($this->fields($request) as $field) {
-            if ($field instanceof Field && in_array($field->attribute(), ['tags', 'entities'], true)) {
-                $relationshipFields[] = $field;
-
-                continue;
+            if ($field instanceof Field) {
+                $fields[$field->attribute()] = $field;
             }
-
-            $detailFields[] = $field;
         }
 
-        $detailFields[] = Section::make(null, $relationshipFields)->columns(12);
-        $detailFields[] = Section::make(__('importance.audit.section'), $this->importanceFields())->columns(12);
-
-        return $detailFields;
+        return [
+            TabGroup::make([
+                Tab::make(__('rag.detail.content'), [
+                    $fields['status'],
+                    $fields['content'],
+                ]),
+                Tab::make(__('rag.detail.context'), [
+                    $fields['project_id'],
+                    $fields['category'],
+                    $fields['source'],
+                    $fields['author'],
+                    DateTime::make('created_at', __('rag.fields.created_at'))
+                        ->onlyOnDetail()
+                        ->span(4),
+                ]),
+                Tab::make(__('rag.detail.relationships'), [
+                    $fields['tags'],
+                    $fields['entities'],
+                ]),
+                Tab::make(__('importance.audit.section'), $this->importanceFields()),
+                Tab::make(__('rag.detail.metadata'), [
+                    $fields['metadata'],
+                ]),
+            ]),
+        ];
     }
 
     /**

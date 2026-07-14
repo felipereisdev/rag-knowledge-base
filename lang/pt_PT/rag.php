@@ -56,6 +56,12 @@ return [
         'source_help' => 'De onde veio a entrada. As entradas criadas aqui são manuais.',
         'language_help' => 'Afeta a lematização da pesquisa de texto integral.',
     ],
+    'detail' => [
+        'content' => 'Conteúdo',
+        'context' => 'Contexto',
+        'relationships' => 'Relações',
+        'metadata' => 'Metadados',
+    ],
     'filters' => [
         'project' => 'Projeto',
         'category' => 'Categoria',
