@@ -126,6 +126,34 @@ final class ImportanceStatistics
     }
 
     /**
+     * Entries the classifier approved on its own, with no human reading them.
+     * Unlike every shadow figure, this is not filtered by mode: `auto_approved`
+     * is only ever written true in `enforce`, and it is a record of what actually
+     * happened, not of what would have.
+     */
+    public function autoApprovedCount(string $projectId): int
+    {
+        return KnowledgeEntry::query()
+            ->where('project_id', $projectId)
+            ->where($this->flagIs('auto_approved', true))
+            ->count();
+    }
+
+    /**
+     * How many shadow-classified entries the classifier would have approved with
+     * nobody reading them. In `shadow` nothing is approved, so this is the size of
+     * the risk `enforce` would take on — read it beside `shadowReview()`'s
+     * `rejected_would_approve`, which is the part of that risk already known to be
+     * wrong.
+     */
+    public function shadowWouldApproveCount(string $projectId): int
+    {
+        return $this->shadowClassified($projectId)
+            ->where($this->flagIs('would_approve', true))
+            ->count();
+    }
+
+    /**
      * The calibration cross-tab: the shadow verdicts set against what a human
      * subsequently decided about the same entry.
      *
@@ -135,8 +163,10 @@ final class ImportanceStatistics
      *     would_reject: int,
      *     approved: int,
      *     approved_would_reject: int,
+     *     approved_would_approve: int,
      *     rejected: int,
      *     rejected_would_keep: int,
+     *     rejected_would_approve: int,
      * }
      */
     public function shadowReview(string $projectId): array
@@ -156,6 +186,14 @@ final class ImportanceStatistics
                 ->where('status', KnowledgeStatus::Approved->value)
                 ->where($this->wouldReject(true))
                 ->count(),
+            // A human approved it, and the classifier would have approved it
+            // unread. This is the benefit auto-approval buys — reviews that need
+            // not have happened — and it is reported, never gated: approving less
+            // than it could is not a failure.
+            'approved_would_approve' => $this->shadowClassified($projectId)
+                ->where('status', KnowledgeStatus::Approved->value)
+                ->where($this->flagIs('would_approve', true))
+                ->count(),
             'rejected' => $this->shadowClassified($projectId)
                 ->where('status', KnowledgeStatus::Rejected->value)
                 ->count(),
@@ -164,6 +202,15 @@ final class ImportanceStatistics
             'rejected_would_keep' => $this->shadowClassified($projectId)
                 ->where('status', KnowledgeStatus::Rejected->value)
                 ->where($this->wouldReject(false))
+                ->count(),
+            // A human threw it away, and the classifier would have APPROVED it,
+            // unread, into the base an agent later trusts. This is the false
+            // auto-approval count, and the gate built on it tolerates none:
+            // rejecting wrongly costs one click, approving wrongly poisons the
+            // knowledge base silently.
+            'rejected_would_approve' => $this->shadowClassified($projectId)
+                ->where('status', KnowledgeStatus::Rejected->value)
+                ->where($this->flagIs('would_approve', true))
                 ->count(),
         ];
     }
@@ -217,16 +264,33 @@ final class ImportanceStatistics
     }
 
     /**
-     * `metadata.importance.would_reject` is a JSON boolean; `->>` renders it as
-     * the text 'true'/'false'.
-     *
      * @return callable(Builder<KnowledgeEntry>): void
      */
     private function wouldReject(bool $expected): callable
     {
-        return static function (Builder $query) use ($expected): void {
+        return $this->flagIs('would_reject', $expected);
+    }
+
+    /**
+     * One of the classifier's JSON booleans under `metadata.importance`, compared
+     * as text: `->>` renders a JSON boolean as 'true'/'false'.
+     *
+     * Deliberately a text comparison rather than a `::boolean` cast. An entry
+     * classified before a flag existed simply has no key, so `->>` yields SQL NULL
+     * and the row matches NEITHER `true` nor `false` — it is absent from the
+     * population, which is the truthful answer. A cast would additionally throw on
+     * any row whose metadata was hand-edited to a non-boolean, taking `rag_status`
+     * down with it.
+     *
+     * `$flag` is only ever a literal from this class; nothing external reaches it.
+     *
+     * @return callable(Builder<KnowledgeEntry>): void
+     */
+    private function flagIs(string $flag, bool $expected): callable
+    {
+        return static function (Builder $query) use ($flag, $expected): void {
             $query->whereRaw(
-                "metadata->'importance'->>'would_reject' = ?",
+                "metadata->'importance'->>'{$flag}' = ?",
                 [$expected ? 'true' : 'false'],
             );
         };

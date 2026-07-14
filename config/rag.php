@@ -56,5 +56,12 @@ return [
         // tests can point the gate at a fixture without touching the shipped
         // corpus.
         'must_keep_corpus_path' => env('RAG_IMPORTANCE_MUST_KEEP_CORPUS_PATH', resource_path('importance/must-keep.json')),
+        // The mirror corpus, for the mirror risk. must-keep guards the reject path
+        // (knowledge the classifier must not throw away); this one guards the
+        // APPROVE path: no fixture a reviewer judged worthless may satisfy the
+        // deterministic half of auto-approval eligibility, or an entry of that
+        // shape reaches the base with nobody reading it. Same directory, same
+        // reason (`.dockerignore` excludes `tests/`), same override hook for tests.
+        'must_reject_corpus_path' => env('RAG_IMPORTANCE_MUST_REJECT_CORPUS_PATH', resource_path('importance/must-reject.json')),
     ],
 ];

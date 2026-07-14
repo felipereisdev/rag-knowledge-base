@@ -218,6 +218,124 @@ it('reports the importance classifier health', function () {
     });
 });
 
+it('reports the auto-approval dial, what it approved, and what shadow would approve', function () {
+    ImportanceClassifierSetting::query()->findOrFail(1)->update([
+        'mode' => 'enforce',
+        'threshold' => 65,
+        'auto_approve_threshold' => 90,
+    ]);
+
+    // Approved by the classifier itself, in enforce: nobody read this one.
+    statusEntry('approved', [
+        'mode' => 'enforce',
+        'verdict' => 'important',
+        'would_reject' => false,
+        'would_approve' => true,
+        'auto_approved' => true,
+        'final_score' => 94,
+    ], 'Auto-approved');
+
+    // Eligible, but classified in shadow: shadow approves nothing, so it counts
+    // towards what enforce WOULD approve and not towards what was approved.
+    statusEntry('pending', [
+        'mode' => 'shadow',
+        'verdict' => 'important',
+        'would_reject' => false,
+        'would_approve' => true,
+        'auto_approved' => false,
+        'final_score' => 92,
+    ], 'Shadow would approve');
+
+    // Important, but not eligible for auto-approval — in neither count.
+    statusEntry('pending', [
+        'mode' => 'shadow',
+        'verdict' => 'important',
+        'would_reject' => false,
+        'would_approve' => false,
+        'auto_approved' => false,
+        'final_score' => 74,
+    ], 'Shadow keep only');
+
+    $response = RagServer::tool(RagStatusTool::class, ['project_id' => 'test-project']);
+
+    $response->assertOk();
+    $response->assertStructuredContent(function (AssertableJson $json) {
+        $json->has('importance_classifier', fn (AssertableJson $classifier) => $classifier
+            ->where('auto_approve_threshold', 90)
+            ->where('auto_approved', 1)
+            ->where('shadow_would_approve', 1)
+            // Every pre-existing key of this object is a backward-compatibility
+            // contract, and none of them moved.
+            ->where('mode', 'enforce')
+            ->where('threshold', 65)
+            ->where('model', (string) config('rag.importance.model'))
+            ->where('prompt_version', ImportancePrompt::VERSION)
+            ->where('rules_version', DeterministicImportanceRules::VERSION)
+            ->has('classifying')
+            ->has('stale_classifying')
+            ->has('stale_after_minutes')
+            ->has('assessments.succeeded')
+            ->has('assessments.failed')
+            ->has('shadow.would_keep')
+            ->has('shadow.would_reject')
+            ->has('queue.name')
+            ->has('queue.pending')
+            ->has('queue.failed')
+            ->etc()
+        )->etc();
+    });
+});
+
+it('reports a null auto-approve threshold as auto-approval being off', function () {
+    ImportanceClassifierSetting::query()->findOrFail(1)->update(['auto_approve_threshold' => null]);
+
+    $response = RagServer::tool(RagStatusTool::class, ['project_id' => 'test-project']);
+
+    $response->assertOk();
+    $response->assertStructuredContent(function (AssertableJson $json) {
+        $json->has('importance_classifier', fn (AssertableJson $classifier) => $classifier
+            ->where('auto_approve_threshold', null)
+            ->where('auto_approved', 0)
+            ->etc()
+        )->etc();
+    });
+});
+
+it('counts auto-approved entries of other projects apart', function () {
+    Project::create([
+        'id' => 'other-project',
+        'name' => 'Other Project',
+        'root_path' => '/tmp/other-project',
+        'language' => 'en',
+    ]);
+
+    KnowledgeEntry::create([
+        'project_id' => 'other-project',
+        'title' => 'Auto-approved elsewhere',
+        'content' => 'Content here',
+        'category' => 'insight',
+        'status' => 'approved',
+        'metadata' => ['importance' => [
+            'mode' => 'enforce',
+            'verdict' => 'important',
+            'would_approve' => true,
+            'auto_approved' => true,
+            'final_score' => 95,
+        ]],
+    ]);
+
+    $response = RagServer::tool(RagStatusTool::class, ['project_id' => 'test-project']);
+
+    $response->assertOk();
+    $response->assertStructuredContent(function (AssertableJson $json) {
+        $json->has('importance_classifier', fn (AssertableJson $classifier) => $classifier
+            ->where('auto_approved', 0)
+            ->where('shadow_would_approve', 0)
+            ->etc()
+        )->etc();
+    });
+});
+
 it('excludes enforce rejections from the shadow would-reject count', function () {
     // `would_reject` is written in every mode — it mirrors "the computed verdict
     // was not_important" — so an enforce rejection carries it too. The shadow

@@ -21,8 +21,21 @@ use JsonException;
  * automatic rejection is invisible to whoever wrote the knowledge. Nothing in
  * this command writes to `importance_classifier_settings`.
  *
- * Readiness is the conjunction of the five approved rollout gates — one failing
+ * Readiness is the conjunction of the seven approved rollout gates — one failing
  * gate is enough to keep the classifier in shadow.
+ *
+ * Five of them guard the REJECT path: they ask whether the classifier throws away
+ * knowledge a human would have kept. Two guard the APPROVE path, and they are not
+ * the mirror image of the other five, because the two errors do not cost the same.
+ * A false reject costs one click in a review queue. A false auto-approve puts junk
+ * — or an injected instruction — into the base with nobody reading it, and search
+ * then serves it to agents as trusted project knowledge. That asymmetry is why the
+ * approve-path gates tolerate zero, and why they carry a floor: a clean record over
+ * a sample too small to have caught anything is not evidence of safety.
+ *
+ * When auto-approval is off (`auto_approve_threshold` is null) nothing is approved
+ * unread, so those two gates have nothing to validate and do not block. READY means
+ * "everything that is switched on has been validated", not "every gate ran".
  */
 class RagImportanceReportCommand extends Command
 {
@@ -40,6 +53,27 @@ class RagImportanceReportCommand extends Command
 
     /** No entry may be stranded in `classifying`. */
     public const int MAX_STALE_CLASSIFYING = 0;
+
+    /**
+     * The anti-vacuity floor under the false-auto-approval gate. "Zero false
+     * approvals among zero rejections" is not a clean record, it is no record —
+     * and the same vacuous pass was already found once in the false-reject gate,
+     * which read `approved === 0` as a flawless 0.0%. Auto-approval may only be
+     * certified against a rejected sample big enough for a mistake to have shown
+     * up in it.
+     */
+    public const int MIN_REJECTED_SAMPLE = 10;
+
+    /**
+     * Zero tolerance, unlike the 5% the false-REJECT gate allows. One entry a
+     * human threw away that the classifier would have approved unread is one
+     * piece of junk it would have published to every agent that searches this
+     * base, silently. There is no acceptable rate of that.
+     */
+    public const int MAX_FALSE_AUTO_APPROVALS = 0;
+
+    /** No must-reject fixture may satisfy the deterministic half of eligibility. */
+    public const int MAX_MUST_REJECT_ELIGIBLE = 0;
 
     protected $signature = 'rag:importance-report
         {--project= : Project ID (defaults to slugified cwd)}
@@ -73,9 +107,15 @@ class RagImportanceReportCommand extends Command
 
         $setting = ImportanceClassifierSetting::current();
 
+        // The dial that decides whether the two approve-path gates have anything
+        // to say. Read once, never written: this command reports readiness and
+        // never acts on it.
+        $autoApprovalEnabled = $setting->auto_approve_threshold !== null;
+
         $review = $statistics->shadowReview($projectId);
         $classifying = $statistics->classifying($projectId);
         $mustKeep = $this->mustKeepFalseRejects($rules, $normalizer);
+        $mustRejectEligible = $this->mustRejectEligible($rules, $normalizer);
 
         $reductionRate = $review['classified'] > 0
             ? $review['would_reject'] / $review['classified']
@@ -109,6 +149,23 @@ class RagImportanceReportCommand extends Command
             'count' => $review['rejected_would_keep'],
             'rejected' => $review['rejected'],
         ]));
+        $this->line(__('importance.report.rejected_would_approve', [
+            'count' => $review['rejected_would_approve'],
+            'rejected' => $review['rejected'],
+        ]));
+        // A benefit measure, not a gate: the reviews auto-approval would have
+        // saved. Approving fewer entries than it could is never unsafe, so nothing
+        // is ever blocked on this number.
+        $this->line(__('importance.report.review_reduction', [
+            'count' => $review['approved_would_approve'],
+            'total' => $review['approved'],
+        ]));
+        $this->line($mustRejectEligible === null
+            ? __('importance.report.must_reject_unavailable', ['path' => $this->mustRejectCorpusPath()])
+            : __('importance.report.must_reject', [
+                'count' => $mustRejectEligible['eligible'],
+                'total' => $mustRejectEligible['checked'],
+            ]));
         $this->line(__('importance.report.stale', [
             'count' => $classifying['stale'],
             'minutes' => $classifying['stale_after_minutes'],
@@ -153,6 +210,37 @@ class RagImportanceReportCommand extends Command
                 'requirement' => '= '.self::MAX_STALE_CLASSIFYING,
                 'actual' => (string) $classifying['stale'],
                 'passes' => $classifying['stale'] <= self::MAX_STALE_CLASSIFYING,
+            ],
+            // Gate 6. Zero false auto-approvals, over a rejected sample big enough
+            // for one to have surfaced. Both halves are required: without the
+            // floor, a project that has rejected nothing certifies auto-approval
+            // on no evidence at all.
+            'false_auto_approvals' => [
+                'requirement' => '= '.self::MAX_FALSE_AUTO_APPROVALS
+                    .' ('.__('importance.report.min_rejected', ['count' => self::MIN_REJECTED_SAMPLE]).')',
+                'actual' => $autoApprovalEnabled
+                    ? $review['rejected_would_approve'].' / '.$review['rejected']
+                    : __('importance.report.auto_approval_disabled'),
+                'passes' => ! $autoApprovalEnabled || (
+                    $review['rejected'] >= self::MIN_REJECTED_SAMPLE
+                    && $review['rejected_would_approve'] <= self::MAX_FALSE_AUTO_APPROVALS
+                ),
+            ],
+            // Gate 7. The model-independent half of the injection defence: no
+            // fixture a reviewer judged worthless may satisfy the DETERMINISTIC
+            // half of eligibility. An unreadable corpus proves nothing, so it
+            // fails — it can never read as a pass.
+            'must_reject' => [
+                'requirement' => '= '.self::MAX_MUST_REJECT_ELIGIBLE,
+                'actual' => match (true) {
+                    ! $autoApprovalEnabled => __('importance.report.auto_approval_disabled'),
+                    $mustRejectEligible === null => '—',
+                    default => (string) $mustRejectEligible['eligible'],
+                },
+                'passes' => ! $autoApprovalEnabled || (
+                    $mustRejectEligible !== null
+                    && $mustRejectEligible['eligible'] <= self::MAX_MUST_REJECT_ELIGIBLE
+                ),
             ],
         ];
 
@@ -233,8 +321,104 @@ class RagImportanceReportCommand extends Command
         DeterministicImportanceRules $rules,
         ImportanceCandidateNormalizer $normalizer,
     ): ?array {
-        $path = $this->mustKeepCorpusPath();
+        $fixtures = $this->corpusFixtures($this->mustKeepCorpusPath());
 
+        if ($fixtures === null) {
+            return null;
+        }
+
+        $falseRejects = 0;
+
+        foreach ($fixtures as $fixture) {
+            $evaluation = $rules->evaluate($normalizer->normalize($this->candidate($fixture['candidate'])));
+
+            if ($evaluation->vetoed) {
+                $falseRejects++;
+            }
+        }
+
+        return ['checked' => count($fixtures), 'false_rejects' => $falseRejects];
+    }
+
+    /**
+     * The mirror of the must-keep check, for the mirror risk. It re-runs the
+     * must-reject corpus — knowledge a reviewer judged worthless — through the
+     * deterministic rules and counts the fixtures that satisfy the DETERMINISTIC
+     * half of auto-approval eligibility: at least one positive signal and not one
+     * penalty (AutoApprovalPolicy's rule test, exactly). A fixture that does is
+     * one bad model score away from being published to every agent that searches
+     * this base, with nobody reading it.
+     *
+     * Deliberately model-INDEPENDENT, and the honest scope of this gate has to be
+     * stated: it never calls Claude. The corpus's semantic scores are a reviewer's
+     * estimates handed to a fake judge, so they cannot prove what the real model
+     * would score, and a gate built on them would be measuring the reviewer, not
+     * the classifier. The deterministic signals are the half an injection cannot
+     * argue with — they are regex, not inference — so they are the half that
+     * carries the defence, and they are what this pins. It also makes the gate
+     * free to run, which is why `rag:importance-report` can afford it.
+     *
+     * @return array{checked: int, eligible: int}|null null when the corpus is unreadable
+     */
+    private function mustRejectEligible(
+        DeterministicImportanceRules $rules,
+        ImportanceCandidateNormalizer $normalizer,
+    ): ?array {
+        $fixtures = $this->corpusFixtures($this->mustRejectCorpusPath());
+
+        if ($fixtures === null) {
+            return null;
+        }
+
+        $eligible = 0;
+
+        foreach ($fixtures as $fixture) {
+            $evaluation = $rules->evaluate($normalizer->normalize($this->candidate($fixture['candidate'])));
+
+            $positives = 0;
+            $penalties = 0;
+
+            foreach ($evaluation->triggeredRules as $rule) {
+                if ($rule['adjustment'] > 0) {
+                    $positives++;
+                }
+
+                // A veto is just a very large penalty, so it is caught here too.
+                if ($rule['adjustment'] < 0) {
+                    $penalties++;
+                }
+            }
+
+            if ($positives >= 1 && $penalties === 0) {
+                $eligible++;
+            }
+        }
+
+        return ['checked' => count($fixtures), 'eligible' => $eligible];
+    }
+
+    /**
+     * @param  array<string, mixed>  $candidate
+     */
+    private function candidate(array $candidate): ImportanceCandidate
+    {
+        /** @var array{title?: string, content?: string, category?: string, source?: string, tags?: list<string>, entities?: list<array{name: string, type: string}>, relations?: list<array{subject: string, predicate: string, object: string}>} $candidate */
+        return new ImportanceCandidate(
+            title: (string) ($candidate['title'] ?? ''),
+            content: (string) ($candidate['content'] ?? ''),
+            category: (string) ($candidate['category'] ?? 'insight'),
+            source: (string) ($candidate['source'] ?? 'manual'),
+            tags: $candidate['tags'] ?? [],
+            entities: $candidate['entities'] ?? [],
+            relations: $candidate['relations'] ?? [],
+        );
+    }
+
+    /**
+     * @return list<array{candidate: array<string, mixed>}>|null null when the corpus is unreadable
+     */
+    private function corpusFixtures(string $path): ?array
+    {
         if (! is_file($path)) {
             return null;
         }
@@ -246,34 +430,17 @@ class RagImportanceReportCommand extends Command
             return null;
         }
 
-        $fixtures = $corpus['fixtures'] ?? [];
-        $falseRejects = 0;
-
-        foreach ($fixtures as $fixture) {
-            /** @var array{title?: string, content?: string, category?: string, source?: string, tags?: list<string>, entities?: list<array{name: string, type: string}>, relations?: list<array{subject: string, predicate: string, object: string}>} $candidate */
-            $candidate = $fixture['candidate'];
-
-            $evaluation = $rules->evaluate($normalizer->normalize(new ImportanceCandidate(
-                title: (string) ($candidate['title'] ?? ''),
-                content: (string) ($candidate['content'] ?? ''),
-                category: (string) ($candidate['category'] ?? 'insight'),
-                source: (string) ($candidate['source'] ?? 'manual'),
-                tags: $candidate['tags'] ?? [],
-                entities: $candidate['entities'] ?? [],
-                relations: $candidate['relations'] ?? [],
-            )));
-
-            if ($evaluation->vetoed) {
-                $falseRejects++;
-            }
-        }
-
-        return ['checked' => count($fixtures), 'false_rejects' => $falseRejects];
+        return $corpus['fixtures'] ?? [];
     }
 
     private function mustKeepCorpusPath(): string
     {
         return (string) config('rag.importance.must_keep_corpus_path');
+    }
+
+    private function mustRejectCorpusPath(): string
+    {
+        return (string) config('rag.importance.must_reject_corpus_path');
     }
 
     private function percent(float $rate): string

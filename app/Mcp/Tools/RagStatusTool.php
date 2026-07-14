@@ -144,12 +144,15 @@ class RagStatusTool extends Tool
      * @return array{
      *     mode: string,
      *     threshold: int,
+     *     auto_approve_threshold: int|null,
      *     model: string,
      *     prompt_version: string,
      *     rules_version: string,
      *     classifying: int,
      *     stale_classifying: int,
      *     stale_after_minutes: int,
+     *     auto_approved: int,
+     *     shadow_would_approve: int,
      *     assessments: array{succeeded: int, failed: int},
      *     shadow: array{would_keep: int, would_reject: int},
      *     queue: array{name: string, pending: int|null, failed: int|null},
@@ -163,6 +166,9 @@ class RagStatusTool extends Tool
         return [
             'mode' => $setting->mode->value,
             'threshold' => $setting->threshold,
+            // null means auto-approval is off: the classifier may reject, but it
+            // never approves anything without a human reading it.
+            'auto_approve_threshold' => $setting->auto_approve_threshold,
             'model' => (string) config('rag.importance.model'),
             // Class constants, not `config('rag.importance.*_version')`: a stale
             // `config:cache` snapshot taken before a version bump would make this
@@ -172,6 +178,14 @@ class RagStatusTool extends Tool
             'classifying' => $classifying['total'],
             'stale_classifying' => $classifying['stale'],
             'stale_after_minutes' => $classifying['stale_after_minutes'],
+            // Entries in this base that no human ever read: the classifier approved
+            // them itself, in `enforce`. Surfaced because "how much of this base was
+            // never reviewed" is a question an operator must be able to answer
+            // without opening a database.
+            'auto_approved' => $statistics->autoApprovedCount($projectId),
+            // …and, in `shadow`, how many it would have approved that way — the size
+            // of the bet `enforce` would place, readable before placing it.
+            'shadow_would_approve' => $statistics->shadowWouldApproveCount($projectId),
             'assessments' => $statistics->assessments($projectId),
             // Shadow only: `would_reject` is written under `enforce` too, and an
             // enforce rejection is not evidence of what shadow would have done.
